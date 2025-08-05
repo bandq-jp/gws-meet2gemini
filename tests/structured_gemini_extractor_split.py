@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Dict, List, Any
 from google import genai
 import dotenv
+import time
+import concurrent.futures
+from functools import partial
 
 dotenv.load_dotenv()
 
@@ -400,14 +403,15 @@ class GeminiStructuredExtractorSplit:
             with open(file_path, 'r', encoding='shift_jis') as file:
                 return file.read()
     
-    def extract_structured_data_group(self, text_content: str, schema: Dict[str, Any], group_name: str) -> Dict[str, Any]:
+    def extract_structured_data_group(self, text_content: str, schema: Dict[str, Any], group_name: str, max_retries: int = 3) -> Dict[str, Any]:
         """
-        指定されたスキーマグループでの構造化データ抽出
+        指定されたスキーマグループでの構造化データ抽出（リトライ機能付き）
         
         Args:
             text_content: 抽出対象のテキスト
             schema: 使用するスキーマ
             group_name: グループ名（ログ用）
+            max_retries: 最大リトライ回数
             
         Returns:
             抽出された構造化データ
@@ -429,30 +433,48 @@ class GeminiStructuredExtractorSplit:
 {group_name}の情報のみを構造化されたJSONで回答してください。
 """
         
-        try:
-            response = self.client.models.generate_content(
-                model="gemini-2.5-pro",
-                contents=prompt,
-                config={
-                    "response_mime_type": "application/json",
-                    "response_schema": schema,
-                    "temperature": 0.1,
-                    "max_output_tokens": 8192
-                }
-            )
-            
-            return json.loads(response.text)
-            
-        except Exception as e:
-            print(f"{group_name}の構造化出力エラー: {e}")
-            return {}
+        for attempt in range(max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model="gemini-2.5-pro",
+                    contents=prompt,
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": schema,
+                        "temperature": 0.1,
+                        "max_output_tokens": 8192
+                    }
+                )
+                
+                if response and response.text:
+                    return json.loads(response.text)
+                else:
+                    print(f"{group_name}: レスポンスが空です (試行 {attempt + 1}/{max_retries})")
+                    if attempt < max_retries - 1:
+                        time.sleep(1)  # 1秒待機してリトライ
+                        continue
+                
+            except json.JSONDecodeError as e:
+                print(f"{group_name}: JSON解析エラー (試行 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+            except Exception as e:
+                print(f"{group_name}: API呼び出しエラー (試行 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)  # エラー時は少し長めに待機
+                    continue
+        
+        print(f"{group_name}: 全ての試行が失敗しました")
+        return {}
     
-    def extract_all_structured_data(self, text_content: str) -> Dict[str, Any]:
+    def extract_all_structured_data(self, text_content: str, use_parallel: bool = True) -> Dict[str, Any]:
         """
-        全スキーマグループでの構造化データ抽出
+        全スキーマグループでの構造化データ抽出（並列処理対応）
         
         Args:
             text_content: 抽出対象のテキスト
+            use_parallel: 並列処理を使用するかどうか
             
         Returns:
             全グループの結合された構造化データ
@@ -468,12 +490,40 @@ class GeminiStructuredExtractorSplit:
         
         combined_result = {}
         
-        for schema, group_name in schema_groups:
-            print(f"{group_name}を処理中...")
-            group_result = self.extract_structured_data_group(text_content, schema, group_name)
-            combined_result.update(group_result)
+        if use_parallel:
+            # 並列処理で実行
+            extract_func = partial(self._extract_group_wrapper, text_content)
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                # 全グループを並列で処理
+                future_to_group = {}
+                for schema, group_name in schema_groups:
+                    print(f"{group_name}を処理中...")
+                    future = executor.submit(extract_func, schema, group_name)
+                    future_to_group[future] = group_name
+                
+                # 結果を収集
+                for future in concurrent.futures.as_completed(future_to_group):
+                    group_name = future_to_group[future]
+                    try:
+                        group_result = future.result()
+                        combined_result.update(group_result)
+                    except Exception as e:
+                        print(f"{group_name}の並列処理エラー: {e}")
+        else:
+            # 順次処理で実行
+            for schema, group_name in schema_groups:
+                print(f"{group_name}を処理中...")
+                group_result = self.extract_structured_data_group(text_content, schema, group_name)
+                combined_result.update(group_result)
         
         return combined_result
+    
+    def _extract_group_wrapper(self, text_content: str, schema: Dict[str, Any], group_name: str) -> Dict[str, Any]:
+        """
+        並列処理用のラッパー関数
+        """
+        return self.extract_structured_data_group(text_content, schema, group_name)
     
     def save_json_output(self, data: Dict[str, Any], output_path: str):
         """JSONファイルとして保存"""
@@ -498,8 +548,8 @@ class GeminiStructuredExtractorSplit:
         print(f"テキストファイルを読み込み中: {text_file_path}")
         text_content = self.read_text_file(text_file_path)
         
-        print("Gemini 2.5 Proで構造化データを抽出中（分割処理）...")
-        extracted_data = self.extract_all_structured_data(text_content)
+        print("Gemini 2.5 proで構造化データを抽出中（分割処理・並列実行）...")
+        extracted_data = self.extract_all_structured_data(text_content, use_parallel=True)
         
         print(f"結果をJSONファイルに保存中: {output_json_path}")
         self.save_json_output(extracted_data, str(output_json_path))
