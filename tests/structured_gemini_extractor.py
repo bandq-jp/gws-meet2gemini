@@ -582,12 +582,13 @@ class GeminiStructuredExtractor:
 """
         
         try:
+            # まずプレビュー版JSON Schemaを試行
             response = self.client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
                 config={
                     "response_mime_type": "application/json",
-                    "response_schema": self.schema,
+                    "response_json_schema": self._get_simplified_json_schema(),
                     "temperature": 0.1,
                     "max_output_tokens": 65536
                 }
@@ -596,8 +597,122 @@ class GeminiStructuredExtractor:
             return json.loads(response.text)
             
         except Exception as e:
-            print(f"構造化出力エラー: {e}")
-            raise
+            print(f"JSON Schema構造化出力エラー: {e}")
+            # フォールバック：テキストプロンプトでのスキーマ指定
+            return self._fallback_text_prompt_extraction(text_content)
+    
+    def _get_simplified_json_schema(self) -> Dict[str, Any]:
+        """簡素化されたJSON Schemaを取得"""
+        return {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {
+                "transfer_activity_status": {
+                    "type": "string",
+                    "enum": [
+                        "情報収集中（転職意欲高）",
+                        "情報収集中（転職意欲低）",
+                        "他社エージェント面談済み",
+                        "企業打診済み ~ 一次選考フェーズ",
+                        "最終面接待ち ~ 内定済み"
+                    ]
+                },
+                "agent_count": {"type": "string"},
+                "current_agents": {"type": "string"},
+                "transfer_reasons": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "desired_timing": {
+                    "type": "string",
+                    "enum": ["すぐにでも", "3ヶ月以内", "6ヶ月以内", "1年以内", "1年以上先"]
+                },
+                "current_job_status": {
+                    "type": "string",
+                    "enum": ["離職中", "離職確定", "離職未確定"]
+                },
+                "current_salary": {"type": "integer"},
+                "desired_first_year_salary": {"type": "number"},
+                "experience_industry": {"type": "string"},
+                "desired_industry": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "desired_position": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "career_vision": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "career_history": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                },
+                "current_duties": {"type": "string"},
+                "company_good_points": {"type": "string"},
+                "company_bad_points": {"type": "string"}
+            },
+            "additionalProperties": False
+        }
+    
+    def _fallback_text_prompt_extraction(self, text_content: str) -> Dict[str, Any]:
+        """
+        フォールバック：テキストプロンプトでのスキーマ指定
+        """
+        prompt = f"""
+以下の議事録テキストから、転職に関する情報を構造化して抽出してください。
+
+【テキスト内容】
+{text_content}
+
+以下のJSONスキーマに従って回答してください：
+
+{{
+  "転職活動状況": "情報収集中（転職意欲高）等",
+  "エージェント数": "数値または説明",
+  "利用中エージェント": "エージェント名",
+  "転職理由": ["理由1", "理由2"],
+  "転職希望時期": "すぐにでも～1年以上先",
+  "現職状況": "離職中等",
+  "現年収": 数値,
+  "希望年収": 数値,
+  "経験業界": "業界名",
+  "希望業界": ["業界1", "業界2"],
+  "希望職種": ["職種1", "職種2"],
+  "キャリアビジョン": ["ビジョン1", "ビジョン2"],
+  "職歴": ["経歴1", "経歴2"],
+  "現職業務": "業務内容",
+  "会社の良い点": "良い点",
+  "会社の悪い点": "悪い点"
+}}
+
+記載がない項目はnullとしてください。構造化されたJSONで回答してください。
+"""
+        
+        try:
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={
+                    "temperature": 0.1,
+                    "max_output_tokens": 8192
+                }
+            )
+            
+            # レスポンスからJSONを抽出
+            response_text = response.text.strip()
+            if response_text.startswith('```json'):
+                response_text = response_text[7:-3]
+            elif response_text.startswith('```'):
+                response_text = response_text[3:-3]
+            
+            return json.loads(response_text)
+            
+        except Exception as e:
+            print(f"フォールバック処理エラー: {e}")
+            return {}
     
     def save_json_output(self, data: Dict[str, Any], output_path: str):
         """
@@ -692,15 +807,16 @@ def main():
         result = extractor.process_text_file(text_file)
         
         print("\n=== 抽出結果のサマリー ===")
-        print(f"転職活動状況: {result.get('transfer_activity_status', 'N/A')}")
-        print(f"エージェント数: {result.get('agent_count', 'N/A')}")
-        print(f"転職検討理由: {result.get('transfer_reasons', 'N/A')}")
-        print(f"転職希望時期: {result.get('desired_timing', 'N/A')}")
-        print(f"現年収: {result.get('current_salary', 'N/A')}")
-        print(f"希望年収: {result.get('desired_first_year_salary', 'N/A')}")
-        print(f"希望業界: {result.get('desired_industry', 'N/A')}")
-        print(f"希望職種: {result.get('desired_position', 'N/A')}")
-        print(f"キャリアビジョン: {result.get('career_vision', 'N/A')}")
+        # 英語キーと日本語キーの両方をチェック
+        print(f"転職活動状況: {result.get('transfer_activity_status') or result.get('転職活動状況', 'N/A')}")
+        print(f"エージェント数: {result.get('agent_count') or result.get('エージェント数', 'N/A')}")
+        print(f"転職検討理由: {result.get('transfer_reasons') or result.get('転職理由', 'N/A')}")
+        print(f"転職希望時期: {result.get('desired_timing') or result.get('転職希望時期', 'N/A')}")
+        print(f"現年収: {result.get('current_salary') or result.get('現年収', 'N/A')}")
+        print(f"希望年収: {result.get('desired_first_year_salary') or result.get('希望年収', 'N/A')}")
+        print(f"希望業界: {result.get('desired_industry') or result.get('希望業界', 'N/A')}")
+        print(f"希望職種: {result.get('desired_position') or result.get('希望職種', 'N/A')}")
+        print(f"キャリアビジョン: {result.get('career_vision') or result.get('キャリアビジョン', 'N/A')}")
         
     except Exception as e:
         print(f"エラーが発生しました: {e}")
