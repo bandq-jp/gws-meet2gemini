@@ -23,17 +23,17 @@ class GeminiStructuredExtractor:
         初期化
         
         Args:
-            api_key: Gemini API キー（環境変数GOOGLE_API_KEYからも取得可能）
+            api_key: Gemini API キー（環境変数GEMINI_API_KEYからも取得可能）
         """
         if api_key:
-            genai.configure(api_key=api_key)
+            self.client = genai.Client(api_key=api_key)
         else:
-            # 環境変数から取得を試行
-            if not os.getenv('GOOGLE_API_KEY'):
-                raise ValueError("Gemini API key is required. Set GOOGLE_API_KEY environment variable or pass api_key parameter.")
-            genai.configure(api_key=os.getenv('GOOGLE_API_KEY'))
+            # 環境変数から取得を試行（GEMINI_API_KEYまたはGOOGLE_API_KEY）
+            gemini_key = os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY')
+            if not gemini_key:
+                raise ValueError("Gemini API key is required. Set GEMINI_API_KEY or GOOGLE_API_KEY environment variable or pass api_key parameter.")
+            self.client = genai.Client(api_key=gemini_key)
         
-        self.model = genai.GenerativeModel('gemini-2.5-pro')
         self.schema = self._build_openapi_schema()
     
     def _build_openapi_schema(self) -> Dict[str, Any]:
@@ -582,9 +582,10 @@ class GeminiStructuredExtractor:
 """
         
         try:
-            response = self.model.generate_content(
-                prompt,
-                generation_config={
+            response = self.client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={
                     "response_mime_type": "application/json",
                     "response_schema": self.schema,
                     "temperature": 0.1,
