@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # PostgreSQL データベース
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: meeting_user
+      POSTGRES_PASSWORD: meeting_password
+      POSTGRES_DB: meeting_minutes_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meeting_user -d meeting_minutes_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (オプション: キャッシュやタスクキュー用)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  # アプリケーション
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://meeting_user:meeting_password@postgres:5432/meeting_minutes_db
+      - ENVIRONMENT=development
+      - DEBUG=true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./service_account.json:/app/service_account.json
+      - ./.env:/app/.env
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  postgres_data:
+  redis_data:
