@@ -1,13 +1,18 @@
 from __future__ import annotations
 from typing import List, Optional, Dict, Any
 from app.infrastructure.supabase.client import get_supabase
+import logging
 from app.domain.entities.meeting_document import MeetingDocument
+
+logger = logging.getLogger(__name__)
+
 
 class MeetingRepositoryImpl:
     TABLE = "meeting_documents"
 
     def get_by_doc_and_organizer(self, doc_id: str, organizer_email: str) -> Dict[str, Any]:
         sb = get_supabase()
+        logger.debug("Supabase select doc_id=%s organizer=%s", doc_id, organizer_email)
         res = sb.table(self.TABLE).select("*").eq("doc_id", doc_id).eq("organizer_email", organizer_email).limit(1).execute()
         data = getattr(res, "data", None)
         if isinstance(data, list) and data:
@@ -30,6 +35,7 @@ class MeetingRepositoryImpl:
             "metadata": meeting.metadata,
         }
         # dedupe by doc_id + organizer_email
+        logger.debug("Supabase upsert doc_id=%s organizer=%s", meeting.doc_id, meeting.organizer_email)
         res = sb.table(self.TABLE).upsert(payload, on_conflict="doc_id,organizer_email").execute()
         data = getattr(res, "data", None)
         if isinstance(data, list) and data:
