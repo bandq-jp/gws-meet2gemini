@@ -220,7 +220,7 @@
         $("status").textContent = 'ミーティング読込中…';
         try{
           const qs = buildQuery();
-          const res = await fetch(url('/api/v1/meetings' + (qs? ('?'+qs):'')));
+          const res = await fetch(url('/api/v1/meetings/' + (qs? ('?'+qs):'')));
           if(!res.ok){ throw new Error('HTTP '+res.status); }
           const data = await res.json();
           // sort desc by meeting_datetime then title
