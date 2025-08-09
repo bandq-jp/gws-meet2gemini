@@ -9,7 +9,7 @@ Google Meet の議事録（Google ドキュメント）を収集し、Supabase �
 - Google Drive/Docs API を用いた議事録の一括収集（対象アカウントを指定可）
 - Supabase（HTTP API）への保存（DB直接続は不使用）
 - Gemini 2.5 Pro の構造化出力（分割・並列処理）により大規模スキーマへ対応
-- Cloud Run 本番では Workload Identity（添付サービスアカウント）で認証、ローカルは `service_account.json` を使用
+- ローカルは `service_account.json` を使用
 
 ---
 
