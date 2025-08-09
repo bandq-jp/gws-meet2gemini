@@ -86,6 +86,11 @@ Dockerfile                      # Cloud Run 用
 uvicorn app.main:app --reload
 ```
 
+5) 簡易テストクライアント（任意）
+- `docs/test-client.html` をブラウザで直接開く
+- ベースURLに `http://localhost:8000` を指定して各ボタンからAPIを実行
+- 必要に応じて `.env` で `CORS_ALLOW_ORIGINS` を設定（未設定時は全許可）
+
 ---
 
 ## API 仕様（v1）

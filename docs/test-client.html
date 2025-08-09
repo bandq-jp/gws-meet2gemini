@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Meet2Gemini – テストクライアント</title>
+    <style>
+      :root{--bg:#f7f9fb;--panel:#ffffff;--panel2:#f9fafb;--fg:#1f2937;--muted:#667085;--line:#e5e7eb;--pri:#2563eb;--ok:#16a34a;--err:#dc2626;--chip:#eef2ff}
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+      header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;background:#ffffff}
+      h1{margin:0;font-size:16px}
+      main{display:grid;grid-template-columns:340px 1fr;gap:12px;padding:12px;height:calc(100vh - 60px);overflow:hidden}
+      .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,.04);display:flex;flex-direction:column;min-height:0}
+      .card h2{margin:0;padding:10px 12px;font-size:13px;background:var(--panel2);border-bottom:1px solid var(--line)}
+      .section{padding:12px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0;overflow:hidden}
+      label{font-size:12px;color:var(--muted)}
+      input[type=text], select{width:100%;background:#fff;color:var(--fg);border:1px solid #d1d5db;border-radius:8px;padding:8px 10px}
+      input[type=text]:focus, select:focus{outline:none;border-color:var(--pri);box-shadow:0 0 0 3px rgba(37,99,235,.15)}
+      .row{display:flex;gap:8px;align-items:center}
+      .btn{appearance:none;border:1px solid #cbd5e1;background:#ffffff;color:#1f2937;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px}
+      .btn.primary{border-color:#1d4ed8;background:var(--pri);color:#fff}
+      .btn:hover{background:#f3f4f6}
+      .btn.primary:hover{background:#1e40af}
+      .btn:disabled{opacity:.6;cursor:not-allowed}
+      .muted{color:var(--muted);font-size:12px}
+      .chips{display:flex;gap:6px;flex-wrap:wrap}
+      .chip{background:var(--chip);border:1px solid #c7d2fe;padding:4px 8px;border-radius:999px;font-size:12px;color:#3730a3}
+      .split{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-height:0}
+      .split > div{display:flex;flex-direction:column;min-height:0}
+      .title{font-weight:600}
+      .mono{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace}
+      .json-box{background:#f8fafc;border:1px solid var(--line);border-radius:8px;overflow:auto;flex:1 1 auto;min-height:120px;height:100%}
+      .json-box pre{margin:0;padding:12px;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;max-width:100%}
+      .hint{font-size:12px;color:var(--muted)}
+      .ok{color:var(--ok)} .err{color:var(--err)}
+      .list{border:1px solid var(--line);border-radius:8px;overflow:auto;background:#fff;flex:1;min-height:0}
+      .item{padding:8px 10px;border-bottom:1px solid var(--line);cursor:pointer}
+      .item:hover{background:#f3f4f6}
+      .item .name{font-size:13px}
+      .item .meta{font-size:11px;color:var(--muted)}
+      .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+      .grow{flex:1}
+      .tag{font-size:11px;color:#1e3a8a;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:2px 6px}
+      .cta{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;border:1px dashed #cbd5e1;border-radius:8px;background:#f8fafc;padding:18px;text-align:center}
+      /* Ensure structured area can expand and scroll */
+      #structuredSection{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+      #structuredCTA{flex:1 1 auto}
+      @media (max-width: 980px){
+        main{grid-template-columns:1fr}
+        .split{grid-template-columns:1fr}
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Meet2Gemini – テストクライアント</h1>
+      <span id="status" class="muted">準備中...</span>
+    </header>
+    <main>
+      <aside class="card">
+        <h2>ミーティングを選択</h2>
+        <div class="section">
+          <div class="toolbar">
+            <input id="baseUrl" type="text" class="grow" placeholder="API ベースURL (例: http://localhost:8000)" />
+            <button id="btnHealth" class="btn">接続確認</button>
+          </div>
+          <div class="toolbar">
+            <input id="accounts" class="grow" type="text" placeholder="アカウントをフィルタ（カンマ区切り）" />
+            <button id="btnRefresh" class="btn primary">再読込</button>
+          </div>
+          <div>
+            <label>ミーティング一覧</label>
+            <select id="meetingSelect"></select>
+          </div>
+          <div class="hint">一覧は最新順。検索はブラウザのプルダウン入力から絞り込み可能です。</div>
+          <div class="list" id="meetingList"></div>
+        </div>
+      </aside>
+      <section class="card">
+        <h2>詳細 / 構造化出力</h2>
+        <div class="section">
+          <div id="meetingHeader" class="row" style="justify-content:space-between;align-items:flex-start; gap:12px; flex-wrap:wrap">
+            <div>
+              <div class="title" id="mTitle">タイトル</div>
+              <div class="muted" id="mMeta">日時・主催者・リンク</div>
+              <div class="chips" id="mChips"></div>
+            </div>
+            <div class="row">
+              <button id="btnProcess" class="btn">構造化を実行</button>
+              <a id="docLink" class="btn" target="_blank" rel="noopener">ドキュメントを開く</a>
+            </div>
+          </div>
+
+          <div class="split">
+            <div>
+              <div class="title">構造化出力</div>
+              <div id="structuredCTA" class="cta" style="display:none">
+                <div class="hint">この議事録の構造化出力はまだありません。</div>
+                <button id="btnProcessCta" class="btn primary">構造化出力を作成</button>
+              </div>
+              <div id="structuredSection">
+                <div class="hint" id="sHint">取得済みの構造化結果を表示します。</div>
+                <div class="json-box mono"><pre id="structuredJson"></pre></div>
+              </div>
+            </div>
+            <div>
+              <div class="title">議事録プレビュー</div>
+              <div class="json-box mono"><pre id="textPreview"></pre></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const state = {
+        baseUrl: '',
+        accounts: '',
+        meetings: [],
+        selected: null,
+        structured: null,
+      };
+
+      function init() {
+        state.baseUrl = window.location.origin;
+        $("baseUrl").value = state.baseUrl;
+        $("status").textContent = '読み込み中…';
+        bind();
+        refreshMeetings();
+      }
+
+      function bind(){
+        $("btnHealth").addEventListener('click', checkHealth);
+        $("btnRefresh").addEventListener('click', refreshMeetings);
+        $("meetingSelect").addEventListener('change', (e)=> selectById(e.target.value));
+        $("btnProcess").addEventListener('click', processStructured);
+        $("btnProcessCta").addEventListener('click', processStructured);
+        $("baseUrl").addEventListener('change', (e)=> { state.baseUrl = e.target.value.trim().replace(/\/$/, ''); });
+      }
+
+      function url(path){
+        const base = ($("baseUrl").value || state.baseUrl || window.location.origin).replace(/\/$/, '');
+        return base + path;
+      }
+
+      async function checkHealth(){
+        $("status").textContent = '接続確認中…';
+        try{
+          const res = await fetch(url('/health'));
+          $("status").textContent = res.ok ? '接続OK' : `接続NG (${res.status})`;
+          $("status").className = res.ok ? 'ok' : 'err';
+        }catch(e){ $("status").textContent = '接続エラー'; $("status").className='err'; }
+      }
+
+      function formatDate(s){
+        if(!s) return '';
+        // accept "YYYY/MM/DD HH:MM" or ISO-like
+        try{
+          if (/^\d{4}\/\d{2}\/\d{2}/.test(s)) return s;
+          const d = new Date(s);
+          if (!isNaN(d)) return d.toLocaleString();
+        }catch {}
+        return s;
+      }
+
+      function setHeader(meeting){
+        $("mTitle").textContent = meeting?.title || '(無題)';
+        const meta = [
+          meeting?.meeting_datetime ? `日時: ${formatDate(meeting.meeting_datetime)}` : null,
+          meeting?.organizer_email ? `主催: ${meeting.organizer_email}` : null,
+          meeting?.doc_id ? `DocID: ${meeting.doc_id}` : null,
+        ].filter(Boolean).join(' / ');
+        $("mMeta").textContent = meta || '';
+        const link = meeting?.document_url || '#';
+        $("docLink").href = link;
+        $("docLink").style.display = link && link !== '#' ? '' : 'none';
+        const chips = $("mChips");
+        chips.innerHTML = '';
+        (meeting?.invited_emails||[]).slice(0, 20).forEach(e=>{
+          const el = document.createElement('span'); el.className = 'chip'; el.textContent = e; chips.appendChild(el);
+        });
+        if ((meeting?.invited_emails||[]).length > 20){
+          const more = document.createElement('span'); more.className='tag'; more.textContent=`+${meeting.invited_emails.length-20}`; chips.appendChild(more);
+        }
+        const text = (meeting?.text_content||'');
+        $("textPreview").textContent = text || '(本文なし)';
+      }
+
+      function populateSelect(meetings){
+        const sel = $("meetingSelect"); sel.innerHTML = '';
+        meetings.forEach(m=>{
+          const opt = document.createElement('option');
+          opt.value = m.id; opt.textContent = `${formatDate(m.meeting_datetime) || ''} ${m.title || '(無題)'} – ${m.organizer_email||''}`.trim();
+          sel.appendChild(opt);
+        });
+      }
+
+      function populateList(meetings){
+        const box = $("meetingList"); box.innerHTML = '';
+        meetings.slice(0, 100).forEach(m=>{
+          const div = document.createElement('div'); div.className='item';
+          div.innerHTML = `<div class="name">${m.title || '(無題)'} <span class="tag">${m.organizer_email||''}</span></div>
+                           <div class="meta">${formatDate(m.meeting_datetime)||''} / id:${m.id}</div>`;
+          div.addEventListener('click', ()=> selectById(m.id));
+          box.appendChild(div);
+        });
+      }
+
+      function buildQuery(){
+        const acc = ($("accounts").value||'').split(',').map(s=>s.trim()).filter(Boolean);
+        const sp = new URLSearchParams();
+        acc.forEach(a=> sp.append('accounts', a));
+        return sp.toString();
+      }
+
+      async function refreshMeetings(){
+        $("status").textContent = 'ミーティング読込中…';
+        try{
+          const qs = buildQuery();
+          const res = await fetch(url('/api/v1/meetings' + (qs? ('?'+qs):'')));
+          if(!res.ok){ throw new Error('HTTP '+res.status); }
+          const data = await res.json();
+          // sort desc by meeting_datetime then title
+          data.sort((a,b)=> String(b.meeting_datetime||'').localeCompare(String(a.meeting_datetime||'')) || String(a.title||'').localeCompare(String(b.title||'')));
+          state.meetings = data;
+          populateSelect(data);
+          populateList(data);
+          $("status").textContent = `読み込み完了 (${data.length}件)`;
+          if (data.length){ selectById(data[0].id); }
+        }catch(e){
+          $("status").textContent = '読込エラー'; $("status").className='err';
+          console.error(e);
+        }
+      }
+
+      function selectById(id){
+        const m = state.meetings.find(x=> String(x.id)===String(id));
+        if(!m) return;
+        $("meetingSelect").value = String(id);
+        state.selected = m;
+        setHeader(m);
+        loadStructured(m.id);
+      }
+
+      async function loadStructured(id){
+        const section = document.getElementById('structuredSection');
+        const cta = document.getElementById('structuredCTA');
+        section.style.display = 'none';
+        cta.style.display = 'none';
+        $("sHint").textContent = '取得中…';
+        $("structuredJson").textContent = '';
+        try{
+          const res = await fetch(url(`/api/v1/structured/${encodeURIComponent(id)}`));
+          const body = await res.json();
+          state.structured = body?.data || {};
+          const has = state.structured && Object.keys(state.structured).length > 0;
+          if (has){
+            $("structuredJson").textContent = JSON.stringify(state.structured, null, 2);
+            $("sHint").textContent = '取得済み';
+            section.style.display = '';
+            cta.style.display = 'none';
+          } else {
+            // hide results and show CTA button
+            section.style.display = 'none';
+            cta.style.display = '';
+          }
+        }catch(e){
+          $("sHint").textContent = '取得エラー';
+          section.style.display = 'none';
+          cta.style.display = '';
+        }
+      }
+
+      async function processStructured(){
+        const m = state.selected; if(!m) return;
+        const btn = $("btnProcess"); btn.disabled = true; const prev = btn.textContent; btn.textContent = '実行中…';
+        try{
+          const res = await fetch(url(`/api/v1/structured/process/${encodeURIComponent(m.id)}`), { method: 'POST' });
+          const body = await res.json().catch(()=>({}));
+          if(!res.ok){ throw new Error(body?.detail || res.statusText); }
+          await loadStructured(m.id);
+          $("status").textContent = '構造化完了'; $("status").className='ok';
+        }catch(e){
+          $("status").textContent = '構造化エラー: ' + String(e.message||e); $("status").className='err';
+        }finally{
+          btn.disabled = false; btn.textContent = prev;
+        }
+      }
+
+      window.addEventListener('DOMContentLoaded', init);
+    </script>
+  </body>
+  </html>
