@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException
+import logging
 
 from app.presentation.schemas.meeting import MeetingOut
 from app.application.use_cases.collect_meetings import CollectMeetingsUseCase
@@ -9,6 +10,7 @@ from app.application.use_cases.get_meeting_list import GetMeetingListUseCase
 from app.application.use_cases.get_meeting_detail import GetMeetingDetailUseCase
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 @router.post("/collect", response_model=dict)
 async def collect_meetings(
@@ -18,9 +20,19 @@ async def collect_meetings(
 ):
     use_case = CollectMeetingsUseCase()
     try:
-        count = await use_case.execute(accounts, include_structure=include_structure, force_update=force_update)
+        logger.debug(
+            "POST /api/v1/meetings/collect called: accounts=%s include_structure=%s force_update=%s",
+            accounts,
+            include_structure,
+            force_update,
+        )
+        count = await use_case.execute(
+            accounts, include_structure=include_structure, force_update=force_update
+        )
+        logger.debug("Meetings collected and stored: %d", count)
         return {"stored": count}
     except RuntimeError as e:
+        logger.exception("Collect meetings failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/", response_model=List[MeetingOut])
