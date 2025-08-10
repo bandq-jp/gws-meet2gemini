@@ -46,3 +46,19 @@ async def list_fields(module: str = Query(..., min_length=1)):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Zoho fields failed: {e}")
+
+
+@router.get("/app-hc/{record_id}", response_model=dict)
+async def get_app_hc_detail(record_id: str):
+    """Read-only: APP-hc(=CustomModule1) の単一レコード詳細。
+
+    Returns: { record: {...} }
+    """
+    client = ZohoClient()
+    try:
+        record = client.get_app_hc_record(record_id)
+        return {"record": record, "record_id": record_id}
+    except ZohoAuthError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Zoho record failed: {e}")

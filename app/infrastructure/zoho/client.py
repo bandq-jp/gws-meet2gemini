@@ -169,3 +169,10 @@ class ZohoClient:
                 }
             )
         return records
+
+    def get_app_hc_record(self, record_id: str) -> Dict[str, Any]:
+        """Fetch single APP-hc record by Zoho record id with all fields (read-only)."""
+        module_api = self.settings.zoho_app_hc_module
+        data = self._get(f"/crm/v2/{module_api}/{record_id}") or {}
+        items = data.get("data") or []
+        return items[0] if items else {}

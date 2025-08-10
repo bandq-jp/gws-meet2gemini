@@ -12,6 +12,7 @@
       header{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;background:#ffffff}
       h1{margin:0;font-size:16px}
       main{display:grid;grid-template-columns:340px 1fr;gap:12px;padding:12px;height:calc(100vh - 60px);overflow:hidden}
+      main.onecol{grid-template-columns:1fr}
       .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(16,24,40,.04);display:flex;flex-direction:column;min-height:0}
       .card h2{margin:0;padding:10px 12px;font-size:13px;background:var(--panel2);border-bottom:1px solid var(--line)}
       .section{padding:12px;display:flex;flex-direction:column;gap:10px;flex:1;min-height:0;overflow:hidden}
@@ -56,10 +57,14 @@
   <body>
     <header>
       <h1>Meet2Gemini – テストクライアント</h1>
+      <div class="row" role="tablist" aria-label="メインタブ">
+        <button id="tabMeetings" class="btn primary" role="tab" aria-selected="true">議事録</button>
+        <button id="tabZoho" class="btn" role="tab" aria-selected="false">ZohoCRM</button>
+      </div>
       <span id="status" class="muted">準備中...</span>
     </header>
     <main>
-      <aside class="card">
+      <aside class="card" data-panel="meetings">
         <h2>ミーティングを選択</h2>
         <div class="section">
           <div class="toolbar">
@@ -79,7 +84,7 @@
           <div class="list" id="meetingList"></div>
         </div>
       </aside>
-      <section class="card">
+      <section class="card" data-panel="meetings">
         <h2>詳細 / 構造化出力</h2>
         <div class="section">
           <div id="meetingHeader" class="row" style="justify-content:space-between;align-items:flex-start; gap:12px; flex-wrap:wrap">
@@ -122,6 +127,28 @@
           </div>
         </div>
       </section>
+
+      <!-- ZohoCRM Panel -->
+      <section class="card" data-panel="zoho" style="display:none">
+        <h2>ZohoCRM 検索</h2>
+        <div class="section">
+          <div class="toolbar">
+            <input id="zohoQuery" type="text" class="grow" placeholder="求職者名で検索 (部分一致)" />
+            <button id="btnZohoSearch" class="btn primary">検索</button>
+            <button id="btnZohoClear" class="btn">クリア</button>
+          </div>
+          <div class="split">
+            <div>
+              <div class="title">検索結果</div>
+              <div class="list" id="zohoResults"></div>
+            </div>
+            <div>
+              <div class="title">詳細</div>
+              <div class="json-box" style="background:#fff"><div id="zohoDetail" style="padding:10px"></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <script>
@@ -132,6 +159,7 @@
         meetings: [],
         selected: null,
         structured: null,
+        zoho: { results: [], fieldsMap: {}, module: null, detail: null },
       };
 
       // UI表示順と日本語ラベルの定義（CSV順）
@@ -215,11 +243,33 @@
         $("baseUrl").addEventListener('change', (e)=> { state.baseUrl = e.target.value.trim().replace(/\/$/, ''); });
         $("tabTable").addEventListener('click', ()=> switchTab('table'));
         $("tabJson").addEventListener('click', ()=> switchTab('json'));
+        $("tabMeetings").addEventListener('click', ()=> switchMain('meetings'));
+        $("tabZoho").addEventListener('click', ()=> switchMain('zoho'));
+        $("btnZohoSearch").addEventListener('click', zohoSearch);
+        $("btnZohoClear").addEventListener('click', zohoClear);
+        $("zohoQuery").addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ zohoSearch(); }});
       }
 
       function url(path){
         const base = ($("baseUrl").value || state.baseUrl || window.location.origin).replace(/\/$/, '');
         return base + path;
+      }
+
+      function switchMain(which){
+        const isMeet = which==='meetings';
+        $("tabMeetings").classList.toggle('primary', isMeet);
+        $("tabMeetings").setAttribute('aria-selected', isMeet?'true':'false');
+        $("tabZoho").classList.toggle('primary', !isMeet);
+        $("tabZoho").setAttribute('aria-selected', !isMeet?'true':'false');
+        document.querySelectorAll('[data-panel="meetings"]').forEach(el=> el.style.display = isMeet ? '' : 'none');
+        document.querySelectorAll('[data-panel="zoho"]').forEach(el=> el.style.display = isMeet ? 'none' : '');
+        const mainEl = document.querySelector('main');
+        if (isMeet) mainEl.classList.remove('onecol'); else mainEl.classList.add('onecol');
+        if (!isMeet && !state.zoho.module) {
+          // preload module meta if needed
+          state.zoho.module = 'CustomModule1';
+          fetchZohoFields(state.zoho.module).catch(()=>{});
+        }
       }
 
       async function checkHealth(){
@@ -444,6 +494,96 @@
         }finally{
           btn.disabled = false; btn.textContent = prev;
         }
+      }
+
+      // -------- ZohoCRM UI --------
+      async function fetchZohoFields(module){
+        try{
+          const res = await fetch(url(`/api/v1/zoho/fields?module=${encodeURIComponent(module)}`));
+          const body = await res.json();
+          const map = {};
+          (body.items||[]).forEach(f=>{ map[f.api_name] = f.display_label || f.api_name; });
+          state.zoho.fieldsMap = map;
+        }catch(e){ /* ignore */ }
+      }
+
+      function zohoClear(){
+        $("zohoQuery").value = '';
+        $("zohoResults").innerHTML = '';
+        $("zohoDetail").innerHTML = '<div class="hint">左の検索から求職者を選択してください</div>';
+        state.zoho.results = []; state.zoho.detail = null;
+      }
+
+      async function zohoSearch(){
+        const q = $("zohoQuery").value.trim();
+        if(!q){ zohoClear(); return; }
+        $("status").textContent = 'Zoho 検索中…'; $("status").className='';
+        try{
+          const res = await fetch(url(`/api/v1/zoho/app-hc/search?name=${encodeURIComponent(q)}&limit=20`));
+          const body = await res.json();
+          state.zoho.results = body.items || [];
+          renderZohoResults();
+          $("status").textContent = `Zoho 検索結果: ${body.count||0}件`; $("status").className='ok';
+        }catch(e){
+          $("status").textContent = 'Zoho 検索エラー'; $("status").className='err';
+        }
+      }
+
+      function renderZohoResults(){
+        const list = $("zohoResults"); list.innerHTML = '';
+        const items = state.zoho.results || [];
+        if(items.length === 0){ list.innerHTML = '<div class="item muted">該当なし</div>'; return; }
+        items.forEach(it => {
+          const div = document.createElement('div'); div.className='item';
+          const name = escapeHtml(it.candidate_name || '(名称未設定)');
+          const cid = it.candidate_id ? escapeHtml(String(it.candidate_id)) : '-';
+          div.innerHTML = `<div class="name">${name}</div><div class="meta">候補者ID: ${cid} / Record: ${escapeHtml(it.record_id||'')}</div>`;
+          div.addEventListener('click', ()=> zohoLoadDetail(it.record_id));
+          list.appendChild(div);
+        });
+      }
+
+      async function zohoLoadDetail(recordId){
+        if(!recordId) return;
+        $("zohoDetail").innerHTML = '<div class="hint">読込中…</div>';
+        try{
+          const res = await fetch(url(`/api/v1/zoho/app-hc/${encodeURIComponent(recordId)}`));
+          const body = await res.json();
+          state.zoho.detail = body.record || {};
+          renderZohoDetail();
+        }catch(e){
+          $("zohoDetail").innerHTML = '<div class="err">取得に失敗しました</div>';
+        }
+      }
+
+      function renderZohoDetail(){
+        const host = $("zohoDetail");
+        const rec = state.zoho.detail || {};
+        if(!rec || Object.keys(rec).length===0){ host.innerHTML = '<div class="hint">詳細がありません</div>'; return; }
+        const map = state.zoho.fieldsMap || {};
+        // Preferred field order hints (optional)
+        const preferred = ['id','Name','Last_Name','First_Name','Email','Phone','Mobile','Created_Time','Modified_Time'];
+        const keys = [...new Set([...preferred, ...Object.keys(rec)])];
+        host.innerHTML = '';
+        const grid = document.createElement('div');
+        grid.style.display='grid'; grid.style.gridTemplateColumns='220px 1fr';
+        grid.style.border='1px solid #e5e7eb'; grid.style.borderRadius='8px'; grid.style.overflow='hidden';
+        keys.forEach(k=>{
+          if(rec[k] === undefined) return;
+          const label = map[k] || k;
+          const cellL = document.createElement('div'); cellL.textContent = label; cellL.style.padding='8px 10px'; cellL.style.background='#f9fafb'; cellL.style.fontSize='12px'; cellL.style.borderBottom='1px solid #e5e7eb'; cellL.style.borderRight='1px solid #e5e7eb';
+          const cellR = document.createElement('div'); cellR.style.padding='8px 10px'; cellR.style.borderBottom='1px solid #e5e7eb';
+          const v = rec[k];
+          if (Array.isArray(v)){
+            cellR.innerHTML = v.length? v.map(x=>`<span class="chip">${escapeHtml(String(typeof x==='object'? x.name||x.id||JSON.stringify(x) : x))}</span>`).join(' ') : '<span class="muted">-</span>';
+          } else if (v && typeof v === 'object'){
+            cellR.innerHTML = `<code class="mono">${escapeHtml(JSON.stringify(v))}</code>`;
+          } else {
+            cellR.textContent = (v===null || v==='')? '-' : String(v);
+          }
+          grid.appendChild(cellL); grid.appendChild(cellR);
+        });
+        host.appendChild(grid);
       }
 
       window.addEventListener('DOMContentLoaded', init);
