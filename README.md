@@ -87,9 +87,36 @@ uvicorn app.main:app --reload
 ```
 
 5) 簡易テストクライアント（任意）
-- `docs/test-client.html` をブラウザで直接開く
-- ベースURLに `http://localhost:8000` を指定して各ボタンからAPIを実行
-- 必要に応じて `.env` で `CORS_ALLOW_ORIGINS` を設定（未設定時は全許可）
+- `docs/test-client.html` をブラウザで直接開くか、`/test-client` で配信
+  - 画面上部に「議事録」「ZohoCRM」のタブがあります
+  - 議事録タブ: 会議一覧/詳細、構造化出力（表形式/JSON）の表示と実行
+  - ZohoCRMタブ: 求職者名で検索 → 結果リスト → クリックで詳細（2カラム表）
+  - ベースURLに `http://localhost:8000` を指定
+  - 必要に応じて `.env` で `CORS_ALLOW_ORIGINS` を設定（未設定時は全許可）
+
+---
+
+## 簡易認証（API / テストクライアントの保護）
+任意で、Bearer トークンによる簡易保護を有効化できます。
+
+1) `.env` に設定
+```
+APP_AUTH_TOKEN=your-secret-token
+```
+2) 有効化される対象
+- `/api/v1/*` と `/test-client` が保護対象になります
+- `Authorization: Bearer <token>` ヘッダ、または `?token=<token>` クエリを要求
+- 例外: `/health`, `/oauth/zoho/callback` は無認証
+
+3) テストクライアントの使い方
+- 画面右上の「Auth Token」欄にトークンを入力（LocalStorageに保存）
+- または `http://localhost:8000/test-client?token=your-secret-token` のようにクエリで付与
+- 以降の API 呼び出しは自動で `Authorization` ヘッダが付与されます
+
+4) cURL 例
+```
+curl -H "Authorization: Bearer your-secret-token" http://localhost:8000/api/v1/meetings
+```
 
 ---
 

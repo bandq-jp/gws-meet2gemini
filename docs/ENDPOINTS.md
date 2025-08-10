@@ -21,6 +21,12 @@
   - 目的: 稼働確認
   - レスポンス: `{ "status": "ok" }`
 
+認証（任意設定）:
+- `.env` に `APP_AUTH_TOKEN` を設定すると、以下が有効になります。
+  - `/api/v1/*` と `/test-client` は `Authorization: Bearer <token>` または `?token=<token>` を要求
+  - 例外: `/health`, `/oauth/zoho/callback`
+  - 例: `curl -H "Authorization: Bearer <token>" http://localhost:8000/api/v1/meetings`
+
 ---
 
 ## Meetings API
@@ -75,6 +81,24 @@
 - 収集（2ユーザー）
 ```
 curl -X POST "http://localhost:8000/api/v1/meetings/collect?accounts=a@ex.com&accounts=b@ex.com"
+```
+
+---
+
+## Zoho CRM API（読み取り専用）
+
+- 検索: `GET /api/v1/zoho/app-hc/search?name=<文字列>&limit=5`
+  - 返却: `{ items: [{ record_id, candidate_name, candidate_id }], count }`
+- 単一詳細: `GET /api/v1/zoho/app-hc/{record_id}`
+  - 返却: `{ record: {...}, record_id }`（全フィールド）
+- メタ: 
+  - モジュール一覧: `GET /api/v1/zoho/modules`
+  - フィールド一覧: `GET /api/v1/zoho/fields?module=CustomModule1`
+
+認証（有効時）:
+```
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/v1/zoho/app-hc/search?name=山田&limit=10"
 ```
 
 - 一覧（フィルタ）

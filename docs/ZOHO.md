@@ -34,6 +34,18 @@ curl --http1.1 "http://localhost:8000/api/v1/zoho/app-hc/search?name=伊藤&limi
   - フィールドの API 名は自動解決（`/crm/v2/settings/fields?module=CustomModule1`）します。
   - 自動解決に失敗する場合は `.env` に API 名を明示してください。
 
+## 単一レコード詳細
+- エンドポイント: `GET /api/v1/zoho/app-hc/{record_id}`
+- 返却: `{ record: {...}, record_id }`（該当レコードの全フィールド）
+
+## 認証（任意）
+- `.env` に `APP_AUTH_TOKEN` を設定すると、`Authorization: Bearer <token>` または `?token=<token>` が必要になります。
+- 例:
+```
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8000/api/v1/zoho/app-hc/search?name=伊藤&limit=5"
+```
+
 ## モジュール/フィールドの発見（表示ラベルとAPI名の対応を確認）
 - モジュール一覧:
 ```
