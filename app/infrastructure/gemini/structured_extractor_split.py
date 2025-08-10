@@ -473,7 +473,7 @@ class GeminiStructuredExtractorSplit:
 
 【抽出ルール】
 1. テキストに明確に記載されている情報のみを抽出してください。
-2. 推測や補完は行わず、記載がない項目はnullとしてください。不明な情報は必ずnullとしてください。
+2. すべての前提として、推測や補完は行わず、記載がない項目はnullとしてください。不明な情報は必ずnullとしてください。
 3. 複数選択可能な項目は配列形式で記載してください。
 4. 選択リストの場合は、提供された選択肢の中から最も適切なものを選んでください。
 5. 数値項目は適切な型（整数・小数）で記載してください。
@@ -492,7 +492,7 @@ class GeminiStructuredExtractorSplit:
                         "response_mime_type": "application/json",
                         "response_schema": schema,
                         "temperature": 0.1,
-                        "max_output_tokens": 8192,
+                        "max_output_tokens": 20000,
                     },
                 )
 
