@@ -1,4 +1,4 @@
 service_account.json
 .env
 __pycache__/
-tests/meet-txt/
+backend/tests/meet-txt
