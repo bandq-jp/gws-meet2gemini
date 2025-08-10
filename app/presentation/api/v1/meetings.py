@@ -8,6 +8,7 @@ from app.application.use_cases.collect_meetings import CollectMeetingsUseCase
 
 from app.application.use_cases.get_meeting_list import GetMeetingListUseCase
 from app.application.use_cases.get_meeting_detail import GetMeetingDetailUseCase
+from app.infrastructure.config.settings import get_settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -43,6 +44,12 @@ async def list_meetings(accounts: Optional[List[str]] = Query(default=None)):
     except RuntimeError as e:
         # Supabase未設定時でもHTTP 400を返して原因を明示
         raise HTTPException(status_code=400, detail=str(e))
+@router.get("/accounts", response_model=dict)
+async def get_available_accounts():
+    """Get available accounts for filtering"""
+    settings = get_settings()
+    return {"accounts": settings.impersonate_subjects}
+
 @router.get("/{meeting_id}", response_model=MeetingOut)
 async def get_meeting_detail(meeting_id: str):
     use_case = GetMeetingDetailUseCase()

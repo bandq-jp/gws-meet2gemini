@@ -154,20 +154,14 @@
         <h2>ミーティングを選択</h2>
         <div class="section">
           <div class="toolbar">
-            <input id="baseUrl" type="text" class="grow" placeholder="API ベースURL (例: http://localhost:8000)" />
-            <input id="authToken" type="text" placeholder="Auth Token" />
-            <button id="btnHealth" class="btn">接続確認</button>
-          </div>
-          <div class="toolbar">
-            <input id="accounts" class="grow" type="text" placeholder="アカウントをフィルタ（カンマ区切り）" />
-            <button id="btnRefresh" class="btn primary">再読込</button>
-            <button id="btnFetchFromDrive" class="btn">Driveから新しい議事録を取得</button>
+            <button id="btnFetchFromDrive" class="btn primary">Driveから新しい議事録を取得</button>
           </div>
           <div>
-            <label>ミーティング一覧</label>
-            <select id="meetingSelect"></select>
+            <label>アカウントでフィルタ</label>
+            <select id="accountSelect">
+              <option value="">すべてのアカウント</option>
+            </select>
           </div>
-          <div class="hint">一覧は最新順。検索はブラウザのプルダウン入力から絞り込み可能です。</div>
           <div class="list" id="meetingList"></div>
         </div>
       </aside>
@@ -190,8 +184,23 @@
             <div>
               <div class="title">構造化出力</div>
               <div id="structuredCTA" class="cta" style="display:none">
-                <div class="hint">この議事録の構造化出力はまだありません。</div>
-                <button id="btnProcessCta" class="btn primary">構造化出力を作成</button>
+                <div class="hint">この議事録の構造化出力はまだありません。候補者を選択してから作成してください。</div>
+                
+                <!-- Candidate Selection -->
+                <div style="margin: 12px 0; text-align: left;">
+                  <label style="display: block; margin-bottom: 6px;">求職者を選択:</label>
+                  <div class="row" style="gap: 8px;">
+                    <input id="candidateSearch" type="text" class="grow" placeholder="求職者名で検索" />
+                    <button id="btnCandidateSearch" class="btn">検索</button>
+                  </div>
+                  <div id="candidateResults" class="list" style="margin-top: 8px; max-height: 200px; display: none;"></div>
+                  <div id="selectedCandidate" style="margin-top: 8px; display: none;">
+                    <div class="hint">選択された候補者:</div>
+                    <div id="selectedCandidateInfo" class="chip" style="margin-top: 4px;"></div>
+                  </div>
+                </div>
+                
+                <button id="btnProcessCta" class="btn primary" disabled>構造化出力を作成</button>
               </div>
               <div id="structuredSection">
                 <div class="row" style="gap:6px;align-items:flex-end;justify-content:space-between;flex-wrap:wrap">
@@ -242,10 +251,13 @@
       const $ = (id) => document.getElementById(id);
       const state = {
         baseUrl: '',
-        accounts: '',
+        availableAccounts: [],
+        selectedAccount: '',
         meetings: [],
         selected: null,
         structured: null,
+        selectedCandidate: null, // {candidate_id, record_id, candidate_name, candidate_email}
+        candidateSearchResults: [],
         zoho: { results: [], fieldsMap: {}, module: null, detail: null },
         authToken: '',
       };
@@ -319,22 +331,16 @@
         const urlp = new URLSearchParams(location.search);
         const qTok = urlp.get('token') || '';
         state.authToken = qTok || localStorage.getItem('authToken') || '';
-        $("baseUrl").value = state.baseUrl;
-        $("authToken").value = state.authToken;
         $("status").textContent = '読み込み中…';
         bind();
-        refreshMeetings();
+        loadAvailableAccounts();
       }
 
       function bind(){
-        $("btnHealth").addEventListener('click', checkHealth);
-        $("btnRefresh").addEventListener('click', refreshMeetings);
         $("btnFetchFromDrive").addEventListener('click', collectFromDrive);
-        $("meetingSelect").addEventListener('change', (e)=> selectById(e.target.value));
+        $("accountSelect").addEventListener('change', (e)=> { state.selectedAccount = e.target.value; refreshMeetings(); });
         $("btnProcess").addEventListener('click', processStructured);
         $("btnProcessCta").addEventListener('click', processStructured);
-        $("baseUrl").addEventListener('change', (e)=> { state.baseUrl = e.target.value.trim().replace(/\/$/, ''); });
-        $("authToken").addEventListener('change', (e)=> { state.authToken = e.target.value.trim(); localStorage.setItem('authToken', state.authToken); });
         $("tabTable").addEventListener('click', ()=> switchTab('table'));
         $("tabJson").addEventListener('click', ()=> switchTab('json'));
         $("tabMeetings").addEventListener('click', ()=> switchMain('meetings'));
@@ -342,10 +348,12 @@
         $("btnZohoSearch").addEventListener('click', zohoSearch);
         $("btnZohoClear").addEventListener('click', zohoClear);
         $("zohoQuery").addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ zohoSearch(); }});
+        $("btnCandidateSearch").addEventListener('click', searchCandidates);
+        $("candidateSearch").addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ searchCandidates(); }});
       }
 
       function url(path){
-        const base = ($("baseUrl").value || state.baseUrl || window.location.origin).replace(/\/$/, '');
+        const base = (state.baseUrl || window.location.origin).replace(/\/$/, '');
         return base + path;
       }
 
@@ -372,13 +380,33 @@
         }
       }
 
-      async function checkHealth(){
-        $("status").textContent = '接続確認中…';
+
+      async function loadAvailableAccounts(){
         try{
-          const res = await apiFetch('/health');
-          $("status").textContent = res.ok ? '接続OK' : `接続NG (${res.status})`;
-          $("status").className = res.ok ? 'ok' : 'err';
-        }catch(e){ $("status").textContent = '接続エラー'; $("status").className='err'; }
+          const res = await apiFetch('/api/v1/meetings/accounts');
+          if(!res.ok){ throw new Error('HTTP '+res.status); }
+          const data = await res.json();
+          state.availableAccounts = data.accounts || [];
+          populateAccountSelect();
+          refreshMeetings();
+        }catch(e){
+          console.error('Failed to load accounts:', e);
+          // fallback to empty accounts and load meetings anyway
+          state.availableAccounts = [];
+          refreshMeetings();
+        }
+      }
+
+      function populateAccountSelect(){
+        const sel = $("accountSelect");
+        // Keep the "all accounts" option
+        sel.innerHTML = '<option value="">すべてのアカウント</option>';
+        state.availableAccounts.forEach(account => {
+          const opt = document.createElement('option');
+          opt.value = account;
+          opt.textContent = account;
+          sel.appendChild(opt);
+        });
       }
 
       function formatDate(s){
@@ -415,14 +443,6 @@
         $("textPreview").textContent = text || '(本文なし)';
       }
 
-      function populateSelect(meetings){
-        const sel = $("meetingSelect"); sel.innerHTML = '';
-        meetings.forEach(m=>{
-          const opt = document.createElement('option');
-          opt.value = m.id; opt.textContent = `${formatDate(m.meeting_datetime) || ''} ${m.title || '(無題)'} – ${m.organizer_email||''}`.trim();
-          sel.appendChild(opt);
-        });
-      }
 
       function populateList(meetings){
         const box = $("meetingList"); box.innerHTML = '';
@@ -436,9 +456,10 @@
       }
 
       function buildQuery(){
-        const acc = ($("accounts").value||'').split(',').map(s=>s.trim()).filter(Boolean);
         const sp = new URLSearchParams();
-        acc.forEach(a=> sp.append('accounts', a));
+        if(state.selectedAccount){
+          sp.append('accounts', state.selectedAccount);
+        }
         return sp.toString();
       }
 
@@ -452,7 +473,6 @@
           // sort desc by meeting_datetime then title
           data.sort((a,b)=> String(b.meeting_datetime||'').localeCompare(String(a.meeting_datetime||'')) || String(a.title||'').localeCompare(String(b.title||'')));
           state.meetings = data;
-          populateSelect(data);
           populateList(data);
           $("status").textContent = `読み込み完了 (${data.length}件)`;
           if (data.length){ selectById(data[0].id); }
@@ -484,8 +504,14 @@
       function selectById(id){
         const m = state.meetings.find(x=> String(x.id)===String(id));
         if(!m) return;
-        $("meetingSelect").value = String(id);
         state.selected = m;
+        // Reset candidate selection for new meeting
+        state.selectedCandidate = null;
+        state.candidateSearchResults = [];
+        $("selectedCandidate").style.display = 'none';
+        $("candidateResults").style.display = 'none';
+        $("btnProcessCta").disabled = true;
+        $("candidateSearch").value = '';
         setHeader(m);
         loadStructured(m.id);
       }
@@ -502,10 +528,11 @@
           const res = await apiFetch(`/api/v1/structured/${encodeURIComponent(id)}`);
           const body = await res.json();
           state.structured = body?.data || {};
+          const zoho_candidate = body?.zoho_candidate;
           const has = state.structured && Object.keys(state.structured).length > 0;
           if (has){
-            $("structuredJson").textContent = JSON.stringify(state.structured, null, 2);
-            renderStructuredTable(state.structured);
+            $("structuredJson").textContent = JSON.stringify({data: state.structured, zoho_candidate: zoho_candidate}, null, 2);
+            renderStructuredTable(state.structured, zoho_candidate);
             $("sHint").textContent = '取得済み';
             section.style.display = '';
             cta.style.display = 'none';
@@ -559,9 +586,42 @@
           .replace(/'/g, '&#039;');
       }
 
-      function renderStructuredTable(data){
+      function renderStructuredTable(data, zoho_candidate){
         const host = $("structuredTable");
         host.innerHTML = '';
+        
+        // Add Zoho candidate info section if available
+        if(zoho_candidate){
+          const zohosec = document.createElement('div');
+          zohosec.style.marginBottom = '14px';
+          const zh = document.createElement('div'); zh.textContent = 'Zoho CRM 候補者情報'; zh.className = 'title'; zh.style.margin='4px 0 8px';
+          zohosec.appendChild(zh);
+          const zgrid = document.createElement('div');
+          zgrid.style.display = 'grid';
+          zgrid.style.gridTemplateColumns = '240px 1fr';
+          zgrid.style.border = '1px solid #e5e7eb';
+          zgrid.style.borderRadius = '8px';
+          zgrid.style.overflow = 'hidden';
+          
+          const zfields = [
+            {key: 'candidate_name', label: '候補者名'},
+            {key: 'candidate_id', label: '候補者ID'},  
+            {key: 'record_id', label: 'レコードID'},
+            {key: 'candidate_email', label: 'メールアドレス'}
+          ];
+          
+          zfields.forEach(field => {
+            const cellL = document.createElement('div');
+            cellL.textContent = field.label; cellL.style.padding='8px 10px'; cellL.style.background='#f0f9ff'; cellL.style.fontSize='12px'; cellL.style.color='#374151';
+            cellL.style.borderBottom = '1px solid #e5e7eb'; cellL.style.borderRight = '1px solid #e5e7eb';
+            const cellR = document.createElement('div');
+            cellR.innerHTML = valueToHtml(zoho_candidate?.[field.key]); cellR.style.padding='8px 10px'; cellR.style.borderBottom='1px solid #e5e7eb';
+            zgrid.appendChild(cellL); zgrid.appendChild(cellR);
+          });
+          zohosec.appendChild(zgrid);
+          host.appendChild(zohosec);
+        }
+        
         uiSections.forEach(section => {
           const sec = document.createElement('div');
           sec.style.marginBottom = '14px';
@@ -589,11 +649,81 @@
         });
       }
 
+      async function searchCandidates(){
+        const query = $("candidateSearch").value.trim();
+        if(!query) return;
+        
+        $("status").textContent = '候補者検索中…'; $("status").className='';
+        try{
+          const res = await apiFetch(`/api/v1/zoho/app-hc/search?name=${encodeURIComponent(query)}&limit=10`);
+          const body = await res.json();
+          state.candidateSearchResults = body.items || [];
+          renderCandidateResults();
+          $("status").textContent = `候補者検索結果: ${body.count||0}件`; $("status").className='ok';
+        }catch(e){
+          $("status").textContent = '候補者検索エラー'; $("status").className='err';
+        }
+      }
+
+      function renderCandidateResults(){
+        const box = $("candidateResults");
+        const results = state.candidateSearchResults;
+        
+        if(results.length === 0){
+          box.innerHTML = '<div class="item muted">該当なし</div>';
+          box.style.display = 'block';
+          return;
+        }
+        
+        box.innerHTML = '';
+        results.forEach(candidate => {
+          const div = document.createElement('div'); div.className='item';
+          const name = escapeHtml(candidate.candidate_name || '(名称未設定)');
+          const cid = candidate.candidate_id ? escapeHtml(String(candidate.candidate_id)) : '-';
+          div.innerHTML = `<div class="name">${name}</div><div class="meta">候補者ID: ${cid} / Record: ${escapeHtml(candidate.record_id||'')}</div>`;
+          div.addEventListener('click', ()=> selectCandidate(candidate));
+          box.appendChild(div);
+        });
+        box.style.display = 'block';
+      }
+
+      function selectCandidate(candidate){
+        state.selectedCandidate = {
+          candidate_id: candidate.candidate_id,
+          record_id: candidate.record_id,
+          candidate_name: candidate.candidate_name,
+          candidate_email: candidate.candidate_email || null
+        };
+        
+        // Update UI
+        $("selectedCandidateInfo").textContent = candidate.candidate_name || '(名称未設定)';
+        $("selectedCandidate").style.display = 'block';
+        $("candidateResults").style.display = 'none';
+        $("btnProcessCta").disabled = false;
+        $("candidateSearch").value = '';
+      }
+
       async function processStructured(){
         const m = state.selected; if(!m) return;
-        const btn = $("btnProcess"); btn.disabled = true; const prev = btn.textContent; btn.textContent = '実行中…';
+        if(!state.selectedCandidate){ 
+          alert('候補者を選択してください'); 
+          return; 
+        }
+        
+        const btn = $("btnProcess") || $("btnProcessCta");
+        btn.disabled = true; const prev = btn.textContent; btn.textContent = '実行中…';
         try{
-          const res = await fetch(url(`/api/v1/structured/process/${encodeURIComponent(m.id)}`), { method: 'POST' });
+          const payload = {
+            zoho_candidate_id: state.selectedCandidate.candidate_id,
+            zoho_record_id: state.selectedCandidate.record_id,
+            zoho_candidate_name: state.selectedCandidate.candidate_name,
+            zoho_candidate_email: state.selectedCandidate.candidate_email
+          };
+          const res = await apiFetch(`/api/v1/structured/process/${encodeURIComponent(m.id)}`, { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
           const body = await res.json().catch(()=>({}));
           if(!res.ok){ throw new Error(body?.detail || res.statusText); }
           await loadStructured(m.id);
