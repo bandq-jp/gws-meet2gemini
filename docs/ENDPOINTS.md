@@ -6,6 +6,7 @@
 - API v1 ルート: `/api/v1`
   - Meetings: `/api/v1/meetings`
   - Structured: `/api/v1/structured`
+  - Zoho (read-only): `/api/v1/zoho`
 
 必要環境変数（抜粋）:
 - `SERVICE_ACCOUNT_JSON`: サービスアカウントJSONのパス or JSON文字列
@@ -94,6 +95,33 @@ curl -X POST "http://localhost:8000/api/v1/structured/process/123"
 - 構造化取得
 ```
 curl "http://localhost:8000/api/v1/structured/123"
+```
+
+---
+
+## Zoho API（読み取り専用）
+
+事前に `.env` に以下を設定してください（読み取りのみ）。
+- `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`
+- `ZOHO_API_BASE_URL=https://www.zohoapis.jp`, `ZOHO_ACCOUNTS_BASE_URL=https://accounts.zoho.jp`
+
+### 1) APP-hc（CustomModule1）求職者名検索
+- `GET /api/v1/zoho/app-hc/search?name=<日本語可>&limit=5`
+- 目的: 「求職者名」ラベルのフィールドで部分一致検索し、`record_id / candidate_name / candidate_id` を返却。
+- 例:
+```
+curl --http1.1 "http://localhost:8000/api/v1/zoho/app-hc/search?name=伊藤&limit=5"
+```
+- 備考: ラベル→API名の自動解決に失敗する場合、`.env` に `ZOHO_APP_HC_NAME_FIELD_API` / `ZOHO_APP_HC_ID_FIELD_API` を明示してください。
+
+### 2) モジュール/フィールドの確認（発見用）
+- モジュール一覧: `GET /api/v1/zoho/modules`
+```
+curl --http1.1 "http://localhost:8000/api/v1/zoho/modules"
+```
+- フィールド一覧（例）: `GET /api/v1/zoho/fields?module=CustomModule1`
+```
+curl --http1.1 "http://localhost:8000/api/v1/zoho/fields?module=CustomModule1"
 ```
 
 ---

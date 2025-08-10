@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,3 +47,35 @@ def serve_test_client():
     if not path.exists():
         return {"error": "test-client.html not found"}, 404
     return FileResponse(str(path), media_type="text/html")
+
+# Read-only: OAuth callback helper for Zoho (displays code only)
+@app.get("/oauth/zoho/callback")
+def zoho_oauth_callback(request: Request):
+    code = request.query_params.get("code")
+    error = request.query_params.get("error")
+    accounts_server = request.query_params.get("accounts-server", "https://accounts.zoho.jp")
+    if error:
+        html = f"""
+        <html><body>
+        <h3>Zoho 認可エラー</h3>
+        <p>error={error}</p>
+        </body></html>
+        """
+        return FileResponse(None, status_code=400)
+    if not code:
+        return {"detail": "code not found"}, 400
+    # Show code and example curl to exchange (read-only helper)
+    html = f"""
+    <!doctype html><html lang=ja><meta charset=utf-8>
+    <body style='font-family:system-ui, sans-serif; padding:16px'>
+      <h3>Zoho 認可コードを取得しました</h3>
+      <p><b>code:</b> <code>{code}</code></p>
+      <p>以下のコマンドで refresh_token を取得できます（JP DCの例）。</p>
+      <pre style='background:#f8f9fb; padding:12px; border:1px solid #e5e7eb; border-radius:6px; overflow:auto'>
+curl -sS -X POST "{accounts_server}/oauth/v2/token" \
+  -d "grant_type=authorization_code&client_id=$ZOHO_CLIENT_ID&client_secret=$ZOHO_CLIENT_SECRET&redirect_uri=http://localhost:8000/oauth/zoho/callback&code={code}"
+      </pre>
+      <p>取得した <code>refresh_token</code> を .env の <code>ZOHO_REFRESH_TOKEN</code> に保存してください。</p>
+    </body></html>
+    """
+    return html
