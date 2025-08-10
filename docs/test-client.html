@@ -69,6 +69,7 @@
           <div class="toolbar">
             <input id="accounts" class="grow" type="text" placeholder="アカウントをフィルタ（カンマ区切り）" />
             <button id="btnRefresh" class="btn primary">再読込</button>
+            <button id="btnFetchFromDrive" class="btn">Driveから新しい議事録を取得</button>
           </div>
           <div>
             <label>ミーティング一覧</label>
@@ -135,6 +136,7 @@
       function bind(){
         $("btnHealth").addEventListener('click', checkHealth);
         $("btnRefresh").addEventListener('click', refreshMeetings);
+        $("btnFetchFromDrive").addEventListener('click', collectFromDrive);
         $("meetingSelect").addEventListener('change', (e)=> selectById(e.target.value));
         $("btnProcess").addEventListener('click', processStructured);
         $("btnProcessCta").addEventListener('click', processStructured);
@@ -233,6 +235,25 @@
         }catch(e){
           $("status").textContent = '読込エラー'; $("status").className='err';
           console.error(e);
+        }
+      }
+
+      async function collectFromDrive(){
+        const btn = $("btnFetchFromDrive");
+        const prev = btn.textContent; btn.disabled = true; btn.textContent = '取得中…';
+        $("status").textContent = 'Driveから取得中…'; $("status").className='';
+        try{
+          const qs = buildQuery();
+          const uri = '/api/v1/meetings/collect' + (qs? ('?'+qs+'&'):'?') + 'include_structure=false&force_update=false';
+          const res = await fetch(url(uri), { method: 'POST' });
+          const body = await res.json().catch(()=>({}));
+          if(!res.ok){ throw new Error(body?.detail || res.statusText); }
+          $("status").textContent = `取得完了: stored=${body?.stored ?? '?'}件`; $("status").className='ok';
+          await refreshMeetings();
+        }catch(e){
+          $("status").textContent = 'Drive取得エラー: ' + String(e.message||e); $("status").className='err';
+        }finally{
+          btn.disabled = false; btn.textContent = prev;
         }
       }
 
