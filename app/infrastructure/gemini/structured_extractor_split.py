@@ -437,11 +437,37 @@ class GeminiStructuredExtractorSplit:
         text_content: str,
         schema: Dict[str, Any],
         group_name: str,
+        candidate_name: str | None = None,
+        agent_name: str | None = None,
         max_retries: int = 3,
     ) -> Dict[str, Any]:
+        # 話者情報の構築
+        speaker_info = ""
+        if candidate_name and agent_name:
+            speaker_info = f"""
+【話者情報】
+- 求職者名: {candidate_name} (注意: Google Meetでの表示名のため、議事録内では異なる名前で表記されている可能性があります)
+- エージェント名: {agent_name} (注意: 議事録内では異なる名前で表記されている可能性があります)
+- 基本的にエージェント以外の発言は求職者によるものです
+- エージェントの発言は、主催者({agent_name})の発言として識別してください
+"""
+        elif candidate_name:
+            speaker_info = f"""
+【話者情報】
+- 求職者名: {candidate_name} (注意: Google Meetでの表示名のため、議事録内では異なる名前で表記されている可能性があります)
+- 基本的にエージェント以外の発言は求職者によるものです
+"""
+        elif agent_name:
+            speaker_info = f"""
+【話者情報】  
+- エージェント名: {agent_name} (注意: 議事録内では異なる名前で表記されている可能性があります)
+- エージェントの発言は、主催者({agent_name})の発言として識別してください
+- 基本的にエージェント以外の発言は求職者によるものです
+"""
+
         prompt = f"""
 以下の議事録テキストから、{group_name}に関する情報を構造化して抽出してください。
-
+{speaker_info}
 【テキスト内容】
 {text_content}
 
@@ -452,6 +478,7 @@ class GeminiStructuredExtractorSplit:
 4. 選択リストの場合は、提供された選択肢の中から最も適切なものを選んでください。
 5. 数値項目は適切な型（整数・小数）で記載してください。
 6. 年収などの数値は数字のみを抽出してください（「万円」などの単位は除く）。
+7. 話者情報を参考に、求職者とエージェントの発言を適切に区別して情報を抽出してください。
 
 {group_name}の情報のみを構造化されたJSONで回答してください。
 """
@@ -487,7 +514,8 @@ class GeminiStructuredExtractorSplit:
         return {}
 
     def extract_all_structured_data(
-        self, text_content: str, use_parallel: bool = True
+        self, text_content: str, candidate_name: str | None = None, 
+        agent_name: str | None = None, use_parallel: bool = True
     ) -> Dict[str, Any]:
         schema_groups = [
             (self._get_schema_group1(), "転職活動状況・エージェント関連"),
@@ -500,7 +528,7 @@ class GeminiStructuredExtractorSplit:
 
         combined_result: Dict[str, Any] = {}
         if use_parallel:
-            extract_func = partial(self._extract_group_wrapper, text_content)
+            extract_func = partial(self._extract_group_wrapper, text_content, candidate_name, agent_name)
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 futures = [
                     executor.submit(extract_func, schema, name)
@@ -515,11 +543,12 @@ class GeminiStructuredExtractorSplit:
         else:
             for schema, group_name in schema_groups:
                 combined_result.update(
-                    self.extract_structured_data_group(text_content, schema, group_name)
+                    self.extract_structured_data_group(text_content, schema, group_name, candidate_name, agent_name)
                 )
         return combined_result
 
     def _extract_group_wrapper(
-        self, text_content: str, schema: Dict[str, Any], group_name: str
+        self, text_content: str, candidate_name: str | None, agent_name: str | None, 
+        schema: Dict[str, Any], group_name: str
     ) -> Dict[str, Any]:
-        return self.extract_structured_data_group(text_content, schema, group_name)
+        return self.extract_structured_data_group(text_content, schema, group_name, candidate_name, agent_name)

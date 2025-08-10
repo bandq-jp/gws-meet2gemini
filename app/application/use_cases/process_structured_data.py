@@ -22,7 +22,16 @@ class ProcessStructuredDataUseCase:
             raise ValueError("Zoho candidate selection is required for structured output processing")
         
         extractor = GeminiStructuredExtractorSplit()
-        data = extractor.extract_all_structured_data(meeting["text_content"], use_parallel=True)
+        # Extract candidate and agent names for better context
+        candidate_name = zoho_candidate_name
+        agent_name = meeting.get("organizer_name")
+        
+        data = extractor.extract_all_structured_data(
+            meeting["text_content"], 
+            candidate_name=candidate_name, 
+            agent_name=agent_name,
+            use_parallel=True
+        )
         
         # Create structured data with Zoho candidate info
         zoho_candidate = ZohoCandidateInfo(
