@@ -47,7 +47,7 @@ class GeminiStructuredExtractorSplit:
                         "企業打診済み ~ 一次選考フェーズ",
                         "最終面接待ち ~ 内定済み",
                     ],
-                    "description": "転職活動状況",
+                    "description": "転職活動状況：現在の転職活動の状況。",
                 },
                 "agent_count": {
                     "type": "string",
@@ -72,16 +72,16 @@ class GeminiStructuredExtractorSplit:
                 "companies_in_selection": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "すでに選考中の企業名/フェーズ",
+                    "description": "今選考中の企業名と、各企業の選考フェーズ（書類選考・一次面接・最終面接など）",
                 },
                 "other_offer_salary": {
                     "type": "string",
-                    "description": "他社オファー年収見込み",
+                    "description": "選考中の企業では、どれくらいのオファー年収提示が見込まれるか。",
                 },
                 "other_company_intention": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "他社意向度及び見込み",
+                    "description": "選考中の企業のうち、意向度が高い企業低い企業",
                 },
             },
             "required": [],
@@ -123,7 +123,7 @@ class GeminiStructuredExtractorSplit:
                             "人と関わる仕事をした",
                         ],
                     },
-                    "description": "転職検討理由（複数選択可）",
+                    "description": "転職検討理由（複数選択可）：今回転職活動を始めようと思ったきっかけ",
                 },
                 "transfer_trigger": {
                     "type": "array",
@@ -144,12 +144,12 @@ class GeminiStructuredExtractorSplit:
                 },
                 "timing_details": {
                     "type": "string",
-                    "description": "転職希望時期の詳細",
+                    "description": "転職希望時期の詳細：具体的には何月ごろか",
                 },
                 "current_job_status": {
                     "type": "string",
                     "enum": ["離職中", "離職確定", "離職未確定"],
-                    "description": "現職状況",
+                    "description": "現職状況：現職を退職することは確定しているか？未確定か？現在離職中か？",
                 },
                 "transfer_status_memo": {
                     "type": "array",
@@ -159,12 +159,12 @@ class GeminiStructuredExtractorSplit:
                 "transfer_axis_primary": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "転職軸（最重要）",
+                    "description": "転職軸（最重要）：今回転職する上での軸（最重要）を自由に記載",
                 },
                 "transfer_priorities": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "転職軸（オープン）",
+                    "description": "転職軸（オープン）：今回転職する上での軸をオープンに答えてください",
                 },
             },
             "required": [],
@@ -178,11 +178,11 @@ class GeminiStructuredExtractorSplit:
                 "career_history": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "職歴",
+                    "description": "職歴：これまでの業界・職種、在籍年数、転職回数など",
                 },
                 "current_duties": {
                     "type": "string",
-                    "description": "現職での担当業務",
+                    "description": "現職ではどのような業務を担当しているか",
                 },
                 "company_good_points": {
                     "type": "string",
@@ -289,17 +289,17 @@ class GeminiStructuredExtractorSplit:
                 "experience_industry": {
                     "type": "string",
                     "enum": industries_long,
-                    "description": "経験業界",
+                    "description": "経験業界：これまでに経験した業界",
                 },
                 "experience_field_hr": {
                     "type": "string",
                     "enum": experience_fields_hr_long,
-                    "description": "経験領域（人材）",
+                    "description": "経験領域（人材）：人材紹介業の経験がある場合に担当した領域（業界）。特化していない場合は総合型",
                 },
                 "desired_industry": {
                     "type": "array",
                     "items": {"type": "string", "enum": industries_long},
-                    "description": "希望業界",
+                    "description": "希望業界：今回の転職活動で興味を持っている業界",
                 },
                 "industry_reason": {
                     "type": "array",
@@ -320,7 +320,7 @@ class GeminiStructuredExtractorSplit:
                             "こだわりなし",
                         ],
                     },
-                    "description": "希望職種",
+                    "description": "希望職種：今回の転職活動で興味を持っている職種",
                 },
                 "position_industry_reason": {
                     "type": "array",
@@ -340,11 +340,11 @@ class GeminiStructuredExtractorSplit:
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9999,
-                    "description": "現年収（4桁の数字のみ／例: 600=600万円）",
+                    "description": "現年収（数字のみ）：4桁の整数（例: 600=600万円）",
                 },
                 "salary_breakdown": {
                     "type": "string",
-                    "description": "現年収内訳（基本給・賞与・インセンティブ）",
+                    "description": "現年収内訳：基本給・賞与・インセンティブ",
                 },
                 "desired_first_year_salary": {
                     "type": "number",
@@ -352,11 +352,11 @@ class GeminiStructuredExtractorSplit:
                 },
                 "base_incentive_ratio": {
                     "type": "string",
-                    "description": "基本給・インセンティブ比率",
+                    "description": "基本給・インセンティブ比率：初年度希望年収のうち、基本給が高い方が良いか、インセンティブで稼ぎたいか",
                 },
                 "max_future_salary": {
                     "type": "string",
-                    "description": "将来的な年収の最大値",
+                    "description": "将来的な年収の最大値：将来的にはいくらくらいまで年収を上げていきたいか",
                 },
                 "salary_memo": {
                     "type": "array",
@@ -368,9 +368,9 @@ class GeminiStructuredExtractorSplit:
                     "items": {"type": "string"},
                     "description": "フリーメモ（リモート・時間）",
                 },
-                "ca_ra_focus": {"type": "string", "description": "CA起点/RA起点"},
-                "customer_acquisition": {"type": "string", "description": "集客方法/比率"},
-                "new_existing_ratio": {"type": "string", "description": "新規/既存の比率"},
+                "ca_ra_focus": {"type": "string", "description": "CA起点/RA起点：人材紹介を希望する場合、CA起点（求職者支援が主軸）かRA起点（企業の採用課題への貢献が主軸）か"},
+                "customer_acquisition": {"type": "string", "description": "集客方法/比率：集客の要望や内訳・比率（スカウト媒体、広告、リファラル、Web、YouTube等）"},
+                "new_existing_ratio": {"type": "string", "description": "新規/既存の比率：新規開拓と既存関係強化の希望比率"},
             },
             "required": [],
         }
@@ -386,7 +386,7 @@ class GeminiStructuredExtractorSplit:
                         "type": "string",
                         "enum": ["拡大・成長", "IPO", "少数精鋭", "長期安定", "こだわりなし"],
                     },
-                    "description": "事業構想",
+                    "description": "事業構想：どのような事業計画・ビジョンを持っている企業で働きたいか。どのようなフェーズ、どのような規模感の会社に入りたいか",
                 },
                 "desired_employee_count": {
                     "type": "array",
@@ -394,7 +394,7 @@ class GeminiStructuredExtractorSplit:
                         "type": "string",
                         "enum": ["-30", "30-150", "150-300", "300-"],
                     },
-                    "description": "希望従業員数",
+                    "description": "希望従業員数：どれくらいの従業員数がいる会社で働きたいか",
                 },
                 "culture_scale_memo": {
                     "type": "array",
@@ -523,4 +523,3 @@ class GeminiStructuredExtractorSplit:
         self, text_content: str, schema: Dict[str, Any], group_name: str
     ) -> Dict[str, Any]:
         return self.extract_structured_data_group(text_content, schema, group_name)
-
