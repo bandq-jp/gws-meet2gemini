@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CandidateSearchDialog } from "@/components/candidate-search-dialog";
 import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Download,
   Search,
@@ -30,6 +31,10 @@ import {
   Loader2,
   Eye,
   Settings,
+  ArrowLeft,
+  Users,
+  Building,
+  ChevronRight,
 } from "lucide-react";
 import { 
   apiClient, 
@@ -49,7 +54,9 @@ interface CandidateMatchSuggestion {
   matchedNames: string[];
 }
 
-export default function HitocariPage() {
+type ViewMode = 'list' | 'detail';
+
+export default function EnhancedHitocariPage() {
   const { isLoaded, userId } = useAuth();
   const { user } = useUser();
   const router = useRouter();
@@ -65,6 +72,7 @@ export default function HitocariPage() {
   const [processing, setProcessing] = useState(false);
   const [loadingStructured, setLoadingStructured] = useState(false);
   const [showCandidateSearch, setShowCandidateSearch] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   const userEmail = user?.emailAddresses[0]?.emailAddress;
 
@@ -82,16 +90,14 @@ export default function HitocariPage() {
     }
   };
 
-  // Filter meetings based on search and account filter - Move useMemo before early returns
+  // Filter meetings based on search and account filter
   const filteredMeetings = useMemo(() => {
     let filtered = meetings;
 
-    // Filter by user account if not showing all accounts
     if (!showAllAccounts && userEmail) {
       filtered = filtered.filter(meeting => meeting.organizer_email === userEmail);
     }
 
-    // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(meeting =>
@@ -113,9 +119,7 @@ export default function HitocariPage() {
     const structured: Meeting[] = [];
     const unstructured: Meeting[] = [];
 
-    // This is a simple implementation - in a real app, you'd track which meetings have structured data
     filteredMeetings.forEach(meeting => {
-      // For now, assume meeting has structured data if it has certain metadata
       if (meeting.metadata && Object.keys(meeting.metadata).length > 0) {
         structured.push(meeting);
       } else {
@@ -142,12 +146,11 @@ export default function HitocariPage() {
     }
   }, [isLoaded, userId, user, router]);
 
-  // Load meetings on component mount - Move this before conditional returns
+  // Load meetings on component mount
   useEffect(() => {
     loadMeetings();
   }, []);
 
-  // Show loading state while auth is loading
   if (!isLoaded) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -159,7 +162,6 @@ export default function HitocariPage() {
     );
   }
 
-  // If not authenticated, don't render anything (redirect will happen)
   if (!userId) {
     return null;
   }
@@ -170,7 +172,6 @@ export default function HitocariPage() {
       const accounts = showAllAccounts ? undefined : (userEmail ? [userEmail] : undefined);
       const result = await apiClient.collectMeetings(accounts, false, false);
       
-      // Refresh meetings after collection
       await loadMeetings();
       
       toast.success(`${result.stored}件の議事録を取得しました`);
@@ -187,20 +188,18 @@ export default function HitocariPage() {
     setStructuredData(null);
     setCandidateSuggestions([]);
     setSelectedCandidate(null);
+    setViewMode('detail');
 
-    // Load structured data if exists
     try {
       setLoadingStructured(true);
       const data = await apiClient.getStructuredData(meeting.id);
       if (data && data.data && Object.keys(data.data).length > 0) {
         setStructuredData(data);
       } else {
-        // Generate candidate suggestions for unstructured meetings
         await generateCandidateSuggestions(meeting);
       }
     } catch (error) {
       console.error('Failed to load structured data:', error);
-      // Generate candidate suggestions even if structured data loading fails
       await generateCandidateSuggestions(meeting);
     } finally {
       setLoadingStructured(false);
@@ -217,15 +216,13 @@ export default function HitocariPage() {
       const searchVariations = createCandidateSearchVariations(extractedNames);
       const suggestions: CandidateMatchSuggestion[] = [];
 
-      // Search for candidates using name variations
-      for (const nameVariation of searchVariations.slice(0, 3)) { // Limit searches
+      for (const nameVariation of searchVariations.slice(0, 3)) {
         try {
           const results = await apiClient.searchZohoCandidates(nameVariation, 5);
           
           results.items.forEach(candidate => {
-            // Calculate confidence based on name similarity
             const confidence = calculateNameSimilarity(extractedNames, candidate.candidate_name);
-            if (confidence > 0.3) { // Only include matches with reasonable confidence
+            if (confidence > 0.3) {
               const existingSuggestion = suggestions.find(s => s.candidate.record_id === candidate.record_id);
               if (!existingSuggestion) {
                 suggestions.push({
@@ -241,7 +238,6 @@ export default function HitocariPage() {
         }
       }
 
-      // Sort by confidence and limit results
       suggestions.sort((a, b) => b.confidence - a.confidence);
       setCandidateSuggestions(suggestions.slice(0, 5));
     } catch (error) {
@@ -258,17 +254,14 @@ export default function HitocariPage() {
     for (const extracted of extractedNames) {
       const extractedNormalized = extracted.toLowerCase().replace(/\s+/g, '');
       
-      // Exact match
       if (extractedNormalized === candidateNormalized) {
         return 1.0;
       }
 
-      // Contains match
       if (candidateNormalized.includes(extractedNormalized) || extractedNormalized.includes(candidateNormalized)) {
         maxSimilarity = Math.max(maxSimilarity, 0.8);
       }
 
-      // Character overlap ratio
       const commonChars = extractedNormalized.split('').filter(char => candidateNormalized.includes(char)).length;
       const overlapRatio = commonChars / Math.max(extractedNormalized.length, candidateNormalized.length);
       maxSimilarity = Math.max(maxSimilarity, overlapRatio * 0.6);
@@ -292,10 +285,11 @@ export default function HitocariPage() {
       setStructuredData(result);
       setCandidateSuggestions([]);
       
-      // Refresh meetings to update structured status
       await loadMeetings();
+      toast.success('構造化処理が完了しました');
     } catch (error) {
       console.error('Failed to process structured data:', error);
+      toast.error('構造化処理に失敗しました');
     } finally {
       setProcessing(false);
     }
@@ -310,462 +304,466 @@ export default function HitocariPage() {
     }
   };
 
-  const MeetingCard = ({ meeting, showActions = true }: { meeting: Meeting; showActions?: boolean }) => (
-    <Card 
-      className={`cursor-pointer transition-all duration-200 hover:shadow-md ${
-        selectedMeeting?.id === meeting.id ? 'ring-2 ring-primary' : ''
-      }`}
-      onClick={() => handleMeetingSelect(meeting)}
-    >
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            <CardTitle className="text-base font-medium truncate">
-              {meeting.title || '(無題)'}
-            </CardTitle>
-            <CardDescription className="flex items-center gap-2 mt-1">
-              <User className="w-4 h-4" />
-              {meeting.organizer_email}
-              {meeting.meeting_datetime && (
-                <>
-                  <Clock className="w-4 h-4 ml-2" />
-                  {formatDateTime(meeting.meeting_datetime)}
-                </>
-              )}
-            </CardDescription>
+  const handleBackToList = () => {
+    setViewMode('list');
+    setSelectedMeeting(null);
+    setStructuredData(null);
+    setCandidateSuggestions([]);
+    setSelectedCandidate(null);
+  };
+
+  // List View Component
+  const MeetingsListView = () => (
+    <div className="space-y-6">
+      {/* Header with Actions */}
+      <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">議事録管理</h1>
+          <p className="text-muted-foreground">
+            Google Meet議事録の管理と構造化データ抽出
+          </p>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          <Button
+            onClick={handleCollectMeetings}
+            disabled={collecting}
+            className="flex items-center space-x-2"
+          >
+            {collecting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            <span>{collecting ? "取得中..." : "Google Driveから取得"}</span>
+          </Button>
+          
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={loadMeetings}
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+      </div>
+
+      {/* Search and Filter Controls */}
+      <Card>
+        <CardContent className="p-6">
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="議事録を検索..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+            
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="show-all"
+                checked={showAllAccounts}
+                onChange={(e) => setShowAllAccounts(e.target.checked)}
+                className="rounded"
+              />
+              <Label htmlFor="show-all" className="text-sm">
+                全ての議事録を表示
+              </Label>
+            </div>
           </div>
-          <div className="flex flex-col items-end gap-1">
-            <Badge variant={structuredData ? "default" : "secondary"}>
-              {structuredData ? "構造化済み" : "未処理"}
-            </Badge>
-            {meeting.invited_emails.length > 0 && (
-              <span className="text-xs text-muted-foreground">
-                参加者 {meeting.invited_emails.length}名
-              </span>
+        </CardContent>
+      </Card>
+
+      {/* Statistics */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">総議事録数</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{filteredMeetings.length}</div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">構造化済み</CardTitle>
+            <Sparkles className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{structuredMeetings.length}</div>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">未処理</CardTitle>
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-600">{unstructuredMeetings.length}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Meetings Tabs */}
+      <Tabs defaultValue="all" className="space-y-4">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="all">全て ({filteredMeetings.length})</TabsTrigger>
+          <TabsTrigger value="structured">構造化済み ({structuredMeetings.length})</TabsTrigger>
+          <TabsTrigger value="unstructured">未処理 ({unstructuredMeetings.length})</TabsTrigger>
+        </TabsList>
+        
+        <TabsContent value="all" className="space-y-4">
+          <MeetingsList meetings={filteredMeetings} />
+        </TabsContent>
+        
+        <TabsContent value="structured" className="space-y-4">
+          <MeetingsList meetings={structuredMeetings} />
+        </TabsContent>
+        
+        <TabsContent value="unstructured" className="space-y-4">
+          <MeetingsList meetings={unstructuredMeetings} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+
+  // Meetings List Component
+  const MeetingsList = ({ meetings }: { meetings: Meeting[] }) => {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground">読み込み中...</p>
+          </div>
+        </div>
+      );
+    }
+
+    if (meetings.length === 0) {
+      return (
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <FileText className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium text-muted-foreground mb-2">議事録が見つかりません</h3>
+            <p className="text-sm text-muted-foreground mb-4">Google Driveから議事録を取得してください</p>
+            <Button onClick={handleCollectMeetings} disabled={collecting}>
+              {collecting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+              {collecting ? "取得中..." : "Google Driveから取得"}
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="space-y-3">
+        {meetings.map((meeting) => (
+          <Card key={meeting.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => handleMeetingSelect(meeting)}>
+            <CardContent className="p-6">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex items-center space-x-2">
+                    <h3 className="text-lg font-medium truncate">
+                      {meeting.title || '(無題)'}
+                    </h3>
+                    <Badge variant={structuredMeetings.some(m => m.id === meeting.id) ? "default" : "secondary"}>
+                      {structuredMeetings.some(m => m.id === meeting.id) ? "構造化済み" : "未処理"}
+                    </Badge>
+                  </div>
+                  
+                  <div className="flex items-center space-x-4 text-sm text-muted-foreground">
+                    <div className="flex items-center space-x-1">
+                      <User className="h-4 w-4" />
+                      <span>{meeting.organizer_email}</span>
+                    </div>
+                    {meeting.meeting_datetime && (
+                      <div className="flex items-center space-x-1">
+                        <Clock className="h-4 w-4" />
+                        <span>{formatDateTime(meeting.meeting_datetime)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center space-x-1">
+                      <Users className="h-4 w-4" />
+                      <span>{meeting.invited_emails.length}名参加</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <ChevronRight className="h-5 w-5 text-muted-foreground ml-4" />
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+
+  // Detail View Component
+  const MeetingDetailView = () => {
+    if (!selectedMeeting) return null;
+
+    return (
+      <div className="space-y-6">
+        {/* Header with Back Button */}
+        <div className="flex items-center space-x-4">
+          <Button variant="ghost" size="sm" onClick={handleBackToList}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            議事録一覧に戻る
+          </Button>
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold truncate">{selectedMeeting.title || '(無題)'}</h1>
+            <p className="text-muted-foreground">議事録の詳細情報と構造化処理</p>
+          </div>
+        </div>
+
+        {/* Meeting Header Info */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between">
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2">
+                  <Badge variant={structuredData ? "default" : "secondary"}>
+                    {structuredData ? "構造化済み" : "未処理"}
+                  </Badge>
+                  {selectedMeeting.document_url && (
+                    <Button asChild variant="outline" size="sm">
+                      <a href={selectedMeeting.document_url} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-4 w-4 mr-2" />
+                        ドキュメント
+                      </a>
+                    </Button>
+                  )}
+                </div>
+                
+                <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+                  <div className="flex items-center space-x-1">
+                    <Mail className="h-4 w-4" />
+                    <span>{selectedMeeting.organizer_email}</span>
+                  </div>
+                  {selectedMeeting.meeting_datetime && (
+                    <div className="flex items-center space-x-1">
+                      <Calendar className="h-4 w-4" />
+                      <span>{formatDateTime(selectedMeeting.meeting_datetime)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </CardHeader>
+          
+          {selectedMeeting.invited_emails.length > 0 && (
+            <CardContent className="pt-0">
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">参加者 ({selectedMeeting.invited_emails.length}名)</Label>
+                <div className="flex flex-wrap gap-2">
+                  {selectedMeeting.invited_emails.map((email, index) => (
+                    <Badge key={index} variant="outline">
+                      {email}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+
+        {/* Content Area */}
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Processing Section */}
+          <div className="space-y-6">
+            {loadingStructured ? (
+              <Card>
+                <CardContent className="flex items-center justify-center py-12">
+                  <div className="text-center">
+                    <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+                    <p className="text-muted-foreground">構造化データを確認中...</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? (
+              <StructuredDataCard data={structuredData} />
+            ) : (
+              <CandidateSelectionCard />
+            )}
+          </div>
+
+          {/* Preview Section */}
+          <div className="space-y-6">
+            {selectedMeeting.text_content && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Eye className="h-5 w-5" />
+                    <span>議事録プレビュー</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-96 w-full rounded-md border p-4">
+                    <pre className="whitespace-pre-wrap text-sm">
+                      {selectedMeeting.text_content}
+                    </pre>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
             )}
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const StructuredDataCard = ({ data }: { data: StructuredData }) => (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <Sparkles className="h-5 w-5 text-green-600" />
+          <span>構造化出力</span>
+        </CardTitle>
+        <CardDescription>
+          AI による議事録の構造化データ抽出結果
+        </CardDescription>
       </CardHeader>
-      
-      {showActions && meeting.invited_emails.length > 0 && (
-        <CardContent className="pt-0">
-          <div className="flex flex-wrap gap-1">
-            {meeting.invited_emails.slice(0, 3).map((email, index) => (
-              <Badge key={index} variant="outline" className="text-xs">
-                {email.split('@')[0]}
-              </Badge>
-            ))}
-            {meeting.invited_emails.length > 3 && (
-              <Badge variant="outline" className="text-xs">
-                +{meeting.invited_emails.length - 3}
-              </Badge>
-            )}
+      <CardContent className="space-y-4">
+        {data.zoho_candidate && (
+          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
+            <h4 className="font-medium mb-2 text-green-800">対応求職者</h4>
+            <div className="text-sm space-y-1">
+              <div><strong>名前:</strong> {data.zoho_candidate.candidate_name}</div>
+              <div><strong>ID:</strong> {data.zoho_candidate.candidate_id}</div>
+              {data.zoho_candidate.candidate_email && (
+                <div><strong>メール:</strong> {data.zoho_candidate.candidate_email}</div>
+              )}
+            </div>
           </div>
-        </CardContent>
-      )}
+        )}
+        
+        <div className="space-y-3">
+          {Object.entries(data.data).map(([key, value]) => (
+            <div key={key} className="flex flex-col space-y-1 pb-3 border-b">
+              <div className="text-sm font-medium text-muted-foreground">
+                {key.replace(/_/g, ' ')}
+              </div>
+              <div className="text-sm">
+                {Array.isArray(value) ? value.join(', ') : String(value || '-')}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  const CandidateSelectionCard = () => (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center space-x-2">
+          <UserCheck className="h-5 w-5" />
+          <span>求職者の選択</span>
+        </CardTitle>
+        <CardDescription>
+          構造化処理を行う前に、対応する求職者を選択してください
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Candidate Suggestions */}
+        {candidateSuggestions.length > 0 && (
+          <div className="space-y-3">
+            <Label className="text-sm font-medium">会議名から推測された候補者</Label>
+            <div className="space-y-2">
+              {candidateSuggestions.map((suggestion) => (
+                <Card 
+                  key={suggestion.candidate.record_id}
+                  className={`cursor-pointer transition-all ${
+                    selectedCandidate?.record_id === suggestion.candidate.record_id 
+                      ? 'ring-2 ring-primary bg-primary/5' 
+                      : 'hover:bg-muted/50'
+                  }`}
+                  onClick={() => setSelectedCandidate(suggestion.candidate)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-medium">{suggestion.candidate.candidate_name}</div>
+                        <div className="text-sm text-muted-foreground">
+                          ID: {suggestion.candidate.candidate_id}
+                        </div>
+                      </div>
+                      <Badge variant={suggestion.confidence > 0.7 ? "default" : "secondary"}>
+                        {Math.round(suggestion.confidence * 100)}% 一致
+                      </Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Manual Search */}
+        <div className="space-y-3">
+          <Label className="text-sm font-medium">手動で候補者を検索</Label>
+          <Button 
+            variant="outline" 
+            onClick={() => setShowCandidateSearch(true)}
+            className="w-full"
+          >
+            <Search className="h-4 w-4 mr-2" />
+            Zoho CRM で候補者を検索
+          </Button>
+          {selectedCandidate && !candidateSuggestions.some(s => s.candidate.record_id === selectedCandidate.record_id) && (
+            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
+              <div className="text-sm font-medium text-green-800">
+                手動選択: {selectedCandidate.candidate_name}
+              </div>
+              <div className="text-xs text-green-700 mt-1">
+                ID: {selectedCandidate.candidate_id}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Action Button */}
+        <Separator />
+        <Button 
+          onClick={handleProcessStructured}
+          disabled={!selectedCandidate || processing}
+          className="w-full"
+          size="lg"
+        >
+          {processing ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              構造化処理中...
+            </>
+          ) : selectedCandidate ? (
+            <>
+              <Sparkles className="h-4 w-4 mr-2" />
+              {selectedCandidate.candidate_name} で構造化処理を実行
+            </>
+          ) : (
+            <>
+              <AlertCircle className="h-4 w-4 mr-2" />
+              候補者を選択してください
+            </>
+          )}
+        </Button>
+      </CardContent>
     </Card>
   );
 
   return (
     <ModernAppShell activeTab="hitocari">
-      <div className="container mx-auto px-6 py-8">
-        {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-2xl font-bold">ひとキャリ 議事録管理</h1>
-            <p className="text-muted-foreground">
-              Google Meet議事録の管理と構造化データ抽出
-            </p>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row gap-3">
-            <Button
-              onClick={handleCollectMeetings}
-              disabled={collecting}
-              className="flex items-center gap-2"
-            >
-              {collecting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Download className="w-4 h-4" />
-              )}
-              {collecting ? "取得中..." : "Google Driveから取得"}
-            </Button>
-            
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={loadMeetings}
-                disabled={loading}
-              >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              </Button>
-              <Button variant="outline" size="icon" disabled>
-                <Settings className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Left Panel - Meeting List */}
-          <div className="lg:col-span-1">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="w-5 h-5" />
-                    議事録一覧
-                  </CardTitle>
-                  <Badge variant="secondary">
-                    {filteredMeetings.length}件
-                  </Badge>
-                </div>
-                <CardDescription>
-                  {showAllAccounts ? "全アカウント" : "自分のアカウント"}の議事録
-                </CardDescription>
-              </CardHeader>
-              
-              <CardContent className="space-y-4">
-                {/* Search and Filter Controls */}
-                <div className="space-y-3">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      placeholder="議事録を検索..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="show-all"
-                      checked={showAllAccounts}
-                      onChange={(e) => setShowAllAccounts(e.target.checked)}
-                      className="rounded"
-                    />
-                    <Label htmlFor="show-all" className="text-sm">
-                      全ての議事録を表示
-                    </Label>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Meeting List Tabs */}
-                <Tabs defaultValue="all" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="all" className="text-xs">
-                      全て ({filteredMeetings.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="structured" className="text-xs">
-                      構造化済み ({structuredMeetings.length})
-                    </TabsTrigger>
-                    <TabsTrigger value="unstructured" className="text-xs">
-                      未処理 ({unstructuredMeetings.length})
-                    </TabsTrigger>
-                  </TabsList>
-                  
-                  <div className="mt-4 max-h-[600px] overflow-y-auto space-y-3">
-                    <TabsContent value="all" className="space-y-3 mt-0">
-                      {loading ? (
-                        <div className="flex items-center justify-center py-8">
-                          <Loader2 className="w-6 h-6 animate-spin" />
-                          <span className="ml-2">読み込み中...</span>
-                        </div>
-                      ) : filteredMeetings.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground">
-                          <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                          <p>議事録が見つかりません</p>
-                          <p className="text-sm">Google Driveから取得してください</p>
-                        </div>
-                      ) : (
-                        filteredMeetings.map((meeting) => (
-                          <MeetingCard key={meeting.id} meeting={meeting} />
-                        ))
-                      )}
-                    </TabsContent>
-                    
-                    <TabsContent value="structured" className="space-y-3 mt-0">
-                      {structuredMeetings.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground">
-                          <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                          <p>構造化済み議事録がありません</p>
-                        </div>
-                      ) : (
-                        structuredMeetings.map((meeting) => (
-                          <MeetingCard key={meeting.id} meeting={meeting} />
-                        ))
-                      )}
-                    </TabsContent>
-                    
-                    <TabsContent value="unstructured" className="space-y-3 mt-0">
-                      {unstructuredMeetings.length === 0 ? (
-                        <div className="text-center py-8 text-muted-foreground">
-                          <UserCheck className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                          <p>未処理の議事録がありません</p>
-                        </div>
-                      ) : (
-                        unstructuredMeetings.map((meeting) => (
-                          <MeetingCard key={meeting.id} meeting={meeting} />
-                        ))
-                      )}
-                    </TabsContent>
-                  </div>
-                </Tabs>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Right Panel - Meeting Detail */}
-          <div className="lg:col-span-2">
-            {selectedMeeting ? (
-              <div className="space-y-6">
-                {/* Meeting Header */}
-                <Card>
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <CardTitle className="text-xl mb-2">
-                          {selectedMeeting.title || '(無題)'}
-                        </CardTitle>
-                        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                          <div className="flex items-center gap-1">
-                            <Calendar className="w-4 h-4" />
-                            {selectedMeeting.meeting_datetime 
-                              ? formatDateTime(selectedMeeting.meeting_datetime)
-                              : '日時不明'
-                            }
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Mail className="w-4 h-4" />
-                            {selectedMeeting.organizer_email}
-                          </div>
-                          {selectedMeeting.document_url && (
-                            <Button asChild variant="outline" size="sm">
-                              <a 
-                                href={selectedMeeting.document_url} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="flex items-center gap-1"
-                              >
-                                <ExternalLink className="w-4 h-4" />
-                                ドキュメント
-                              </a>
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  
-                  {selectedMeeting.invited_emails.length > 0 && (
-                    <CardContent>
-                      <Label className="text-sm font-medium">参加者</Label>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {selectedMeeting.invited_emails.map((email, index) => (
-                          <Badge key={index} variant="outline">
-                            {email}
-                          </Badge>
-                        ))}
-                      </div>
-                    </CardContent>
-                  )}
-                </Card>
-
-                {/* Structured Data or Candidate Selection */}
-                {loadingStructured ? (
-                  <Card>
-                    <CardContent className="flex items-center justify-center py-12">
-                      <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                      構造化データを確認中...
-                    </CardContent>
-                  </Card>
-                ) : structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? (
-                  /* Structured Data Display */
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Sparkles className="w-5 h-5 text-green-600" />
-                        構造化出力
-                      </CardTitle>
-                      <CardDescription>
-                        AI による議事録の構造化データ抽出結果
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {structuredData.zoho_candidate && (
-                        <div className="mb-4 p-4 bg-muted rounded-lg">
-                          <h4 className="font-medium mb-2">対応求職者</h4>
-                          <div className="text-sm space-y-1">
-                            <div><strong>名前:</strong> {structuredData.zoho_candidate.candidate_name}</div>
-                            <div><strong>ID:</strong> {structuredData.zoho_candidate.candidate_id}</div>
-                            {structuredData.zoho_candidate.candidate_email && (
-                              <div><strong>メール:</strong> {structuredData.zoho_candidate.candidate_email}</div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      
-                      <div className="space-y-4">
-                        {Object.entries(structuredData.data).map(([key, value]) => (
-                          <div key={key} className="grid grid-cols-3 gap-4 py-2 border-b">
-                            <div className="text-sm font-medium text-muted-foreground">
-                              {key.replace(/_/g, ' ')}
-                            </div>
-                            <div className="col-span-2 text-sm">
-                              {Array.isArray(value) ? value.join(', ') : String(value || '-')}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  /* Candidate Selection for Unstructured Data */
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <UserCheck className="w-5 h-5" />
-                        求職者の選択
-                      </CardTitle>
-                      <CardDescription>
-                        構造化処理を行う前に、対応する求職者を選択してください
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6">
-                      {/* Candidate Suggestions */}
-                      {candidateSuggestions.length > 0 && (
-                        <div>
-                          <Label className="text-sm font-medium mb-3 block">
-                            会議名から推測された候補者
-                          </Label>
-                          <div className="space-y-2">
-                            {candidateSuggestions.map((suggestion) => (
-                              <Card 
-                                key={suggestion.candidate.record_id}
-                                className={`cursor-pointer transition-colors ${
-                                  selectedCandidate?.record_id === suggestion.candidate.record_id 
-                                    ? 'ring-2 ring-primary bg-primary/5' 
-                                    : 'hover:bg-muted/50'
-                                }`}
-                                onClick={() => setSelectedCandidate(suggestion.candidate)}
-                              >
-                                <CardContent className="p-3">
-                                  <div className="flex items-center justify-between">
-                                    <div>
-                                      <div className="font-medium">
-                                        {suggestion.candidate.candidate_name}
-                                      </div>
-                                      <div className="text-sm text-muted-foreground">
-                                        ID: {suggestion.candidate.candidate_id}
-                                      </div>
-                                    </div>
-                                    <div className="text-right">
-                                      <Badge 
-                                        variant={suggestion.confidence > 0.7 ? "default" : "secondary"}
-                                      >
-                                        {Math.round(suggestion.confidence * 100)}% 一致
-                                      </Badge>
-                                    </div>
-                                  </div>
-                                </CardContent>
-                              </Card>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Manual Search */}
-                      <div>
-                        <Label className="text-sm font-medium mb-3 block">
-                          手動で候補者を検索
-                        </Label>
-                        <Button 
-                          variant="outline" 
-                          onClick={() => setShowCandidateSearch(true)}
-                          className="w-full"
-                        >
-                          <Search className="w-4 h-4 mr-2" />
-                          Zoho CRM で候補者を検索
-                        </Button>
-                        {selectedCandidate && !candidateSuggestions.some(s => s.candidate.record_id === selectedCandidate.record_id) && (
-                          <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-                            <div className="text-sm font-medium text-green-800">
-                              手動選択: {selectedCandidate.candidate_name}
-                            </div>
-                            <div className="text-xs text-green-700 mt-1">
-                              ID: {selectedCandidate.candidate_id}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Action Button */}
-                      <div className="pt-4 border-t">
-                        <Button 
-                          onClick={handleProcessStructured}
-                          disabled={!selectedCandidate || processing}
-                          className="w-full"
-                        >
-                          {processing ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              構造化処理中...
-                            </>
-                          ) : selectedCandidate ? (
-                            <>
-                              <Sparkles className="w-4 h-4 mr-2" />
-                              {selectedCandidate.candidate_name} で構造化処理を実行
-                            </>
-                          ) : (
-                            <>
-                              <AlertCircle className="w-4 h-4 mr-2" />
-                              候補者を選択してください
-                            </>
-                          )}
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Meeting Content Preview */}
-                {selectedMeeting.text_content && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Eye className="w-5 h-5" />
-                        議事録プレビュー
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="bg-muted/30 rounded-lg p-4 max-h-80 overflow-y-auto">
-                        <pre className="whitespace-pre-wrap text-sm text-foreground">
-                          {selectedMeeting.text_content.substring(0, 1000)}
-                          {selectedMeeting.text_content.length > 1000 && '...'}
-                        </pre>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            ) : (
-              /* No meeting selected */
-              <Card className="h-96 flex items-center justify-center">
-                <div className="text-center text-muted-foreground">
-                  <FileText className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                  <h3 className="text-lg font-medium mb-2">議事録を選択</h3>
-                  <p>左側から議事録を選択して詳細を表示します</p>
-                </div>
-              </Card>
-            )}
-          </div>
-        </div>
+      <div className="container mx-auto px-4 py-6 max-w-7xl">
+        {viewMode === 'list' ? <MeetingsListView /> : <MeetingDetailView />}
       </div>
 
       {/* Candidate Search Dialog */}
