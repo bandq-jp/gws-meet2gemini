@@ -1,9 +1,5 @@
 "use client";
 
-import { useAuth, useUser } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { ModernAppShell } from "@/components/modern-app-shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,44 +16,8 @@ import {
 import Link from "next/link";
 
 export default function Dashboard() {
-  const { isLoaded, userId } = useAuth();
-  const { user } = useUser();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (isLoaded && !userId) {
-      router.push('/sign-in');
-      return;
-    }
-
-    if (isLoaded && user && userId) {
-      const userEmail = user.emailAddresses[0]?.emailAddress;
-      if (userEmail && !userEmail.endsWith('@bandq.jp')) {
-        router.push('/unauthorized');
-        return;
-      }
-    }
-  }, [isLoaded, userId, user, router]);
-
-  // Show loading state while auth is loading
-  if (!isLoaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-2 text-muted-foreground">読み込み中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // If not authenticated, don't render anything (redirect will happen)
-  if (!userId) {
-    return null;
-  }
-
   return (
-    <ModernAppShell activeTab="dashboard">
+    <>
       <div className="container mx-auto px-6 py-8">
         {/* Welcome Section */}
         <div className="mb-8">
@@ -218,6 +178,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-    </ModernAppShell>
+    </>
   );
 }

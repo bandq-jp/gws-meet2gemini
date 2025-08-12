@@ -1,0 +1,76 @@
+"use client";
+
+import { useAuth, useUser } from "@clerk/nextjs";
+import { useRouter, usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { 
+  SidebarProvider, 
+  SidebarInset, 
+  SidebarTrigger 
+} from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
+
+interface SidebarLayoutProps {
+  children: React.ReactNode;
+}
+
+export function SidebarLayout({ children }: SidebarLayoutProps) {
+  const { isLoaded, userId } = useAuth();
+  const { user } = useUser();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Skip authentication check for sign-in, sign-up, and unauthorized pages
+  const isAuthPage = pathname?.startsWith('/sign-') || pathname === '/unauthorized';
+
+  useEffect(() => {
+    if (!isAuthPage && isLoaded && !userId) {
+      router.push('/sign-in');
+      return;
+    }
+
+    if (!isAuthPage && isLoaded && user && userId) {
+      const userEmail = user.emailAddresses[0]?.emailAddress;
+      if (userEmail && !userEmail.endsWith('@bandq.jp')) {
+        router.push('/unauthorized');
+        return;
+      }
+    }
+  }, [isLoaded, userId, user, router, isAuthPage]);
+
+  // Show loading state while auth is loading
+  if (!isAuthPage && !isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="mt-2 text-muted-foreground">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If not authenticated and not on auth page, don't render anything (redirect will happen)
+  if (!isAuthPage && !userId) {
+    return null;
+  }
+
+  // For auth pages, don't show sidebar
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
+
+  return (
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 bg-background/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur">
+          <SidebarTrigger className="-ml-1" />
+        </header>
+        <div className="flex flex-1 flex-col gap-4 p-4">
+          {children}
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}

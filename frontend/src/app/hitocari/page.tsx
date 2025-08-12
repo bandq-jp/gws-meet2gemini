@@ -1,23 +1,18 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useAuth, useUser } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
-import { ModernAppShell } from "@/components/modern-app-shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CandidateSearchDialog } from "@/components/candidate-search-dialog";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Download,
   Search,
-  Filter,
   RefreshCw,
   FileText,
   Clock,
@@ -30,10 +25,8 @@ import {
   AlertCircle,
   Loader2,
   Eye,
-  Settings,
   ArrowLeft,
   Users,
-  Building,
   ChevronRight,
 } from "lucide-react";
 import { 
@@ -57,9 +50,6 @@ interface CandidateMatchSuggestion {
 type ViewMode = 'list' | 'detail';
 
 export default function EnhancedHitocariPage() {
-  const { isLoaded, userId } = useAuth();
-  const { user } = useUser();
-  const router = useRouter();
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
@@ -74,7 +64,7 @@ export default function EnhancedHitocariPage() {
   const [showCandidateSearch, setShowCandidateSearch] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
-  const userEmail = user?.emailAddresses[0]?.emailAddress;
+  const userEmail = 'demo@bandq.jp'; // プレースホルダー
 
   // Define loadMeetings function before it's used in useEffect
   const loadMeetings = async () => {
@@ -82,9 +72,10 @@ export default function EnhancedHitocariPage() {
       setLoading(true);
       const data = await apiClient.getMeetings();
       setMeetings(data);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to load meetings:', error);
-      toast.error(`議事録の読み込みに失敗しました: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : '不明なエラー';
+      toast.error(`議事録の読み込みに失敗しました: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
@@ -130,41 +121,10 @@ export default function EnhancedHitocariPage() {
     return { structuredMeetings: structured, unstructuredMeetings: unstructured };
   }, [filteredMeetings]);
 
-  // Auth protection
-  useEffect(() => {
-    if (isLoaded && !userId) {
-      router.push('/sign-in');
-      return;
-    }
-
-    if (isLoaded && user && userId) {
-      const userEmail = user.emailAddresses[0]?.emailAddress;
-      if (userEmail && !userEmail.endsWith('@bandq.jp')) {
-        router.push('/unauthorized');
-        return;
-      }
-    }
-  }, [isLoaded, userId, user, router]);
-
   // Load meetings on component mount
   useEffect(() => {
     loadMeetings();
   }, []);
-
-  if (!isLoaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-2 text-muted-foreground">読み込み中...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!userId) {
-    return null;
-  }
 
   const handleCollectMeetings = async () => {
     try {
@@ -175,9 +135,10 @@ export default function EnhancedHitocariPage() {
       await loadMeetings();
       
       toast.success(`${result.stored}件の議事録を取得しました`);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Failed to collect meetings:', error);
-      toast.error(`議事録の取得に失敗しました: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : '不明なエラー';
+      toast.error(`議事録の取得に失敗しました: ${errorMessage}`);
     } finally {
       setCollecting(false);
     }
@@ -729,7 +690,7 @@ export default function EnhancedHitocariPage() {
   );
 
   return (
-    <ModernAppShell activeTab="hitocari">
+    <>
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         {viewMode === 'list' ? <MeetingsListView /> : <MeetingDetailView />}
       </div>
@@ -741,6 +702,6 @@ export default function EnhancedHitocariPage() {
         onCandidateSelect={setSelectedCandidate}
         selectedCandidate={selectedCandidate}
       />
-    </ModernAppShell>
+    </>
   );
 }
