@@ -430,18 +430,18 @@ export default function EnhancedHitocariPage() {
                     </Badge>
                   </div>
                   
-                  <div className="flex items-center space-x-4 text-sm text-muted-foreground">
-                    <div className="flex items-center space-x-1">
-                      <User className="h-4 w-4" />
-                      <span>{meeting.organizer_email}</span>
+                  <div className="flex items-center space-x-4 text-sm text-muted-foreground overflow-hidden">
+                    <div className="flex items-center space-x-1 min-w-0">
+                      <User className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{meeting.organizer_email}</span>
                     </div>
                     {meeting.meeting_datetime && (
-                      <div className="flex items-center space-x-1">
+                      <div className="flex items-center space-x-1 shrink-0">
                         <Clock className="h-4 w-4" />
                         <span>{formatDateTime(meeting.meeting_datetime)}</span>
                       </div>
                     )}
-                    <div className="flex items-center space-x-1">
+                    <div className="flex items-center space-x-1 shrink-0">
                       <Users className="h-4 w-4" />
                       <span>{meeting.invited_emails.length}名参加</span>
                     </div>
@@ -464,14 +464,14 @@ export default function EnhancedHitocariPage() {
     return (
       <div className="space-y-6">
         {/* Header with Back Button */}
-        <div className="flex items-center space-x-4">
-          <Button variant="ghost" size="sm" onClick={handleBackToList}>
+        <div className="flex items-center space-x-4 min-w-0">
+          <Button variant="ghost" size="sm" onClick={handleBackToList} className="shrink-0">
             <ArrowLeft className="h-4 w-4 mr-2" />
             議事録一覧に戻る
           </Button>
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold truncate">{selectedMeeting.title || '(無題)'}</h1>
-            <p className="text-muted-foreground">議事録の詳細情報と構造化処理</p>
+            <p className="text-muted-foreground truncate">議事録の詳細情報と構造化処理</p>
           </div>
         </div>
 
@@ -495,12 +495,12 @@ export default function EnhancedHitocariPage() {
                 </div>
                 
                 <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
-                  <div className="flex items-center space-x-1">
-                    <Mail className="h-4 w-4" />
-                    <span>{selectedMeeting.organizer_email}</span>
+                  <div className="flex items-center space-x-1 min-w-0">
+                    <Mail className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{selectedMeeting.organizer_email}</span>
                   </div>
                   {selectedMeeting.meeting_datetime && (
-                    <div className="flex items-center space-x-1">
+                    <div className="flex items-center space-x-1 shrink-0">
                       <Calendar className="h-4 w-4" />
                       <span>{formatDateTime(selectedMeeting.meeting_datetime)}</span>
                     </div>
@@ -516,8 +516,8 @@ export default function EnhancedHitocariPage() {
                 <Label className="text-sm font-medium">参加者 ({selectedMeeting.invited_emails.length}名)</Label>
                 <div className="flex flex-wrap gap-2">
                   {selectedMeeting.invited_emails.map((email, index) => (
-                    <Badge key={index} variant="outline">
-                      {email}
+                    <Badge key={index} variant="outline" className="max-w-xs">
+                      <span className="truncate">{email}</span>
                     </Badge>
                   ))}
                 </div>
@@ -527,9 +527,9 @@ export default function EnhancedHitocariPage() {
         </Card>
 
         {/* Content Area */}
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 xl:grid-cols-2">
           {/* Processing Section */}
-          <div className="space-y-6">
+          <div className="space-y-6 min-w-0">
             {loadingStructured ? (
               <Card>
                 <CardContent className="flex items-center justify-center py-12">
@@ -547,7 +547,7 @@ export default function EnhancedHitocariPage() {
           </div>
 
           {/* Preview Section */}
-          <div className="space-y-6">
+          <div className="space-y-6 min-w-0">
             {selectedMeeting.text_content && (
               <Card>
                 <CardHeader>
@@ -558,7 +558,7 @@ export default function EnhancedHitocariPage() {
                 </CardHeader>
                 <CardContent>
                   <ScrollArea className="h-96 w-full rounded-md border p-4">
-                    <pre className="whitespace-pre-wrap text-sm">
+                    <pre className="whitespace-pre-wrap text-sm break-words overflow-hidden">
                       {selectedMeeting.text_content}
                     </pre>
                   </ScrollArea>
@@ -602,7 +602,7 @@ export default function EnhancedHitocariPage() {
               <div className="text-sm font-medium text-muted-foreground">
                 {key.replace(/_/g, ' ')}
               </div>
-              <div className="text-sm">
+              <div className="text-sm break-words overflow-hidden">
                 {Array.isArray(value) ? value.join(', ') : String(value || '-')}
               </div>
             </div>
@@ -640,14 +640,14 @@ export default function EnhancedHitocariPage() {
                   onClick={() => setSelectedCandidate(suggestion.candidate)}
                 >
                   <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-medium">{suggestion.candidate.candidate_name}</div>
-                        <div className="text-sm text-muted-foreground">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium truncate">{suggestion.candidate.candidate_name}</div>
+                        <div className="text-sm text-muted-foreground truncate">
                           ID: {suggestion.candidate.candidate_id}
                         </div>
                       </div>
-                      <Badge variant={suggestion.confidence > 0.7 ? "default" : "secondary"}>
+                      <Badge variant={suggestion.confidence > 0.7 ? "default" : "secondary"} className="shrink-0">
                         {Math.round(suggestion.confidence * 100)}% 一致
                       </Badge>
                     </div>
@@ -671,10 +671,10 @@ export default function EnhancedHitocariPage() {
           </Button>
           {selectedCandidate && !candidateSuggestions.some(s => s.candidate.record_id === selectedCandidate.record_id) && (
             <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="text-sm font-medium text-green-800">
+              <div className="text-sm font-medium text-green-800 truncate">
                 手動選択: {selectedCandidate.candidate_name}
               </div>
-              <div className="text-xs text-green-700 mt-1">
+              <div className="text-xs text-green-700 mt-1 truncate">
                 ID: {selectedCandidate.candidate_id}
               </div>
             </div>
@@ -712,7 +712,7 @@ export default function EnhancedHitocariPage() {
 
   return (
     <>
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
+      <div className="w-full px-6 py-6">
         {viewMode === 'list' ? <MeetingsListView /> : <MeetingDetailView />}
       </div>
 
