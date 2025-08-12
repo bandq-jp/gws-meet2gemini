@@ -2,6 +2,7 @@
 
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
+import { useState, useEffect } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -22,6 +23,8 @@ import {
   Award,
   User,
   LogOut,
+  ChevronDown,
+  ChevronsLeftRight,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -39,31 +42,51 @@ export function AppSidebar() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const menuItems = [
+  const teamItems = [
     {
-      title: "ひとキャリ",
-      icon: Users,
+      name: "ひとキャリ",
       href: "/hitocari",
       id: "hitocari",
       enabled: true,
-      description: "人材採用・議事録管理",
+      icon: Users,
     },
     {
-      title: "モノテック",
-      icon: Building2,
-      href: "/monotech",
+      name: "モノテック",
+      href: "/monotech", 
       id: "monotech",
       enabled: false,
-      description: "技術・製品管理（開発中）",
+      icon: Building2,
     },
     {
-      title: "AchieveHR",
-      icon: Award,
-      href: "/achievehr", 
-      id: "achievehr",
+      name: "AchieveHR",
+      href: "/achievehr",
+      id: "achievehr", 
       enabled: false,
-      description: "人事評価システム（開発中）",
+      icon: Award,
     },
+  ];
+
+  // 現在のパスに基づいてアクティブなチームを決定
+  const getCurrentTeam = () => {
+    return teamItems.find(team => pathname?.startsWith(team.href)) || teamItems[0];
+  };
+
+  const [activeTeam, setActiveTeam] = useState(getCurrentTeam());
+
+  // パスが変更されたときにアクティブなチームを更新
+  useEffect(() => {
+    const currentTeam = getCurrentTeam();
+    setActiveTeam(currentTeam);
+  }, [pathname]);
+
+  const handleTeamSelect = (team: typeof teamItems[0]) => {
+    if (team.enabled) {
+      setActiveTeam(team);
+      router.push(team.href);
+    }
+  };
+
+  const menuItems = [
     {
       title: "分析",
       icon: BarChart3,
@@ -85,19 +108,58 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar variant="inset">
+    <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
-        <div className="flex items-center gap-2 px-4 py-2">
-          <div className="flex aspect-square size-8 items-center justify-center rounded-lg text-primary-foreground bg-[linear-gradient(135deg,var(--brand-300),var(--brand-400))]">
-            <Building2 className="size-4" />
-          </div>
-          <div className="grid flex-1 text-left text-sm leading-tight">
-            <span className="truncate font-semibold">b&q Hub</span>
-            <span className="truncate text-xs text-muted-foreground">
-              統合管理システム
-            </span>
-          </div>
-        </div>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SidebarMenuButton
+                  size="lg"
+                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                >
+                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg text-primary-foreground bg-[linear-gradient(135deg,var(--brand-300),var(--brand-400))]">
+                    <Building2 className="size-4" />
+                  </div>
+                  <div className="grid flex-1 text-left text-sm leading-tight">
+                    <span className="truncate font-semibold">b&q Hub</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {activeTeam.name}
+                    </span>
+                  </div>
+                  <ChevronDown className="ml-auto" />
+                </SidebarMenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg"
+                align="start"
+                side="bottom"
+                sideOffset={4}
+              >
+                {teamItems.map((team) => (
+                  <DropdownMenuItem
+                    key={team.id}
+                    onClick={() => handleTeamSelect(team)}
+                    className={`gap-2 ${
+                      !team.enabled
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'cursor-pointer'
+                    }`}
+                    disabled={!team.enabled}
+                  >
+                    <team.icon className="size-4" />
+                    <div className="flex-1">
+                      <div className="font-medium">{team.name}</div>
+                      {!team.enabled && (
+                        <div className="text-xs text-muted-foreground">開発中</div>
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       
       <SidebarContent>
