@@ -100,7 +100,7 @@ export function ModernAppShell({ children, activeTab }: ModernAppShellProps) {
         <Sidebar variant="inset">
           <SidebarHeader className="border-b border-sidebar-border">
             <div className="flex items-center gap-2 px-4 py-2">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg text-primary-foreground bg-[linear-gradient(135deg,var(--brand-300),var(--brand-400))]">
                 <Building2 className="size-4" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
@@ -232,7 +232,7 @@ export function ModernAppShell({ children, activeTab }: ModernAppShellProps) {
         </Sidebar>
         
         <SidebarInset>
-          <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
+          <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 bg-background/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur">
             <SidebarTrigger className="-ml-1" />
             <div className="mx-auto">
               <h1 className="text-lg font-semibold">

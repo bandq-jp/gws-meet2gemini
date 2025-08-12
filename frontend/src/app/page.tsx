@@ -70,13 +70,13 @@ export default function Dashboard() {
         {/* Service Cards */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 mb-8">
           {/* ひとキャリ Card */}
-          <Card className="relative overflow-hidden border-2 border-primary/20 bg-gradient-to-br from-blue-50 to-indigo-50">
+          <Card className="relative overflow-hidden border-2 border-primary/10 bg-gradient-to-br from-[#a3d8e2]/40 via-[#79c5d8]/20 to-transparent">
             <CardHeader className="pb-2">
               <div className="flex items-center gap-2">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <Users className="w-6 h-6 text-primary" />
+                <div className="p-2 rounded-lg text-primary-foreground bg-[linear-gradient(135deg,var(--brand-300),var(--brand-400))]">
+                  <Users className="w-6 h-6" />
                 </div>
-                <Badge variant="default" className="bg-primary">
+                <Badge variant="default">
                   利用可能
                 </Badge>
               </div>
