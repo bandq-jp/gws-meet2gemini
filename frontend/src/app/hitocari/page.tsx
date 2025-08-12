@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { AppShell } from "@/components/app-shell";
+import { ModernAppShell } from "@/components/modern-app-shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -367,7 +367,7 @@ export default function HitocariPage() {
   );
 
   return (
-    <AppShell activeTab="hitocari">
+    <ModernAppShell activeTab="hitocari">
       <div className="container mx-auto px-6 py-8">
         {/* Header */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-8">
@@ -775,6 +775,6 @@ export default function HitocariPage() {
         onCandidateSelect={setSelectedCandidate}
         selectedCandidate={selectedCandidate}
       />
-    </AppShell>
+    </ModernAppShell>
   );
 }

@@ -3,7 +3,7 @@
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { AppShell } from "@/components/app-shell";
+import { ModernAppShell } from "@/components/modern-app-shell";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +57,7 @@ export default function Dashboard() {
   }
 
   return (
-    <AppShell activeTab="dashboard">
+    <ModernAppShell activeTab="dashboard">
       <div className="container mx-auto px-6 py-8">
         {/* Welcome Section */}
         <div className="mb-8">
@@ -218,6 +218,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-    </AppShell>
+    </ModernAppShell>
   );
 }
