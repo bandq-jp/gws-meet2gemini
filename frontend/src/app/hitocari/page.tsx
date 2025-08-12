@@ -54,7 +54,9 @@ export default function EnhancedHitocariPage() {
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showAllAccounts, setShowAllAccounts] = useState(false);
+  const [showAllAccounts, setShowAllAccounts] = useState(true);
+  const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [structuredData, setStructuredData] = useState<StructuredData | null>(null);
   const [candidateSuggestions, setCandidateSuggestions] = useState<CandidateMatchSuggestion[]>([]);
@@ -64,7 +66,19 @@ export default function EnhancedHitocariPage() {
   const [showCandidateSearch, setShowCandidateSearch] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
 
-  const userEmail = 'demo@bandq.jp'; // プレースホルダー
+
+  // Load available accounts function
+  const loadAvailableAccounts = async () => {
+    try {
+      // For now, we'll use a placeholder. In a real implementation, this would call an API
+      // that returns available email accounts from the backend
+      const mockAccounts = ['user1@bandq.jp', 'user2@bandq.jp', 'admin@bandq.jp'];
+      setAvailableAccounts(mockAccounts);
+    } catch (error) {
+      console.error('Failed to load available accounts:', error);
+      setAvailableAccounts([]);
+    }
+  };
 
   // Define loadMeetings function before it's used in useEffect
   const loadMeetings = async () => {
@@ -85,8 +99,8 @@ export default function EnhancedHitocariPage() {
   const filteredMeetings = useMemo(() => {
     let filtered = meetings;
 
-    if (!showAllAccounts && userEmail) {
-      filtered = filtered.filter(meeting => meeting.organizer_email === userEmail);
+    if (selectedAccount) {
+      filtered = filtered.filter(meeting => meeting.organizer_email === selectedAccount);
     }
 
     if (searchQuery.trim()) {
@@ -103,7 +117,7 @@ export default function EnhancedHitocariPage() {
       new Date(b.meeting_datetime || b.created_at).getTime() - 
       new Date(a.meeting_datetime || a.created_at).getTime()
     );
-  }, [meetings, searchQuery, showAllAccounts, userEmail]);
+  }, [meetings, searchQuery, selectedAccount]);
 
   // Separate structured and unstructured meetings
   const { structuredMeetings, unstructuredMeetings } = useMemo(() => {
@@ -121,15 +135,16 @@ export default function EnhancedHitocariPage() {
     return { structuredMeetings: structured, unstructuredMeetings: unstructured };
   }, [filteredMeetings]);
 
-  // Load meetings on component mount
+  // Load meetings and accounts on component mount
   useEffect(() => {
+    loadAvailableAccounts();
     loadMeetings();
   }, []);
 
   const handleCollectMeetings = async () => {
     try {
       setCollecting(true);
-      const accounts = showAllAccounts ? undefined : (userEmail ? [userEmail] : undefined);
+      const accounts = selectedAccount ? [selectedAccount] : undefined;
       const result = await apiClient.collectMeetings(accounts, false, false);
       
       await loadMeetings();
@@ -325,16 +340,22 @@ export default function EnhancedHitocariPage() {
             </div>
             
             <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="show-all"
-                checked={showAllAccounts}
-                onChange={(e) => setShowAllAccounts(e.target.checked)}
-                className="rounded"
-              />
-              <Label htmlFor="show-all" className="text-sm">
-                全ての議事録を表示
+              <Label htmlFor="account-select" className="text-sm">
+                アカウントでフィルタ:
               </Label>
+              <select
+                id="account-select"
+                value={selectedAccount}
+                onChange={(e) => setSelectedAccount(e.target.value)}
+                className="rounded border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                <option value="">すべてのアカウント</option>
+                {availableAccounts.map((account) => (
+                  <option key={account} value={account}>
+                    {account}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </CardContent>
