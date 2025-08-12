@@ -37,6 +37,69 @@ import {
   extractNamesFromTitle,
   createCandidateSearchVariations 
 } from "@/lib/api";
+
+// UI表示順と日本語ラベルの定義（test-clientから移植）
+const uiSections = [
+  { title: '転職活動状況', items: [
+    { key: 'transfer_activity_status', label: '転職活動状況' },
+    { key: 'agent_count', label: '何名のエージェントと話したか' },
+    { key: 'current_agents', label: 'すでに利用しているエージェントの社名' },
+    { key: 'introduced_jobs', label: '他社エージェントに紹介された求人' },
+    { key: 'job_appeal_points', label: '紹介求人の魅力点' },
+    { key: 'job_concerns', label: '紹介求人の懸念点' },
+    { key: 'companies_in_selection', label: 'すでに選考中の企業名/フェーズ' },
+    { key: 'other_offer_salary', label: '他社オファー年収見込み' },
+    { key: 'other_company_intention', label: '他社意向度及び見込み' },
+    { key: 'transfer_reasons', label: '転職検討理由（複数選択可）' },
+    { key: 'transfer_trigger', label: '転職検討理由 / きっかけ' },
+    { key: 'desired_timing', label: '転職希望の時期' },
+    { key: 'timing_details', label: '転職希望時期の詳細' },
+    { key: 'current_job_status', label: '現職状況' },
+    { key: 'transfer_status_memo', label: 'フリーメモ（転職状況）' },
+  ]},
+  { title: '転職軸（最重要）', items: [
+    { key: 'transfer_axis_primary', label: '転職軸（最重要）' },
+    { key: 'transfer_priorities', label: '転職軸（オープン）' },
+  ]},
+  { title: 'ヒアリング（現職）', items: [
+    { key: 'career_history', label: '職歴' },
+    { key: 'experience_industry', label: '経験業界' },
+    { key: 'experience_field_hr', label: '経験領域（人材）' },
+    { key: 'current_duties', label: '現職での担当業務' },
+    { key: 'company_good_points', label: '現職企業の良いところ' },
+    { key: 'company_bad_points', label: '現職企業の悪いところ' },
+    { key: 'enjoyed_work', label: 'これまでの仕事で楽しかったこと/好きだったこと' },
+    { key: 'difficult_work', label: 'これまでの仕事で辛かったこと/嫌だったこと' },
+  ]},
+  { title: '転職軸（業界・職種）', items: [
+    { key: 'desired_industry', label: '希望業界' },
+    { key: 'industry_reason', label: '業界希望理由' },
+    { key: 'desired_position', label: '希望職種' },
+    { key: 'ca_ra_focus', label: 'CA起点/RA起点' },
+    { key: 'customer_acquisition', label: '集客方法/比率' },
+    { key: 'new_existing_ratio', label: '新規/既存の比率' },
+    { key: 'position_industry_reason', label: '職種・業界希望理由' },
+  ]},
+  { title: '転職軸（給与）', items: [
+    { key: 'current_salary', label: '現年収（数字のみ）' },
+    { key: 'salary_breakdown', label: '現年収内訳' },
+    { key: 'desired_first_year_salary', label: '初年度希望年収（数字）' },
+    { key: 'base_incentive_ratio', label: '基本給・インセンティブ比率' },
+    { key: 'max_future_salary', label: '将来的な年収の最大値' },
+    { key: 'salary_memo', label: 'フリーメモ（給与）' },
+  ]},
+  { title: '転職軸（リモート・時間）', items: [
+    { key: 'remote_time_memo', label: 'フリーメモ（リモート・時間）' },
+  ]},
+  { title: '転職軸（会社カルチャー・規模）', items: [
+    { key: 'business_vision', label: '事業構想' },
+    { key: 'desired_employee_count', label: '希望従業員数' },
+    { key: 'culture_scale_memo', label: 'フリーメモ（会社カルチャー・規模）' },
+  ]},
+  { title: '転職軸（将来的なキャリアパス）', items: [
+    { key: 'career_vision', label: 'キャリアビジョン' },
+  ]},
+];
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
 import toast from "react-hot-toast";
@@ -571,6 +634,25 @@ export default function EnhancedHitocariPage() {
     );
   };
 
+  const renderStructuredValue = (value: any) => {
+    if (value === null || value === undefined || value === '') {
+      return <span className="text-muted-foreground">-</span>;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return <span className="text-muted-foreground">-</span>;
+      return (
+        <div className="flex flex-wrap gap-1">
+          {value.map((v, i) => (
+            <Badge key={i} variant="secondary" className="text-xs">
+              {String(v)}
+            </Badge>
+          ))}
+        </div>
+      );
+    }
+    return <span className="break-words">{String(value)}</span>;
+  };
+
   const StructuredDataCard = ({ data }: { data: StructuredData }) => (
     <Card>
       <CardHeader>
@@ -582,31 +664,61 @@ export default function EnhancedHitocariPage() {
           AI による議事録の構造化データ抽出結果
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
+        {/* Zoho候補者情報セクション */}
         {data.zoho_candidate && (
-          <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
-            <h4 className="font-medium mb-2 text-green-800">対応求職者</h4>
-            <div className="text-sm space-y-1">
-              <div><strong>名前:</strong> {data.zoho_candidate.candidate_name}</div>
-              <div><strong>ID:</strong> {data.zoho_candidate.candidate_id}</div>
-              {data.zoho_candidate.candidate_email && (
-                <div><strong>メール:</strong> {data.zoho_candidate.candidate_email}</div>
-              )}
+          <div className="space-y-3">
+            <h4 className="text-base font-semibold text-foreground">Zoho CRM 候補者情報</h4>
+            <div className="grid grid-cols-1 border border-border rounded-lg overflow-hidden">
+              {[
+                { key: 'candidate_name', label: '候補者名' },
+                { key: 'candidate_id', label: '候補者ID' },
+                { key: 'record_id', label: 'レコードID' },
+                { key: 'candidate_email', label: 'メールアドレス' },
+              ].map((field, index) => (
+                <div key={field.key} className={`grid grid-cols-[200px_1fr] ${index > 0 ? 'border-t border-border' : ''}`}>
+                  <div className="bg-muted/30 px-3 py-2 text-sm font-medium text-muted-foreground border-r border-border">
+                    {field.label}
+                  </div>
+                  <div className="px-3 py-2 text-sm">
+                    {renderStructuredValue(data.zoho_candidate?.[field.key as keyof typeof data.zoho_candidate])}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
         
-        <div className="space-y-3">
-          {Object.entries(data.data).map(([key, value]) => (
-            <div key={key} className="flex flex-col space-y-1 pb-3 border-b">
-              <div className="text-sm font-medium text-muted-foreground">
-                {key.replace(/_/g, ' ')}
+        {/* 構造化データセクション */}
+        <div className="space-y-4">
+          {uiSections.map((section) => {
+            // このセクションにデータがあるかチェック
+            const sectionHasData = section.items.some(item => data.data[item.key]);
+            if (!sectionHasData) return null;
+
+            return (
+              <div key={section.title} className="space-y-3">
+                <h4 className="text-base font-semibold text-foreground">{section.title}</h4>
+                <div className="grid grid-cols-1 border border-border rounded-lg overflow-hidden">
+                  {section.items.map((item, index) => {
+                    const value = data.data[item.key];
+                    if (value === null || value === undefined || value === '') return null;
+                    
+                    return (
+                      <div key={item.key} className={`grid grid-cols-[200px_1fr] ${index > 0 ? 'border-t border-border' : ''}`}>
+                        <div className="bg-muted/30 px-3 py-2 text-sm font-medium text-muted-foreground border-r border-border">
+                          {item.label}
+                        </div>
+                        <div className="px-3 py-2 text-sm">
+                          {renderStructuredValue(value)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="text-sm break-words overflow-hidden">
-                {Array.isArray(value) ? value.join(', ') : String(value || '-')}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </CardContent>
     </Card>

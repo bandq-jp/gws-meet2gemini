@@ -25,6 +25,14 @@ import {
   LogOut,
   ChevronDown,
   ChevronsLeftRight,
+  FileText,
+  Database,
+  Target,
+  TrendingUp,
+  Calendar,
+  UserCheck,
+  MessageSquare,
+  PieChart,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -86,16 +94,112 @@ export function AppSidebar() {
     }
   };
 
-  const menuItems = [
-    {
-      title: "分析",
-      icon: BarChart3,
-      href: "/analytics",
-      id: "analytics",
-      enabled: false,
-      description: "データ分析・レポート（開発中）",
-    },
-  ];
+  // チーム別メニュー定義
+  const getTeamMenuItems = (teamId: string) => {
+    switch (teamId) {
+      case 'hitocari':
+        return [
+          {
+            title: "議事録管理",
+            icon: FileText,
+            href: "/hitocari",
+            id: "meetings",
+            enabled: true,
+            description: "Google Meet議事録の管理と構造化データ抽出",
+          },
+          {
+            title: "Zoho CRM",
+            icon: Database,
+            href: "/hitocari/zoho",
+            id: "zoho",
+            enabled: false,
+            description: "求職者データベース管理",
+          },
+          {
+            title: "効果測定",
+            icon: Target,
+            href: "/hitocari/analytics",
+            id: "analytics",
+            enabled: false,
+            description: "採用活動の効果測定・分析",
+          },
+          {
+            title: "分析",
+            icon: TrendingUp,
+            href: "/hitocari/reports",
+            id: "reports",
+            enabled: false,
+            description: "データ分析・レポート機能",
+          },
+          {
+            title: "候補者管理",
+            icon: UserCheck,
+            href: "/hitocari/candidates",
+            id: "candidates",
+            enabled: false,
+            description: "候補者情報の統合管理",
+          },
+          {
+            title: "面談予約",
+            icon: Calendar,
+            href: "/hitocari/appointments",
+            id: "appointments",
+            enabled: false,
+            description: "面談・面接のスケジュール管理",
+          },
+          {
+            title: "コミュニケーション",
+            icon: MessageSquare,
+            href: "/hitocari/communication",
+            id: "communication",
+            enabled: false,
+            description: "候補者とのやり取り管理",
+          },
+        ];
+      case 'monotech':
+        return [
+          {
+            title: "プロジェクト管理",
+            icon: Building2,
+            href: "/monotech/projects",
+            id: "projects",
+            enabled: false,
+            description: "技術プロジェクトの管理",
+          },
+          {
+            title: "技術分析",
+            icon: BarChart3,
+            href: "/monotech/tech-analytics",
+            id: "tech-analytics",
+            enabled: false,
+            description: "技術動向の分析",
+          },
+        ];
+      case 'achievehr':
+        return [
+          {
+            title: "人事評価",
+            icon: Award,
+            href: "/achievehr/evaluation",
+            id: "evaluation",
+            enabled: false,
+            description: "従業員の人事評価システム",
+          },
+          {
+            title: "パフォーマンス分析",
+            icon: PieChart,
+            href: "/achievehr/performance",
+            id: "performance",
+            enabled: false,
+            description: "パフォーマンスデータの分析",
+          },
+        ];
+      default:
+        return [];
+    }
+  };
+
+  const menuItems = getTeamMenuItems(activeTeam.id);
 
   const handleMenuClick = (item: typeof menuItems[0]) => {
     if (item.enabled) {
@@ -167,7 +271,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => (
-                <SidebarMenuItem key={item.id}>
+                <SidebarMenuItem key={`${activeTeam.id}-${item.id}`}>
                   <SidebarMenuButton
                     onClick={() => handleMenuClick(item)}
                     isActive={pathname === item.href}
