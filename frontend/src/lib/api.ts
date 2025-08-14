@@ -47,9 +47,6 @@ export interface SettingsResponse {
   gemini: GeminiSettings;
 }
 
-export interface SettingsUpdateRequest {
-  gemini?: GeminiSettings;
-}
 
 export interface ApiError {
   detail: string;
@@ -189,12 +186,6 @@ class ApiClient {
     return this.request<SettingsResponse>('/settings');
   }
 
-  async updateSettings(settings: SettingsUpdateRequest): Promise<SettingsResponse> {
-    return this.request<SettingsResponse>('/settings', {
-      method: 'POST',
-      body: JSON.stringify(settings),
-    });
-  }
 
   async getGeminiModels(): Promise<{ models: Array<{ value: string; label: string; description: string }> }> {
     return this.request<{ models: Array<{ value: string; label: string; description: string }> }>('/settings/gemini/models');

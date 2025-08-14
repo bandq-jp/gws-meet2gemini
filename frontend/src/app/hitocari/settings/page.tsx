@@ -21,7 +21,7 @@ import {
   Mail,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { apiClient, GeminiSettings } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 export default function HitocariSettingsPage() {
   const [loading, setLoading] = useState(false);
@@ -44,7 +44,7 @@ export default function HitocariSettingsPage() {
     // AI処理設定
     geminiEnabled: true,
     geminiModel: "gemini-2.5-pro",
-    geminiMaxTokens: 8192,
+    geminiMaxTokens: 20000,
     geminiTemperature: 0.1,
     
     // 通知設定
@@ -83,29 +83,6 @@ export default function HitocariSettingsPage() {
     }
   };
 
-  const handleSave = async () => {
-    setLoading(true);
-    try {
-      // AI処理設定のみをバックエンドに送信
-      const geminiSettings: GeminiSettings = {
-        gemini_enabled: settings.geminiEnabled,
-        gemini_model: settings.geminiModel,
-        gemini_max_tokens: settings.geminiMaxTokens,
-        gemini_temperature: settings.geminiTemperature,
-      };
-
-      await apiClient.updateSettings({
-        gemini: geminiSettings
-      });
-      
-      toast.success("設定を保存しました");
-    } catch (error) {
-      console.error('設定の保存に失敗:', error);
-      toast.error("設定の保存に失敗しました");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleTest = async (service: string) => {
     setLoading(true);
@@ -326,69 +303,61 @@ export default function HitocariSettingsPage() {
                   <span>Gemini AI設定</span>
                 </CardTitle>
                 <CardDescription>
-                  構造化データ抽出用AI設定
+                  構造化データ抽出用AI設定（読み取り専用）
                 </CardDescription>
               </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
-                <Label htmlFor="gemini-enabled">Gemini AI処理を有効にする</Label>
+                <Label htmlFor="gemini-enabled" className="text-muted-foreground">Gemini AI処理を有効にする</Label>
                 <Switch
                   id="gemini-enabled"
                   checked={settings.geminiEnabled}
-                  onCheckedChange={(checked) => updateSetting('geminiEnabled', checked)}
+                  disabled={true}
                 />
               </div>
               
               {settings.geminiEnabled && (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="gemini-model">使用モデル</Label>
-                    <select
+                    <Label htmlFor="gemini-model" className="text-muted-foreground">使用モデル</Label>
+                    <Input
                       id="gemini-model"
                       value={settings.geminiModel}
-                      onChange={(e) => updateSetting('geminiModel', e.target.value)}
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                      <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                      <option value="gemini-1.5-pro">Gemini 1.5 Pro (レガシー)</option>
-                      <option value="gemini-1.5-flash">Gemini 1.5 Flash (レガシー)</option>
-                    </select>
+                      disabled={true}
+                      className="bg-muted"
+                    />
                   </div>
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="gemini-max-tokens">最大トークン数</Label>
+                      <Label htmlFor="gemini-max-tokens" className="text-muted-foreground">最大トークン数</Label>
                       <Input
                         id="gemini-max-tokens"
                         type="number"
                         value={settings.geminiMaxTokens}
-                        onChange={(e) => updateSetting('geminiMaxTokens', parseInt(e.target.value))}
-                        min="1024"
-                        max="32768"
+                        disabled={true}
+                        className="bg-muted"
                       />
                     </div>
                     
                     <div className="space-y-2">
-                      <Label htmlFor="gemini-temperature">温度パラメータ</Label>
+                      <Label htmlFor="gemini-temperature" className="text-muted-foreground">温度パラメータ</Label>
                       <Input
                         id="gemini-temperature"
                         type="number"
                         step="0.1"
                         value={settings.geminiTemperature}
-                        onChange={(e) => updateSetting('geminiTemperature', parseFloat(e.target.value))}
-                        min="0.0"
-                        max="2.0"
+                        disabled={true}
+                        className="bg-muted"
                       />
                     </div>
                   </div>
                   
                   <Button
                     variant="outline"
-                    onClick={() => handleTest('Gemini AI')}
-                    disabled={loading}
+                    disabled={true}
                   >
-                    <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                    <RefreshCw className="h-4 w-4 mr-2" />
                     接続テスト
                   </Button>
                 </>
@@ -496,20 +465,12 @@ export default function HitocariSettingsPage() {
         </TabsContent>
       </Tabs>
 
-      {/* 保存ボタン */}
+      {/* リフレッシュボタン */}
       <Separator />
       <div className="flex justify-end space-x-4">
         <Button variant="outline" onClick={() => window.location.reload()}>
           <RefreshCw className="h-4 w-4 mr-2" />
-          リセット
-        </Button>
-        <Button onClick={handleSave} disabled={loading}>
-          {loading ? (
-            <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-          ) : (
-            <Save className="h-4 w-4 mr-2" />
-          )}
-          設定を保存
+          リフレッシュ
         </Button>
       </div>
     </div>

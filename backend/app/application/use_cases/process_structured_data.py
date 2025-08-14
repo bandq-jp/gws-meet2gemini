@@ -3,7 +3,7 @@ from typing import Optional
 
 from app.infrastructure.supabase.repositories.meeting_repository_impl import MeetingRepositoryImpl
 from app.infrastructure.supabase.repositories.structured_repository_impl import StructuredRepositoryImpl
-from app.infrastructure.gemini.structured_extractor_split import GeminiStructuredExtractorSplit
+from app.infrastructure.gemini.structured_extractor import StructuredDataExtractor
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
 from app.presentation.api.v1.settings import get_current_gemini_settings
 
@@ -25,7 +25,7 @@ class ProcessStructuredDataUseCase:
         # 現在の設定を取得
         gemini_settings = get_current_gemini_settings()
         
-        extractor = GeminiStructuredExtractorSplit(
+        extractor = StructuredDataExtractor(
             model=gemini_settings.gemini_model,
             temperature=gemini_settings.gemini_temperature,
             max_tokens=gemini_settings.gemini_max_tokens

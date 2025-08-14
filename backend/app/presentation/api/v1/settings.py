@@ -1,7 +1,6 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from typing import Optional
 
 from app.infrastructure.config.settings import get_settings as get_backend_settings
 
@@ -12,18 +11,13 @@ class GeminiSettings(BaseModel):
     """Gemini AI設定"""
     gemini_enabled: bool = Field(default=True, description="Gemini AI処理を有効にするかどうか")
     gemini_model: str = Field(default="gemini-2.5-pro", description="使用するGeminiモデル")
-    gemini_max_tokens: int = Field(default=8192, ge=1024, le=32768, description="最大トークン数")
+    gemini_max_tokens: int = Field(default=20000, ge=1024, le=32768, description="最大トークン数")
     gemini_temperature: float = Field(default=0.1, ge=0.0, le=2.0, description="温度パラメータ")
 
 
 class SettingsResponse(BaseModel):
     """設定レスポンス"""
     gemini: GeminiSettings
-
-
-class SettingsUpdateRequest(BaseModel):
-    """設定更新リクエスト"""
-    gemini: Optional[GeminiSettings] = None
 
 
 # 設定を格納するグローバル変数（本来はDBや設定ファイルに保存）
@@ -51,19 +45,6 @@ async def get_settings_endpoint():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"設定の取得に失敗しました: {str(e)}")
 
-
-@router.post("/", response_model=SettingsResponse)
-async def update_settings(request: SettingsUpdateRequest):
-    """設定を更新"""
-    try:
-        # Gemini設定の更新
-        if request.gemini:
-            _current_settings["gemini"] = request.gemini
-        
-        # 更新後の設定を返す
-        return SettingsResponse(gemini=_current_settings["gemini"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"設定の更新に失敗しました: {str(e)}")
 
 
 @router.get("/gemini/models", response_model=dict)
