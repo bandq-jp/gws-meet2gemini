@@ -13,3 +13,4 @@ class MeetingOut(BaseModel):
     invited_emails: List[str] = Field(default_factory=list)
     text_content: Optional[str]
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    is_structured: bool = Field(default=False, description="構造化済みかどうか")

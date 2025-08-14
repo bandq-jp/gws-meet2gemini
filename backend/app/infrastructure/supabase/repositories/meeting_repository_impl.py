@@ -46,21 +46,37 @@ class MeetingRepositoryImpl:
 
     def list_meetings(self, accounts: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         sb = get_supabase()
-        query = sb.table(self.TABLE).select("*")
+        # LEFT JOINで構造化済みかどうかを判定
+        query = sb.table(self.TABLE).select(
+            "*, structured_outputs!left(meeting_id)"
+        )
         if accounts:
             query = query.in_("organizer_email", accounts)
         res = query.order("meeting_datetime", desc=True).execute()
         data = getattr(res, "data", None)
         if isinstance(data, list):
+            # is_structuredフィールドを追加
+            for item in data:
+                item['is_structured'] = bool(item.get('structured_outputs'))
+                # structured_outputsフィールドは除去
+                item.pop('structured_outputs', None)
             return data
         return []
 
     def get_meeting(self, meeting_id: str) -> Dict[str, Any]:
         sb = get_supabase()
-        res = sb.table(self.TABLE).select("*").eq("id", meeting_id).limit(1).execute()
+        # LEFT JOINで構造化済みかどうかを判定
+        res = sb.table(self.TABLE).select(
+            "*, structured_outputs!left(meeting_id)"
+        ).eq("id", meeting_id).limit(1).execute()
         data = getattr(res, "data", None)
         if isinstance(data, list) and data:
-            return data[0]
+            item = data[0]
+            item['is_structured'] = bool(item.get('structured_outputs'))
+            item.pop('structured_outputs', None)
+            return item
         if isinstance(data, dict):
+            data['is_structured'] = bool(data.get('structured_outputs'))
+            data.pop('structured_outputs', None)
             return data
         return {}

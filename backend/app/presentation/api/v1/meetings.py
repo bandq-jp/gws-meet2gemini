@@ -37,10 +37,13 @@ async def collect_meetings(
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/", response_model=List[MeetingOut])
-async def list_meetings(accounts: Optional[List[str]] = Query(default=None)):
+async def list_meetings(
+    accounts: Optional[List[str]] = Query(default=None),
+    structured: Optional[bool] = Query(default=None, description="構造化済み(true)/未構造化(false)でフィルタ")
+):
     use_case = GetMeetingListUseCase()
     try:
-        return await use_case.execute(accounts)
+        return await use_case.execute(accounts, structured)
     except RuntimeError as e:
         # Supabase未設定時でもHTTP 400を返して原因を明示
         raise HTTPException(status_code=400, detail=str(e))
