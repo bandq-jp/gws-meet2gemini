@@ -8,15 +8,16 @@ from app.presentation.schemas.structured import StructuredOut, StructuredProcess
 router = APIRouter()
 
 @router.post("/process/{meeting_id}", response_model=StructuredOut)
-async def process_structured(meeting_id: str, request: StructuredProcessRequest):
+def process_structured(meeting_id: str, request: StructuredProcessRequest):
     try:
         use_case = ProcessStructuredDataUseCase()
-        return await use_case.execute(
+        return use_case.execute(
             meeting_id=meeting_id,
             zoho_candidate_id=request.zoho_candidate_id,
             zoho_record_id=request.zoho_record_id,
             zoho_candidate_name=request.zoho_candidate_name,
-            zoho_candidate_email=request.zoho_candidate_email
+            zoho_candidate_email=request.zoho_candidate_email,
+            custom_schema_id=request.custom_schema_id
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

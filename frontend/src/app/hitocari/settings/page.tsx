@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -21,11 +22,18 @@ import {
   Mail,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { apiClient } from "@/lib/api";
+import { apiClient, CustomSchema, SchemaField } from "@/lib/api";
 
 export default function HitocariSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
+  
+  // カスタムスキーマ関連の状態
+  const [customSchemas, setCustomSchemas] = useState<CustomSchema[]>([]);
+  const [loadingSchemas, setLoadingSchemas] = useState(false);
+  const [selectedSchema, setSelectedSchema] = useState<CustomSchema | null>(null);
+  const [defaultSchemaDefinition, setDefaultSchemaDefinition] = useState<CustomSchema | null>(null);
+  const [loadingDefaultDefinition, setLoadingDefaultDefinition] = useState(false);
   const [settings, setSettings] = useState({
     // Google Drive設定
     googleDriveEnabled: true,
@@ -61,6 +69,8 @@ export default function HitocariSettingsPage() {
   // バックエンドから設定を読み込み
   useEffect(() => {
     loadSettings();
+    loadSchemas();
+    loadDefaultSchemaDefinition();
   }, []);
 
   const loadSettings = async () => {
@@ -80,6 +90,36 @@ export default function HitocariSettingsPage() {
       toast.error('設定の読み込みに失敗しました');
     } finally {
       setLoadingSettings(false);
+    }
+  };
+
+  const loadSchemas = async () => {
+    try {
+      setLoadingSchemas(true);
+      const schemas = await apiClient.getAllSchemas();
+      setCustomSchemas(schemas);
+    } catch (error) {
+      console.error('スキーマの読み込みに失敗:', error);
+      toast.error('スキーマの読み込みに失敗しました');
+    } finally {
+      setLoadingSchemas(false);
+    }
+  };
+
+  const loadDefaultSchemaDefinition = async () => {
+    try {
+      setLoadingDefaultDefinition(true);
+      const schema = await apiClient.getDefaultSchemaDefinition();
+      setDefaultSchemaDefinition(schema);
+      // デフォルト表示としてシステム定義スキーマを選択
+      if (!selectedSchema) {
+        setSelectedSchema(schema);
+      }
+    } catch (error) {
+      console.error('デフォルトスキーマ定義の読み込みに失敗:', error);
+      // ここではトーストは控えめに（必須ではないため）
+    } finally {
+      setLoadingDefaultDefinition(false);
     }
   };
 
@@ -115,8 +155,9 @@ export default function HitocariSettingsPage() {
       </div>
 
       <Tabs defaultValue="ai" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="ai">AI処理</TabsTrigger>
+          <TabsTrigger value="schemas">スキーマ管理</TabsTrigger>
           <TabsTrigger value="integrations">外部連携</TabsTrigger>
           <TabsTrigger value="notifications">通知</TabsTrigger>
           <TabsTrigger value="automation">自動化</TabsTrigger>
@@ -364,6 +405,207 @@ export default function HitocariSettingsPage() {
               )}
             </CardContent>
           </Card>
+          )}
+        </TabsContent>
+
+        {/* スキーマ管理 */}
+        <TabsContent value="schemas" className="space-y-6">
+          {loadingSchemas ? (
+            <Card>
+              <CardContent className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                  <p className="text-muted-foreground">スキーマを読み込み中...</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-6">
+              {/* コード定義のデフォルトスキーマ（常に表示） */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Database className="h-5 w-5" />
+                    <span>システム・デフォルトスキーマ（コード定義）</span>
+                  </CardTitle>
+                  <CardDescription>
+                    backend/app/domain/schemas/structured_extraction_schema.py を動的に解析した結果
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {loadingDefaultDefinition ? (
+                    <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
+                      <RefreshCw className="h-4 w-4 animate-spin mr-2" /> 読み込み中...
+                    </div>
+                  ) : defaultSchemaDefinition ? (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <h4 className="font-medium">{defaultSchemaDefinition.name}</h4>
+                          <p className="text-sm text-muted-foreground">{defaultSchemaDefinition.description}</p>
+                          <div className="text-xs text-muted-foreground">
+                            {defaultSchemaDefinition.fields.length} フィールド • {defaultSchemaDefinition.schema_groups.length} グループ
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedSchema(defaultSchemaDefinition)}
+                        >
+                          詳細を表示
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">デフォルトスキーマを取得できませんでした。</div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* スキーマ一覧 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Database className="h-5 w-5" />
+                    <span>カスタムスキーマ一覧</span>
+                  </CardTitle>
+                  <CardDescription>
+                    構造化データ抽出に使用するスキーマの管理
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {customSchemas.length === 0 ? (
+                    <div className="text-center py-8">
+                      <p className="text-muted-foreground mb-4">カスタムスキーマが見つかりません（必要に応じて初期化してください）</p>
+                      <Button onClick={() => apiClient.initializeDefaultSchema().then(loadSchemas)}>
+                        デフォルトスキーマを初期化
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {customSchemas.map((schema) => (
+                        <div
+                          key={schema.id}
+                          className={`border rounded-lg p-4 cursor-pointer transition-colors ${
+                            selectedSchema?.id === schema.id 
+                              ? 'border-primary bg-primary/5' 
+                              : 'hover:border-muted-foreground'
+                          }`}
+                          onClick={() => setSelectedSchema(schema)}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-1">
+                              <div className="flex items-center space-x-2">
+                                <h4 className="font-medium">{schema.name}</h4>
+                                {schema.is_default && (
+                                  <Badge variant="default">デフォルト</Badge>
+                                )}
+                                {!schema.is_active && (
+                                  <Badge variant="secondary">非アクティブ</Badge>
+                                )}
+                              </div>
+                              <p className="text-sm text-muted-foreground">
+                                {schema.description || 'スキーマの説明がありません'}
+                              </p>
+                              <div className="text-xs text-muted-foreground">
+                                {schema.fields.length} フィールド • {schema.schema_groups.length} グループ
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              {!schema.is_default && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (schema.id) {
+                                      apiClient.setDefaultSchema(schema.id)
+                                        .then(() => {
+                                          toast.success('デフォルトスキーマを設定しました');
+                                          loadSchemas();
+                                        })
+                                        .catch(() => toast.error('デフォルトスキーマの設定に失敗しました'));
+                                    }
+                                  }}
+                                >
+                                  デフォルトに設定
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* スキーマ詳細表示（選択したスキーマ or デフォルト） */}
+              {selectedSchema && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>スキーマ詳細: {selectedSchema.name}</CardTitle>
+                    <CardDescription>
+                      フィールドとグループの詳細情報
+                  </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-6">
+                      {selectedSchema.schema_groups.map((group, groupIndex) => {
+                        const groupFields = selectedSchema.fields.filter(f => f.group_name === group.name);
+                        if (groupFields.length === 0) return null;
+
+                        return (
+                          <div key={groupIndex} className="space-y-3">
+                            <h4 className="text-base font-semibold text-foreground border-b pb-2">
+                              {group.name}
+                            </h4>
+                            <div className="grid gap-3">
+                              {groupFields.map((field, fieldIndex) => (
+                                <div key={fieldIndex} className="border rounded-lg p-3">
+                                  <div className="flex items-start justify-between mb-2">
+                                    <div>
+                                      <h5 className="font-medium text-sm">{field.field_label}</h5>
+                                      <p className="text-xs text-muted-foreground">キー: {field.field_key}</p>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <Badge variant="outline" className="text-xs">
+                                        {field.field_type}
+                                        {field.array_item_type && `<${field.array_item_type}>`}
+                                      </Badge>
+                                      {field.is_required && (
+                                        <Badge variant="destructive" className="text-xs">必須</Badge>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {field.field_description && (
+                                    <p className="text-xs text-muted-foreground mb-2">
+                                      {field.field_description}
+                                    </p>
+                                  )}
+                                  {field.enum_options.length > 0 && (
+                                    <div className="mt-2">
+                                      <p className="text-xs font-medium text-muted-foreground mb-1">選択肢:</p>
+                                      <div className="flex flex-wrap gap-1">
+                                        {field.enum_options.map((option, optionIndex) => (
+                                          <Badge key={optionIndex} variant="secondary" className="text-xs">
+                                            {option.value}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           )}
         </TabsContent>
 

@@ -26,6 +26,8 @@ export interface StructuredData {
     candidate_name?: string;
     candidate_email?: string;
   };
+  custom_schema_id?: string;
+  schema_version?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -46,6 +48,55 @@ export interface GeminiSettings {
 
 export interface SettingsResponse {
   gemini: GeminiSettings;
+}
+
+// Custom Schema interfaces
+export interface EnumOption {
+  id?: string;
+  value: string;
+  label?: string;
+  display_order: number;
+}
+
+export interface ValidationRules {
+  minimum?: number;
+  maximum?: number;
+  min_length?: number;
+  max_length?: number;
+  pattern?: string;
+}
+
+export interface SchemaField {
+  id?: string;
+  field_key: string;
+  field_label: string;
+  field_description?: string;
+  field_type: string; // string, number, integer, array, boolean, object
+  is_required: boolean;
+  array_item_type?: string;
+  group_name: string;
+  display_order: number;
+  validation_rules?: ValidationRules;
+  enum_options: EnumOption[];
+}
+
+export interface SchemaGroup {
+  name: string;
+  description: string;
+}
+
+export interface CustomSchema {
+  id?: string;
+  name: string;
+  description?: string;
+  is_default: boolean;
+  is_active: boolean;
+  created_by?: string;
+  base_schema_version?: string;
+  schema_groups: SchemaGroup[];
+  fields: SchemaField[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 
@@ -154,6 +205,7 @@ class ApiClient {
       zoho_record_id?: string;
       zoho_candidate_name?: string;
       zoho_candidate_email?: string;
+      custom_schema_id?: string;
     }
   ): Promise<StructuredData> {
     return this.request<StructuredData>(`/structured/process/${encodeURIComponent(meetingId)}`, {
@@ -190,6 +242,90 @@ class ApiClient {
 
   async getGeminiModels(): Promise<{ models: Array<{ value: string; label: string; description: string }> }> {
     return this.request<{ models: Array<{ value: string; label: string; description: string }> }>('/settings/gemini/models');
+  }
+
+  // Custom Schema endpoints
+  async getAllSchemas(includeInactive = false): Promise<CustomSchema[]> {
+    const params = new URLSearchParams();
+    if (includeInactive) {
+      params.set('include_inactive', 'true');
+    }
+    const queryString = params.toString();
+    return this.request<CustomSchema[]>(`/custom-schemas${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getDefaultSchema(): Promise<CustomSchema | null> {
+    try {
+      return await this.request<CustomSchema>('/custom-schemas/default');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async getDefaultSchemaDefinition(): Promise<CustomSchema> {
+    return this.request<CustomSchema>('/custom-schemas/default-definition');
+  }
+
+  async initializeDefaultSchema(): Promise<CustomSchema> {
+    return this.request<CustomSchema>('/custom-schemas/init-default', {
+      method: 'POST',
+    });
+  }
+
+  async getSchema(schemaId: string): Promise<CustomSchema> {
+    return this.request<CustomSchema>(`/custom-schemas/${encodeURIComponent(schemaId)}`);
+  }
+
+  async createSchema(schemaData: {
+    name: string;
+    description?: string;
+    is_default?: boolean;
+    schema_groups: SchemaGroup[];
+    fields: SchemaField[];
+  }): Promise<CustomSchema> {
+    return this.request<CustomSchema>('/custom-schemas', {
+      method: 'POST',
+      body: JSON.stringify(schemaData),
+    });
+  }
+
+  async updateSchema(
+    schemaId: string,
+    schemaData: {
+      name: string;
+      description?: string;
+      is_default?: boolean;
+      is_active?: boolean;
+      schema_groups: SchemaGroup[];
+      fields: SchemaField[];
+    }
+  ): Promise<CustomSchema> {
+    return this.request<CustomSchema>(`/custom-schemas/${encodeURIComponent(schemaId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(schemaData),
+    });
+  }
+
+  async deleteSchema(schemaId: string): Promise<void> {
+    await this.request<void>(`/custom-schemas/${encodeURIComponent(schemaId)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async setDefaultSchema(schemaId: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/custom-schemas/${encodeURIComponent(schemaId)}/set-default`, {
+      method: 'POST',
+    });
+  }
+
+  async duplicateSchema(schemaId: string, newName: string): Promise<CustomSchema> {
+    return this.request<CustomSchema>(`/custom-schemas/${encodeURIComponent(schemaId)}/duplicate`, {
+      method: 'POST',
+      body: JSON.stringify({ new_name: newName }),
+    });
   }
 }
 
