@@ -155,6 +155,14 @@ export function AppSidebar() {
             enabled: false,
             description: "候補者とのやり取り管理",
           },
+          {
+            title: "設定",
+            icon: Settings,
+            href: "/hitocari/settings",
+            id: "settings",
+            enabled: true,
+            description: "ひとキャリシステムの設定",
+          },
         ];
       case 'monotech':
         return [
