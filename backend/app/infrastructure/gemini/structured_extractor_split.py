@@ -20,9 +20,9 @@ dotenv.load_dotenv()
 
 
 class GeminiStructuredExtractorSplit:
-    """Gemini 2.5 Proを使用した構造化データ抽出器（分割処理版）"""
+    """Gemini を使用した構造化データ抽出器（分割処理版）"""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, model: str | None = None, temperature: float | None = None, max_tokens: int | None = None):
         if api_key:
             self.client = genai.Client(api_key=api_key)
         else:
@@ -32,6 +32,11 @@ class GeminiStructuredExtractorSplit:
                     "Gemini API key is required. Set GEMINI_API_KEY or GOOGLE_API_KEY."
                 )
             self.client = genai.Client(api_key=gemini_key)
+        
+        # 設定可能なパラメータ
+        self.model = model or "gemini-2.5-pro"
+        self.temperature = temperature if temperature is not None else 0.1
+        self.max_tokens = max_tokens or 20000
 
     # グループ1: 転職活動状況・エージェント関連
     def _get_schema_group1(self) -> Dict[str, Any]:
@@ -486,13 +491,13 @@ class GeminiStructuredExtractorSplit:
         for attempt in range(max_retries):
             try:
                 response = self.client.models.generate_content(
-                    model="gemini-2.5-pro",
+                    model=self.model,
                     contents=prompt,
                     config={
                         "response_mime_type": "application/json",
                         "response_schema": schema,
-                        "temperature": 0.1,
-                        "max_output_tokens": 20000,
+                        "temperature": self.temperature,
+                        "max_output_tokens": self.max_tokens,
                     },
                 )
 

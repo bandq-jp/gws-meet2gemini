@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,9 +21,11 @@ import {
   Mail,
 } from "lucide-react";
 import toast from "react-hot-toast";
+import { apiClient, GeminiSettings } from "@/lib/api";
 
 export default function HitocariSettingsPage() {
   const [loading, setLoading] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
   const [settings, setSettings] = useState({
     // Google Drive設定
     googleDriveEnabled: true,
@@ -43,6 +45,7 @@ export default function HitocariSettingsPage() {
     geminiEnabled: true,
     geminiModel: "gemini-2.5-pro",
     geminiMaxTokens: 8192,
+    geminiTemperature: 0.1,
     
     // 通知設定
     emailNotifications: true,
@@ -55,13 +58,49 @@ export default function HitocariSettingsPage() {
     collectInterval: 60, // minutes
   });
 
+  // バックエンドから設定を読み込み
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    try {
+      setLoadingSettings(true);
+      const response = await apiClient.getSettings();
+      
+      setSettings(prev => ({
+        ...prev,
+        geminiEnabled: response.gemini.gemini_enabled,
+        geminiModel: response.gemini.gemini_model,
+        geminiMaxTokens: response.gemini.gemini_max_tokens,
+        geminiTemperature: response.gemini.gemini_temperature,
+      }));
+    } catch (error) {
+      console.error('設定の読み込みに失敗:', error);
+      toast.error('設定の読み込みに失敗しました');
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
   const handleSave = async () => {
     setLoading(true);
     try {
-      // TODO: バックエンドAPIに設定を保存
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Mock delay
+      // AI処理設定のみをバックエンドに送信
+      const geminiSettings: GeminiSettings = {
+        gemini_enabled: settings.geminiEnabled,
+        gemini_model: settings.geminiModel,
+        gemini_max_tokens: settings.geminiMaxTokens,
+        gemini_temperature: settings.geminiTemperature,
+      };
+
+      await apiClient.updateSettings({
+        gemini: geminiSettings
+      });
+      
       toast.success("設定を保存しました");
     } catch (error) {
+      console.error('設定の保存に失敗:', error);
       toast.error("設定の保存に失敗しました");
     } finally {
       setLoading(false);
@@ -98,10 +137,10 @@ export default function HitocariSettingsPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="integrations" className="space-y-6">
+      <Tabs defaultValue="ai" className="space-y-6">
         <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="integrations">外部連携</TabsTrigger>
           <TabsTrigger value="ai">AI処理</TabsTrigger>
+          <TabsTrigger value="integrations">外部連携</TabsTrigger>
           <TabsTrigger value="notifications">通知</TabsTrigger>
           <TabsTrigger value="automation">自動化</TabsTrigger>
         </TabsList>
@@ -270,16 +309,26 @@ export default function HitocariSettingsPage() {
 
         {/* AI処理設定 */}
         <TabsContent value="ai" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center space-x-2">
-                <Key className="h-5 w-5" />
-                <span>Gemini AI設定</span>
-              </CardTitle>
-              <CardDescription>
-                構造化データ抽出用AI設定
-              </CardDescription>
-            </CardHeader>
+          {loadingSettings ? (
+            <Card>
+              <CardContent className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <RefreshCw className="h-8 w-8 animate-spin mx-auto mb-4" />
+                  <p className="text-muted-foreground">設定を読み込み中...</p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <Key className="h-5 w-5" />
+                  <span>Gemini AI設定</span>
+                </CardTitle>
+                <CardDescription>
+                  構造化データ抽出用AI設定
+                </CardDescription>
+              </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between">
                 <Label htmlFor="gemini-enabled">Gemini AI処理を有効にする</Label>
@@ -307,16 +356,31 @@ export default function HitocariSettingsPage() {
                     </select>
                   </div>
                   
-                  <div className="space-y-2">
-                    <Label htmlFor="gemini-max-tokens">最大トークン数</Label>
-                    <Input
-                      id="gemini-max-tokens"
-                      type="number"
-                      value={settings.geminiMaxTokens}
-                      onChange={(e) => updateSetting('geminiMaxTokens', parseInt(e.target.value))}
-                      min="1024"
-                      max="32768"
-                    />
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="gemini-max-tokens">最大トークン数</Label>
+                      <Input
+                        id="gemini-max-tokens"
+                        type="number"
+                        value={settings.geminiMaxTokens}
+                        onChange={(e) => updateSetting('geminiMaxTokens', parseInt(e.target.value))}
+                        min="1024"
+                        max="32768"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="gemini-temperature">温度パラメータ</Label>
+                      <Input
+                        id="gemini-temperature"
+                        type="number"
+                        step="0.1"
+                        value={settings.geminiTemperature}
+                        onChange={(e) => updateSetting('geminiTemperature', parseFloat(e.target.value))}
+                        min="0.0"
+                        max="2.0"
+                      />
+                    </div>
                   </div>
                   
                   <Button
@@ -331,6 +395,7 @@ export default function HitocariSettingsPage() {
               )}
             </CardContent>
           </Card>
+          )}
         </TabsContent>
 
         {/* 通知設定 */}

@@ -36,6 +36,21 @@ export interface ZohoCandidate {
   candidate_email?: string;
 }
 
+export interface GeminiSettings {
+  gemini_enabled: boolean;
+  gemini_model: string;
+  gemini_max_tokens: number;
+  gemini_temperature: number;
+}
+
+export interface SettingsResponse {
+  gemini: GeminiSettings;
+}
+
+export interface SettingsUpdateRequest {
+  gemini?: GeminiSettings;
+}
+
 export interface ApiError {
   detail: string;
   status: number;
@@ -167,6 +182,22 @@ class ApiClient {
     return this.request<{ record: Record<string, unknown>; record_id: string }>(
       `/zoho/app-hc/${encodeURIComponent(recordId)}`
     );
+  }
+
+  // Settings endpoints
+  async getSettings(): Promise<SettingsResponse> {
+    return this.request<SettingsResponse>('/settings');
+  }
+
+  async updateSettings(settings: SettingsUpdateRequest): Promise<SettingsResponse> {
+    return this.request<SettingsResponse>('/settings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async getGeminiModels(): Promise<{ models: Array<{ value: string; label: string; description: string }> }> {
+    return this.request<{ models: Array<{ value: string; label: string; description: string }> }>('/settings/gemini/models');
   }
 }
 

@@ -5,6 +5,7 @@ from app.infrastructure.supabase.repositories.meeting_repository_impl import Mee
 from app.infrastructure.supabase.repositories.structured_repository_impl import StructuredRepositoryImpl
 from app.infrastructure.gemini.structured_extractor_split import GeminiStructuredExtractorSplit
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
+from app.presentation.api.v1.settings import get_current_gemini_settings
 
 class ProcessStructuredDataUseCase:
     async def execute(self, meeting_id: str, zoho_candidate_id: Optional[str] = None, 
@@ -21,7 +22,14 @@ class ProcessStructuredDataUseCase:
         if not zoho_record_id:
             raise ValueError("Zoho candidate selection is required for structured output processing")
         
-        extractor = GeminiStructuredExtractorSplit()
+        # 現在の設定を取得
+        gemini_settings = get_current_gemini_settings()
+        
+        extractor = GeminiStructuredExtractorSplit(
+            model=gemini_settings.gemini_model,
+            temperature=gemini_settings.gemini_temperature,
+            max_tokens=gemini_settings.gemini_max_tokens
+        )
         # Extract candidate and agent names for better context
         candidate_name = zoho_candidate_name
         agent_name = meeting.get("organizer_name")
