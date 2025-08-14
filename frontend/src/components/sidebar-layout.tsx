@@ -3,10 +3,7 @@
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
-import { 
-  SidebarProvider, 
-  SidebarTrigger 
-} from "@/components/ui/sidebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 
 interface SidebarLayoutProps {
@@ -63,10 +60,7 @@ export function SidebarLayout({ children }: SidebarLayoutProps) {
     <SidebarProvider>
       <AppSidebar />
       <main className="flex-1 overflow-hidden">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4 bg-background/95 backdrop-blur supports-[backdrop-filter]:backdrop-blur">
-          <SidebarTrigger className="-ml-1" />
-        </header>
-        <div className="h-[calc(100vh-4rem)] overflow-auto">
+        <div className="h-screen overflow-auto">
           {children}
         </div>
       </main>

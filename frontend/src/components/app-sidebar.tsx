@@ -14,6 +14,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import {
   Users,
@@ -213,6 +214,9 @@ export function AppSidebar() {
   return (
     <Sidebar variant="sidebar" collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
+        <div className="flex items-center justify-end px-2 py-2">
+          <SidebarTrigger className="-mr-1" />
+        </div>
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
