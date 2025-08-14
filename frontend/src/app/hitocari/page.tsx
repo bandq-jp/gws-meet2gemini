@@ -187,7 +187,7 @@ export default function EnhancedHitocariPage() {
     const unstructured: Meeting[] = [];
 
     filteredMeetings.forEach(meeting => {
-      if (meeting.metadata && Object.keys(meeting.metadata).length > 0) {
+      if (meeting.is_structured) {
         structured.push(meeting);
       } else {
         unstructured.push(meeting);
@@ -498,8 +498,8 @@ export default function EnhancedHitocariPage() {
                     <h3 className="text-lg font-medium truncate">
                       {meeting.title || '(無題)'}
                     </h3>
-                    <Badge variant={structuredMeetings.some(m => m.id === meeting.id) ? "default" : "secondary"}>
-                      {structuredMeetings.some(m => m.id === meeting.id) ? "構造化済み" : "未処理"}
+                    <Badge variant={meeting.is_structured ? "default" : "secondary"}>
+                      {meeting.is_structured ? "構造化済み" : "未処理"}
                     </Badge>
                   </div>
                   

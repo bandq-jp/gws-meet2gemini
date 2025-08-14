@@ -12,6 +12,7 @@ export interface Meeting {
   invited_emails: string[];
   text_content?: string;
   metadata?: Record<string, unknown>;
+  is_structured?: boolean;
   created_at: string;
   updated_at: string;
 }

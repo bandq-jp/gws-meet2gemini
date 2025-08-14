@@ -46,37 +46,48 @@ class MeetingRepositoryImpl:
 
     def list_meetings(self, accounts: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         sb = get_supabase()
-        # LEFT JOINで構造化済みかどうかを判定
-        query = sb.table(self.TABLE).select(
-            "*, structured_outputs!left(meeting_id)"
-        )
+        # 構造化済みかどうかを判定するため、structured_outputsテーブルを別途チェック
+        query = sb.table(self.TABLE).select("*")
         if accounts:
             query = query.in_("organizer_email", accounts)
         res = query.order("meeting_datetime", desc=True).execute()
         data = getattr(res, "data", None)
+        
         if isinstance(data, list):
+            # 各meeting_idに対してstructured_outputsの存在をチェック
+            meeting_ids = [item.get('id') for item in data if item.get('id')]
+            structured_meetings = set()
+            
+            if meeting_ids:
+                # 構造化データが存在するmeeting_idを取得
+                structured_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", meeting_ids).execute()
+                structured_data = getattr(structured_res, "data", None)
+                if isinstance(structured_data, list):
+                    structured_meetings = {item['meeting_id'] for item in structured_data}
+            
             # is_structuredフィールドを追加
             for item in data:
-                item['is_structured'] = bool(item.get('structured_outputs'))
-                # structured_outputsフィールドは除去
-                item.pop('structured_outputs', None)
+                item['is_structured'] = item.get('id') in structured_meetings
             return data
         return []
 
     def get_meeting(self, meeting_id: str) -> Dict[str, Any]:
         sb = get_supabase()
-        # LEFT JOINで構造化済みかどうかを判定
-        res = sb.table(self.TABLE).select(
-            "*, structured_outputs!left(meeting_id)"
-        ).eq("id", meeting_id).limit(1).execute()
+        # 会議データを取得
+        res = sb.table(self.TABLE).select("*").eq("id", meeting_id).limit(1).execute()
         data = getattr(res, "data", None)
+        
         if isinstance(data, list) and data:
             item = data[0]
-            item['is_structured'] = bool(item.get('structured_outputs'))
-            item.pop('structured_outputs', None)
+            # 構造化データの存在をチェック
+            structured_res = sb.table("structured_outputs").select("meeting_id").eq("meeting_id", meeting_id).limit(1).execute()
+            structured_data = getattr(structured_res, "data", None)
+            item['is_structured'] = bool(structured_data and len(structured_data) > 0)
             return item
-        if isinstance(data, dict):
-            data['is_structured'] = bool(data.get('structured_outputs'))
-            data.pop('structured_outputs', None)
+        elif isinstance(data, dict):
+            # 構造化データの存在をチェック
+            structured_res = sb.table("structured_outputs").select("meeting_id").eq("meeting_id", meeting_id).limit(1).execute()
+            structured_data = getattr(structured_res, "data", None)
+            data['is_structured'] = bool(structured_data and len(structured_data) > 0)
             return data
         return {}
