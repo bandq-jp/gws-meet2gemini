@@ -2,7 +2,7 @@
 
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useRouter, usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -24,7 +24,6 @@ import {
   User,
   LogOut,
   ChevronDown,
-  ChevronsLeftRight,
   FileText,
   Database,
   Target,
@@ -50,7 +49,7 @@ export function AppSidebar() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const teamItems = [
+  const teamItems = useMemo(() => [
     {
       name: "ひとキャリ",
       href: "/hitocari",
@@ -72,20 +71,20 @@ export function AppSidebar() {
       enabled: false,
       icon: Award,
     },
-  ];
+  ], []);
 
   // 現在のパスに基づいてアクティブなチームを決定
-  const getCurrentTeam = () => {
+  const getCurrentTeam = useCallback(() => {
     return teamItems.find(team => pathname?.startsWith(team.href)) || teamItems[0];
-  };
+  }, [pathname, teamItems]);
 
-  const [activeTeam, setActiveTeam] = useState(getCurrentTeam());
+  const [activeTeam, setActiveTeam] = useState(() => getCurrentTeam());
 
   // パスが変更されたときにアクティブなチームを更新
   useEffect(() => {
     const currentTeam = getCurrentTeam();
     setActiveTeam(currentTeam);
-  }, [pathname]);
+  }, [getCurrentTeam]);
 
   const handleTeamSelect = (team: typeof teamItems[0]) => {
     if (team.enabled) {

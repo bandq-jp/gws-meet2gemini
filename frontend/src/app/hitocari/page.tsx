@@ -117,7 +117,6 @@ export default function EnhancedHitocariPage() {
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [showAllAccounts, setShowAllAccounts] = useState(true);
   const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
@@ -634,7 +633,7 @@ export default function EnhancedHitocariPage() {
     );
   };
 
-  const renderStructuredValue = (value: any) => {
+  const renderStructuredValue = (value: unknown) => {
     if (value === null || value === undefined || value === '') {
       return <span className="text-muted-foreground">-</span>;
     }

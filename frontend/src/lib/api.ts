@@ -11,14 +11,14 @@ export interface Meeting {
   document_url?: string;
   invited_emails: string[];
   text_content?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
 
 export interface StructuredData {
   meeting_id: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   zoho_candidate?: {
     candidate_id?: string;
     record_id?: string;
@@ -158,10 +158,10 @@ class ApiClient {
   }
 
   async getZohoCandidateDetail(recordId: string): Promise<{
-    record: Record<string, any>;
+    record: Record<string, unknown>;
     record_id: string;
   }> {
-    return this.request<{ record: Record<string, any>; record_id: string }>(
+    return this.request<{ record: Record<string, unknown>; record_id: string }>(
       `/zoho/app-hc/${encodeURIComponent(recordId)}`
     );
   }

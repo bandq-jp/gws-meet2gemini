@@ -63,7 +63,7 @@ export function CandidateSearchDialog({
   };
 
   const clearSelection = () => {
-    onCandidateSelect(null as any);
+    onCandidateSelect(null);
   };
 
   return (

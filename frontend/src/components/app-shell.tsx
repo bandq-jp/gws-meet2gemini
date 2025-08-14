@@ -1,6 +1,4 @@
 "use client";
-
-import { useState } from "react";
 import { UserButton, useUser } from "@clerk/nextjs";
 import {
   Sidebar,
@@ -16,9 +14,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Building2,
   Users,
@@ -36,7 +32,6 @@ interface AppShellProps {
 
 export function AppShell({ children, activeTab = "hitocari" }: AppShellProps) {
   const { user } = useUser();
-  const [collapsed, setCollapsed] = useState(false);
 
   const menuItems = [
     {

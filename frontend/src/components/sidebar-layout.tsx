@@ -5,7 +5,6 @@ import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { 
   SidebarProvider, 
-  SidebarInset, 
   SidebarTrigger 
 } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
