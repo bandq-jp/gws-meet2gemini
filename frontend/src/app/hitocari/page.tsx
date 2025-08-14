@@ -103,6 +103,7 @@ const uiSections = [
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { ja } from "date-fns/locale";
 import toast from "react-hot-toast";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 interface CandidateMatchSuggestion {
   candidate: ZohoCandidate;
@@ -254,6 +255,10 @@ export default function EnhancedHitocariPage() {
       const searchVariations = createCandidateSearchVariations(extractedNames);
       const suggestions: CandidateMatchSuggestion[] = [];
 
+      // 軽量なエラー型ガード
+      const isZohoLikeError = (e: unknown): e is { status?: number; message?: string } =>
+        typeof e === 'object' && e !== null && ('status' in e || 'message' in e);
+
       for (const nameVariation of searchVariations.slice(0, 3)) {
         try {
           const results = await apiClient.searchZohoCandidates(nameVariation, 5);
@@ -271,9 +276,9 @@ export default function EnhancedHitocariPage() {
               }
             }
           });
-        } catch (error: any) {
+        } catch (error: unknown) {
           // ZohoのAPI認証エラーやサービス無効時は警告のみ表示し、検索を継続
-          if (error?.status === 500 || error?.status === 502 || error?.message?.includes('Zoho')) {
+          if (isZohoLikeError(error) && (error.status === 500 || error.status === 502 || error.message?.includes('Zoho'))) {
             console.warn(`Zoho search unavailable for "${nameVariation}":`, error.message || error);
             // 最初のエラー時のみユーザーに通知
             if (searchVariations.indexOf(nameVariation) === 0) {
@@ -366,11 +371,14 @@ export default function EnhancedHitocariPage() {
     <div className="space-y-6">
       {/* Header with Actions */}
       <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">議事録管理</h1>
-          <p className="text-muted-foreground">
-            Google Meet議事録の管理と構造化データ抽出
-          </p>
+        <div className="flex items-center space-x-4">
+          <SidebarTrigger className="md:hidden" />
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">議事録管理</h1>
+            <p className="text-muted-foreground">
+              Google Meet議事録の管理と構造化データ抽出
+            </p>
+          </div>
         </div>
         
         <div className="flex items-center space-x-2">
@@ -538,10 +546,13 @@ export default function EnhancedHitocariPage() {
       <div className="space-y-6">
         {/* Header with Back Button */}
         <div className="flex items-center space-x-4 min-w-0">
-          <Button variant="ghost" size="sm" onClick={handleBackToList} className="shrink-0">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            議事録一覧に戻る
-          </Button>
+          <div className="flex items-center space-x-2">
+            <SidebarTrigger className="md:hidden" />
+            <Button variant="ghost" size="sm" onClick={handleBackToList} className="shrink-0">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              議事録一覧に戻る
+            </Button>
+          </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold truncate">{selectedMeeting.title || '(無題)'}</h1>
             <p className="text-muted-foreground truncate">議事録の詳細情報と構造化処理</p>

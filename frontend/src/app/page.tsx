@@ -14,6 +14,7 @@ import {
   Clock
 } from "lucide-react";
 import Link from "next/link";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 
 export default function Dashboard() {
   return (
@@ -21,7 +22,10 @@ export default function Dashboard() {
       <div className="container mx-auto px-6 py-8">
         {/* Welcome Section */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">b&q Hub ダッシュボード</h1>
+          <div className="flex items-center space-x-4 mb-2">
+            <SidebarTrigger className="md:hidden" />
+            <h1 className="text-3xl font-bold">b&q Hub ダッシュボード</h1>
+          </div>
           <p className="text-muted-foreground">
             統合管理システムへようこそ。各サービスにアクセスして業務を効率化しましょう。
           </p>

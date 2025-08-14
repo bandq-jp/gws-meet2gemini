@@ -23,6 +23,40 @@ import {
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { apiClient, CustomSchema, SchemaField } from "@/lib/api";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+
+// 設定状態の型を明確化
+interface SettingsState {
+  // Google Drive設定
+  googleDriveEnabled: boolean;
+  googleDriveAccount: string;
+  googleDriveFolder: string;
+
+  // Zoho CRM設定
+  zohoEnabled: boolean;
+  zohoClientId: string;
+  zohoClientSecret: string;
+  zohoRefreshToken: string;
+  zohoModule: string;
+  zohoNameField: string;
+  zohoIdField: string;
+
+  // AI処理設定
+  geminiEnabled: boolean;
+  geminiModel: string;
+  geminiMaxTokens: number;
+  geminiTemperature: number;
+
+  // 通知設定
+  emailNotifications: boolean;
+  slackNotifications: boolean;
+  notificationEmail: string;
+
+  // 自動処理設定
+  autoCollectMeetings: boolean;
+  autoProcessStructured: boolean;
+  collectInterval: number; // minutes
+}
 
 export default function HitocariSettingsPage() {
   const [loading, setLoading] = useState(false);
@@ -34,7 +68,7 @@ export default function HitocariSettingsPage() {
   const [selectedSchema, setSelectedSchema] = useState<CustomSchema | null>(null);
   const [defaultSchemaDefinition, setDefaultSchemaDefinition] = useState<CustomSchema | null>(null);
   const [loadingDefaultDefinition, setLoadingDefaultDefinition] = useState(false);
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState<SettingsState>({
     // Google Drive設定
     googleDriveEnabled: true,
     googleDriveAccount: "admin@bandq.jp",
@@ -137,7 +171,7 @@ export default function HitocariSettingsPage() {
     }
   };
 
-  const updateSetting = (key: string, value: any) => {
+  const updateSetting = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
@@ -145,6 +179,7 @@ export default function HitocariSettingsPage() {
     <div className="w-full px-6 py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center space-x-4">
+        <SidebarTrigger className="md:hidden" />
         <Settings className="h-8 w-8" />
         <div>
           <h1 className="text-3xl font-bold tracking-tight">ひとキャリ設定</h1>

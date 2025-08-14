@@ -19,7 +19,7 @@ import { apiClient, ZohoCandidate } from "@/lib/api";
 interface CandidateSearchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCandidateSelect: (candidate: ZohoCandidate) => void;
+  onCandidateSelect: (candidate: ZohoCandidate | null) => void;
   selectedCandidate?: ZohoCandidate | null;
 }
 

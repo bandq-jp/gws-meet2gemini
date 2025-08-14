@@ -94,10 +94,11 @@ async function handleRequest(
     const responseData = await response.json();
     return NextResponse.json(responseData);
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('[Proxy] Request failed:', error);
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Internal server error', details: error.message },
+      { error: 'Internal server error', details: message },
       { status: 500 }
     );
   }
