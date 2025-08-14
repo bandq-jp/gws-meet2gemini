@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os
-from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -8,7 +8,6 @@ from pathlib import Path
 import logging
 
 from app.presentation.api.v1 import router as api_v1_router
-from app.infrastructure.config.settings import get_settings
 
 app = FastAPI(title="Meet2Gemini API")
 
@@ -32,20 +31,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def require_auth(request: Request):
-    settings = get_settings()
-    token = settings.app_auth_token
-    if not token:
-        return  # auth disabled
-    # Accept Authorization: Bearer <token> or query ?token=...
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth and auth.lower().startswith("bearer ") and auth.split(" ", 1)[1] == token:
-        return
-    if request.query_params.get("token") == token:
-        return
-    raise HTTPException(status_code=401, detail="Unauthorized")
-
-app.include_router(api_v1_router, prefix="/api/v1", dependencies=[Depends(require_auth)])
+app.include_router(api_v1_router, prefix="/api/v1")
 
 # Serve test client HTML via FastAPI
 _root_dir = Path(__file__).resolve().parents[1]
@@ -56,7 +42,7 @@ if _docs_dir.exists():
     app.mount("/_docs", StaticFiles(directory=str(_docs_dir)), name="docs")
 
 @app.get("/test-client")
-def serve_test_client(request: Request, _=Depends(require_auth)):
+def serve_test_client(request: Request):
     path = _docs_dir / "test-client.html"
     if not path.exists():
         return {"error": "test-client.html not found"}, 404

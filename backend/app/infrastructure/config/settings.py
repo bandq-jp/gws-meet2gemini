@@ -33,9 +33,6 @@ class Settings:
     zoho_app_hc_name_field_api: str | None = os.getenv("ZOHO_APP_HC_NAME_FIELD_API") or None
     zoho_app_hc_id_field_api: str | None = os.getenv("ZOHO_APP_HC_ID_FIELD_API") or None
 
-    # Simple auth (optional)
-    # If set, API endpoints (under /api/v1) and /test-client require Authorization: Bearer <token>
-    app_auth_token: str | None = os.getenv("APP_AUTH_TOKEN") or os.getenv("API_AUTH_TOKEN") or None
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
