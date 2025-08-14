@@ -5,7 +5,7 @@ DDD/オニオンアーキテクチャに従い、以下のように責任を分�
 - ドメイン層: スキーマ定義（business rules）
 - インフラ層: Gemini AI接続、抽出ロジック（technical details）
 
-元のGeminiStructuredExtractorSplitクラスから以下を分離：
+元のstructured_extractor_split.pyから以下を分離：
 - スキーマ定義 → domain/schemas/structured_extraction_schema.py
 - Geminiクライアント → infrastructure/gemini/client.py
 - 抽出ロジック → このファイル（responsibility: orchestration）
@@ -214,5 +214,3 @@ class StructuredDataExtractor:
         return ""
 
 
-# 後方互換性のため、元のクラス名でもアクセス可能にする
-GeminiStructuredExtractorSplit = StructuredDataExtractor
