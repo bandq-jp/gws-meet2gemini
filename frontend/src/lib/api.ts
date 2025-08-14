@@ -83,6 +83,9 @@ class ApiClient {
         throw new ApiError('API認証が必要です。バックエンドの設定を確認してください。', response.status);
       } else if (response.status === 404) {
         throw new ApiError('APIエンドポイントが見つかりません。バックエンドが起動しているか確認してください。', response.status);
+      } else if (response.status === 500) {
+        // 500エラーは外部サービス（Zoho等）の問題として扱う
+        throw new ApiError(error.detail || 'サービスが一時的に利用できません。', response.status);
       } else if (response.status >= 500) {
         throw new ApiError('サーバーエラーが発生しました。バックエンドのログを確認してください。', response.status);
       }
@@ -172,36 +175,68 @@ export const apiClient = new ApiClient();
 // Utility functions for candidate name matching
 export function extractNamesFromTitle(title: string): string[] {
   // Parse meeting title to extract potential candidate names
-  // Format: JP13:00_谷合 理央様_初回面談
+  // Formats to handle:
+  // - JP12:45~川嶋 拓海様_初回面談
+  // - JP13:00_谷合 理央様_初回面談
+  // - 田中太郎様_面談
   const patterns = [
-    /JP\d+:\d+_(.+?)様_/g,
-    /JP\d+:\d+_(.+?)_/g,
-    /(.+?)様/g,
-    /([一-龯々ーァ-ヺ]+)\s*([一-龯々ーァ-ヺ]+)/g, // Japanese name pattern
+    // JP時間~名前様 pattern
+    /JP\d{1,2}:\d{2}[~_](.+?)様/g,
+    // JP時間_名前様_その他 pattern
+    /JP\d{1,2}:\d{2}_(.+?)様_/g,
+    // JP時間_名前_その他 pattern (様なし)
+    /JP\d{1,2}:\d{2}_(.+?)_/g,
+    // 名前様 pattern (JPなし)
+    /([一-龯々ーァ-ヺ\s]+)様/g,
+    // 一般的な日本語の姓名パターン
+    /([一-龯々ーァ-ヺ]{1,4})\s+([一-龯々ーァ-ヺ]{1,4})/g,
   ];
 
   const names: string[] = [];
   
   for (const pattern of patterns) {
     let match;
+    // Reset pattern index for global patterns
+    pattern.lastIndex = 0;
+    
     while ((match = pattern.exec(title)) !== null) {
-      const name = match[1].trim();
+      let name = '';
+      
+      // Handle different match groups
+      if (pattern.source.includes('([一-龯々ーァ-ヺ]{1,4})\\s+([一-龯々ーァ-ヺ]{1,4})')) {
+        // Two-group Japanese name pattern
+        if (match[1] && match[2]) {
+          name = `${match[1]} ${match[2]}`;
+        }
+      } else {
+        // Single group pattern
+        name = match[1]?.trim() || '';
+      }
+      
       if (name && name.length > 1 && !names.includes(name)) {
-        names.push(name);
-        // Also add name variations (with/without space)
-        if (name.includes(' ')) {
-          names.push(name.replace(/\s+/g, ''));
-        } else if (name.length > 2) {
-          // Try to insert space in middle for Japanese names
-          const mid = Math.floor(name.length / 2);
-          const spacedName = name.slice(0, mid) + ' ' + name.slice(mid);
-          names.push(spacedName);
+        // Clean up the name - remove extra whitespace
+        name = name.replace(/\s+/g, ' ').trim();
+        
+        // Skip if it contains time patterns or non-name content
+        if (!/\d{1,2}:\d{2}|初回|面談|面接|ミーティング/.test(name)) {
+          names.push(name);
+          
+          // Add name variations
+          if (name.includes(' ')) {
+            // Add version without space
+            names.push(name.replace(/\s+/g, ''));
+          }
         }
       }
     }
   }
 
-  return names;
+  // Remove duplicates and sort by length (longer names first)
+  const uniqueNames = [...new Set(names)]
+    .filter(name => name.length > 1)
+    .sort((a, b) => b.length - a.length);
+
+  return uniqueNames;
 }
 
 export function createCandidateSearchVariations(names: string[]): string[] {

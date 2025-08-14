@@ -271,8 +271,19 @@ export default function EnhancedHitocariPage() {
               }
             }
           });
-        } catch (error) {
-          console.warn(`Search failed for name variation: ${nameVariation}`, error);
+        } catch (error: any) {
+          // ZohoのAPI認証エラーやサービス無効時は警告のみ表示し、検索を継続
+          if (error?.status === 500 || error?.status === 502 || error?.message?.includes('Zoho')) {
+            console.warn(`Zoho search unavailable for "${nameVariation}":`, error.message || error);
+            // 最初のエラー時のみユーザーに通知
+            if (searchVariations.indexOf(nameVariation) === 0) {
+              toast.error('Zoho CRM連携が一時的に利用できません。手動で候補者を選択してください。', {
+                duration: 6000,
+              });
+            }
+          } else {
+            console.warn(`Search failed for name variation: ${nameVariation}`, error);
+          }
         }
       }
 

@@ -12,14 +12,22 @@ async def search_app_hc(name: str = Query(..., min_length=1), limit: int = Query
 
     Returns: { items: [{record_id, candidate_name, candidate_id}], count }
     """
-    client = ZohoClient()
     try:
+        client = ZohoClient()
         items = client.search_app_hc_by_name(name=name.strip(), limit=limit)
         return {"items": items, "count": len(items)}
     except ZohoAuthError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # Zoho認証エラーは400で返すが、詳細なエラーメッセージを含める
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Zoho authentication failed: {str(e)}. Please check Zoho CRM credentials."
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Zoho search failed: {e}")
+        # その他のエラーは500で返し、Zoho APIが利用できない旨を明示
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Zoho CRM service unavailable: {str(e)}. Search functionality temporarily disabled."
+        )
 
 
 @router.get("/modules", response_model=dict)
@@ -54,11 +62,17 @@ async def get_app_hc_detail(record_id: str):
 
     Returns: { record: {...} }
     """
-    client = ZohoClient()
     try:
+        client = ZohoClient()
         record = client.get_app_hc_record(record_id)
         return {"record": record, "record_id": record_id}
     except ZohoAuthError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Zoho authentication failed: {str(e)}. Please check Zoho CRM credentials."
+        )
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Zoho record failed: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Zoho CRM service unavailable: {str(e)}. Record retrieval temporarily disabled."
+        )
