@@ -6,6 +6,8 @@ import json
 import logging
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from google.auth.exceptions import RefreshError
 import google.auth
 
 from app.infrastructure.config.settings import get_settings
@@ -26,53 +28,66 @@ class DriveDocsCollector:
         subjects = accounts or self.settings.impersonate_subjects
         self.logger.debug("collect_meeting_docs: subjects=%s include_structure=%s", subjects, include_structure)
         results: List[MeetingDocument] = []
+        skipped_accounts: List[str] = []
         for subject in subjects:
             self.logger.debug("Start collecting for subject=%s", subject)
-            drive = self._build_drive(subject)
-            docs = self._build_docs(subject)
-            folders = self._list_all_folders(drive)
-            self.logger.debug("Total folders found=%d", len(folders))
-            meet_folders = [fid for fid, meta in folders.items() if meta.get("name", "").lower() == "meet recordings".lower()]
-            if not meet_folders:
-                self.logger.warning("No 'Meet Recordings' folder found for subject=%s", subject)
-            for fid in meet_folders:
-                self.logger.debug("Scanning folder id=%s name=%s", fid, folders.get(fid, {}).get("name"))
-                files = self._list_files_in_folder(drive, fid)
-                self.logger.debug("Files in folder=%d", len(files))
-                for f in files:
-                    mime = f.get("mimeType")
-                    self.logger.debug("File id=%s name=%s mime=%s", f.get("id"), f.get("name"), mime)
-                    if mime != "application/vnd.google-apps.document":
-                        self.logger.debug("Skip non-Google Doc id=%s", f.get("id"))
-                        continue
-                    text = self._export_doc_as_text(drive, f["id"]) or ""
-                    self.logger.debug("Exported text length id=%s len=%d", f.get("id"), len(text))
-                    invited = self._get_invited_emails(drive, f["id"]) or []
-                    self.logger.debug("Invited emails count id=%s count=%d", f.get("id"), len(invited))
-                    organizer_name = None
-                    if isinstance(f.get("owners"), list) and f["owners"]:
-                        owner = f["owners"][0]
-                        organizer_name = owner.get("displayName")
-                    title = f.get("name")
-                    meeting_dt = self._parse_meeting_datetime(title) or f.get("modifiedTime")
-                    if meeting_dt == f.get("modifiedTime"):
-                        self.logger.debug("Datetime parsed from modifiedTime id=%s", f.get("id"))
-                    else:
-                        self.logger.debug("Datetime parsed from title id=%s", f.get("id"))
-                    meeting = MeetingDocument(
-                        id=None,
-                        doc_id=f["id"],
-                        title=title,
-                        meeting_datetime=meeting_dt,
-                        organizer_email=subject,
-                        organizer_name=organizer_name,
-                        document_url=f.get("webViewLink"),
-                        invited_emails=invited,
-                        text_content=text,
-                        metadata=f,
-                    )
-                    results.append(meeting)
-            self.logger.debug("Accumulated results for subject=%s count=%d", subject, len(results))
+            try:
+                drive = self._build_drive(subject)
+                docs = self._build_docs(subject)
+                folders = self._list_all_folders(drive)
+                self.logger.debug("Total folders found=%d", len(folders))
+                meet_folders = [fid for fid, meta in folders.items() if meta.get("name", "").lower() == "meet recordings".lower()]
+                if not meet_folders:
+                    self.logger.warning("No 'Meet Recordings' folder found for subject=%s", subject)
+                for fid in meet_folders:
+                    self.logger.debug("Scanning folder id=%s name=%s", fid, folders.get(fid, {}).get("name"))
+                    files = self._list_files_in_folder(drive, fid)
+                    self.logger.debug("Files in folder=%d", len(files))
+                    for f in files:
+                        mime = f.get("mimeType")
+                        self.logger.debug("File id=%s name=%s mime=%s", f.get("id"), f.get("name"), mime)
+                        if mime != "application/vnd.google-apps.document":
+                            self.logger.debug("Skip non-Google Doc id=%s", f.get("id"))
+                            continue
+                        text = self._export_doc_as_text(drive, f["id"]) or ""
+                        self.logger.debug("Exported text length id=%s len=%d", f.get("id"), len(text))
+                        invited = self._get_invited_emails(drive, f["id"]) or []
+                        self.logger.debug("Invited emails count id=%s count=%d", f.get("id"), len(invited))
+                        organizer_name = None
+                        if isinstance(f.get("owners"), list) and f["owners"]:
+                            owner = f["owners"][0]
+                            organizer_name = owner.get("displayName")
+                        title = f.get("name")
+                        meeting_dt = self._parse_meeting_datetime(title) or f.get("modifiedTime")
+                        if meeting_dt == f.get("modifiedTime"):
+                            self.logger.debug("Datetime parsed from modifiedTime id=%s", f.get("id"))
+                        else:
+                            self.logger.debug("Datetime parsed from title id=%s", f.get("id"))
+                        meeting = MeetingDocument(
+                            id=None,
+                            doc_id=f["id"],
+                            title=title,
+                            meeting_datetime=meeting_dt,
+                            organizer_email=subject,
+                            organizer_name=organizer_name,
+                            document_url=f.get("webViewLink"),
+                            invited_emails=invited,
+                            text_content=text,
+                            metadata=f,
+                        )
+                        results.append(meeting)
+                self.logger.debug("Accumulated results for subject=%s count=%d", subject, len(results))
+            except (RefreshError, HttpError) as e:
+                self.logger.warning("Skip subject due to auth/API error: subject=%s error=%s", subject, e)
+                skipped_accounts.append(subject)
+                continue
+            except Exception as e:
+                self.logger.error("Skip subject due to unexpected error: subject=%s error=%s", subject, e)
+                skipped_accounts.append(subject)
+                continue
+
+        if skipped_accounts:
+            self.logger.warning("Skipped accounts: %s", ", ".join(skipped_accounts))
         return results
 
     def _build_drive(self, subject: Optional[str]):
