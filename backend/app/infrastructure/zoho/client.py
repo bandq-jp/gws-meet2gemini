@@ -177,37 +177,3 @@ class ZohoClient:
         items = data.get("data") or []
         return items[0] if items else {}
     
-    # def update_record(self, module_api_name: str, record_id: str, update_data: Dict[str, Any]) -> Dict[str, Any]:
-    #     """
-    #     指定モジュールの特定レコードを更新する（PUTメソッド）
-    
-    #     Parameters:
-    #         module_api_name (str): 例 "jobSeeker"
-    #         record_id (str): ZohoのレコードID
-    #         update_data (dict): {"data": [ {...} ]} の形式で渡す
-    
-    #     Returns:
-    #         dict: Zoho APIの応答
-    #     """
-    #     base = self.settings.zoho_api_base_url.rstrip("/")
-    #     url = f"{base}/crm/v2/{module_api_name}/{record_id}"
-    
-    #     headers = {
-    #         "Authorization": f"Zoho-oauthtoken {self._get_access_token()}",
-    #         "Content-Type": "application/json"
-    #     }
-    
-    #     req = request.Request(
-    #         url,
-    #         data=json.dumps(update_data).encode("utf-8"),
-    #         headers=headers,
-    #         method="PUT"
-    #     )
-    
-    #     try:
-    #         with request.urlopen(req, timeout=30) as resp:
-    #             text = resp.read().decode("utf-8")
-    #             return json.loads(text) if text else {}
-    #     except error.HTTPError as e:
-    #         body = e.read().decode("utf-8", "ignore")
-    #         raise RuntimeError(f"Zoho PUT {module_api_name}/{record_id} failed: {e.code} {body}") from e
