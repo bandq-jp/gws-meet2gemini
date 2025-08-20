@@ -9,6 +9,9 @@ from app.infrastructure.gemini.structured_extractor import StructuredDataExtract
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
 from app.presentation.api.v1.settings import get_current_gemini_settings
 
+# from app.infrastructure.zoho.cliant import ZohoWriteClient
+
+
 class ProcessStructuredDataUseCase:
     def execute(self, meeting_id: str, zoho_candidate_id: Optional[str] = None, 
                      zoho_record_id: Optional[str] = None, 
@@ -84,6 +87,8 @@ class ProcessStructuredDataUseCase:
         )
         
         structured_repo.upsert_structured(structured_data)
+
+        
         return {
             "meeting_id": meeting_id, 
             "data": data, 
