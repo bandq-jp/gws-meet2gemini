@@ -88,12 +88,15 @@ class ProcessStructuredDataUseCase:
         
         structured_repo.upsert_structured(structured_data)
 
-        zoho_client = ZohoWriteClient()
-        zoho_result = zoho_client.update_record(
-            module="jobSeeker",  # ← モジュール名は文字列で
-            record_id=zoho_record_id,
-            data=data  # 必要に応じて data を整形して渡す
-        )
+        # zoho_client = ZohoWriteClient()
+        # try:
+        #     zoho_result = zoho_client.update_record(
+        #         module="jobSeeker",
+        #         record_id=zoho_record_id,
+        #         data=data
+        #     )
+        # except Exception as e:
+        #     raise RuntimeError(f"Zohoの更新に失敗しました: {str(e)}")
         
         return {
             "meeting_id": meeting_id, 
