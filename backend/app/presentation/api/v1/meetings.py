@@ -3,10 +3,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException
 import logging
 
-from app.presentation.schemas.meeting import MeetingOut
+from app.presentation.schemas.meeting import MeetingOut, MeetingListResponse
 from app.application.use_cases.collect_meetings import CollectMeetingsUseCase
 
 from app.application.use_cases.get_meeting_list import GetMeetingListUseCase
+from app.application.use_cases.get_meeting_list_paginated import GetMeetingListPaginatedUseCase
 from app.application.use_cases.get_meeting_detail import GetMeetingDetailUseCase
 from app.infrastructure.config.settings import get_settings
 
@@ -36,11 +37,26 @@ async def collect_meetings(
         logger.exception("Collect meetings failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/", response_model=List[MeetingOut])
-async def list_meetings(
+@router.get("/", response_model=MeetingListResponse)
+async def list_meetings_paginated(
+    page: int = Query(default=1, ge=1, description="ページ番号（1から開始）"),
+    page_size: int = Query(default=40, ge=1, le=40, description="1ページあたりのアイテム数（最大40）"),
+    accounts: Optional[List[str]] = Query(default=None, description="フィルタ対象のアカウント一覧"),
+    structured: Optional[bool] = Query(default=None, description="構造化済み(true)/未構造化(false)でフィルタ")
+):
+    """軽量な議事録一覧をページネーション付きで取得（推奨）"""
+    use_case = GetMeetingListPaginatedUseCase()
+    try:
+        return await use_case.execute(page, page_size, accounts, structured)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/legacy", response_model=List[MeetingOut])
+async def list_meetings_legacy(
     accounts: Optional[List[str]] = Query(default=None),
     structured: Optional[bool] = Query(default=None, description="構造化済み(true)/未構造化(false)でフィルタ")
 ):
+    """レガシー: 全データを含む議事録一覧取得（非推奨、互換性のため残存）"""
     use_case = GetMeetingListUseCase()
     try:
         return await use_case.execute(accounts, structured)

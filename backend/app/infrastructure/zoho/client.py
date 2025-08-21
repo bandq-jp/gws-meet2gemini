@@ -157,7 +157,9 @@ class ZohoClient:
                 last_err = e
                 continue
         if not data and last_err:
-            raise last_err
+            # 検索に失敗した場合（例：サポート外の演算子）、例外を発生させる代わりに空の結果を返す。
+            # これにより、APIクライアント側では「候補者が見つからなかった」として処理される。
+            pass
         records = []
         for r in data.get("data", []) or []:
             records.append(

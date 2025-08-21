@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CandidateSearchDialog } from "@/components/candidate-search-dialog";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
 import {
   Download,
   Search,
@@ -32,6 +33,8 @@ import {
 import { 
   apiClient, 
   Meeting, 
+  MeetingSummary,
+  MeetingListResponse,
   StructuredData, 
   ZohoCandidate,
   extractNamesFromTitle,
@@ -114,12 +117,24 @@ interface CandidateMatchSuggestion {
 type ViewMode = 'list' | 'detail';
 
 export default function EnhancedHitocariPage() {
-  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  // Meeting list states
+  const [meetingsResponse, setMeetingsResponse] = useState<MeetingListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [collecting, setCollecting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [showAllAccounts, setShowAllAccounts] = useState(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string>("");
+  
+  // Pagination states
+  const [allPage, setAllPage] = useState(1);
+  const [structuredPage, setStructuredPage] = useState(1);
+  const [unstructuredPage, setUnstructuredPage] = useState(1);
+  
+  // Tab states
+  const [activeTab, setActiveTab] = useState<'all' | 'structured' | 'unstructured'>('all');
+  
+  // Detail view states
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
   const [structuredData, setStructuredData] = useState<StructuredData | null>(null);
   const [candidateSuggestions, setCandidateSuggestions] = useState<CandidateMatchSuggestion[]>([]);
@@ -133,22 +148,39 @@ export default function EnhancedHitocariPage() {
   // Load available accounts function
   const loadAvailableAccounts = async () => {
     try {
-      // For now, we'll use a placeholder. In a real implementation, this would call an API
-      // that returns available email accounts from the backend
-      const mockAccounts = ['user1@bandq.jp', 'user2@bandq.jp', 'admin@bandq.jp'];
-      setAvailableAccounts(mockAccounts);
+      const response = await apiClient.getAvailableAccounts();
+      setAvailableAccounts(response.accounts);
+      if (response.accounts.length > 0 && !currentUserEmail) {
+        setCurrentUserEmail(response.accounts[0]); // デフォルトは最初のアカウント
+      }
     } catch (error) {
       console.error('Failed to load available accounts:', error);
       setAvailableAccounts([]);
     }
   };
 
-  // Define loadMeetings function before it's used in useEffect
-  const loadMeetings = async () => {
+  // Define loadMeetings function for paginated data
+  const loadMeetings = async (
+    tab: 'all' | 'structured' | 'unstructured' = activeTab,
+    page: number = 1,
+    resetPage: boolean = false
+  ) => {
     try {
       setLoading(true);
-      const data = await apiClient.getMeetings();
-      setMeetings(data);
+      
+      const accounts = showAllAccounts ? undefined : (currentUserEmail ? [currentUserEmail] : undefined);
+      const structured = tab === 'all' ? undefined : (tab === 'structured');
+      
+      const data = await apiClient.getMeetings(page, 40, accounts, structured);
+      setMeetingsResponse(data);
+      
+      // ページリセットが必要な場合
+      if (resetPage) {
+        setAllPage(1);
+        setStructuredPage(1);
+        setUnstructuredPage(1);
+      }
+      
     } catch (error: unknown) {
       console.error('Failed to load meetings:', error);
       const errorMessage = error instanceof Error ? error.message : '不明なエラー';
@@ -158,59 +190,72 @@ export default function EnhancedHitocariPage() {
     }
   };
 
-  // Filter meetings based on search and account filter
+  // 検索フィルタ済みのミーティング（軽量検索のみ）
   const filteredMeetings = useMemo(() => {
-    let filtered = meetings;
-
-    if (selectedAccount) {
-      filtered = filtered.filter(meeting => meeting.organizer_email === selectedAccount);
-    }
-
+    if (!meetingsResponse?.items) return [];
+    
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(meeting =>
+      return meetingsResponse.items.filter(meeting =>
         meeting.title?.toLowerCase().includes(query) ||
         meeting.organizer_email?.toLowerCase().includes(query) ||
-        meeting.invited_emails?.some(email => email.toLowerCase().includes(query)) ||
-        meeting.text_content?.toLowerCase().includes(query)
+        meeting.invited_emails?.some(email => email.toLowerCase().includes(query))
+        // text_content検索を削除（軽量化のため）
       );
     }
 
-    return filtered.sort((a, b) => 
-      new Date(b.meeting_datetime || b.created_at).getTime() - 
-      new Date(a.meeting_datetime || a.created_at).getTime()
-    );
-  }, [meetings, searchQuery, selectedAccount]);
+    return meetingsResponse.items;
+  }, [meetingsResponse, searchQuery]);
 
-  // Separate structured and unstructured meetings
-  const { structuredMeetings, unstructuredMeetings } = useMemo(() => {
-    const structured: Meeting[] = [];
-    const unstructured: Meeting[] = [];
+  // 現在のページ番号を取得
+  const getCurrentPage = () => {
+    switch (activeTab) {
+      case 'structured': return structuredPage;
+      case 'unstructured': return unstructuredPage;
+      default: return allPage;
+    }
+  };
 
-    filteredMeetings.forEach(meeting => {
-      if (meeting.is_structured) {
-        structured.push(meeting);
-      } else {
-        unstructured.push(meeting);
-      }
-    });
-
-    return { structuredMeetings: structured, unstructuredMeetings: unstructured };
-  }, [filteredMeetings]);
+  // ページ変更ハンドラ
+  const handlePageChange = (newPage: number) => {
+    switch (activeTab) {
+      case 'structured':
+        setStructuredPage(newPage);
+        break;
+      case 'unstructured':
+        setUnstructuredPage(newPage);
+        break;
+      default:
+        setAllPage(newPage);
+        break;
+    }
+    loadMeetings(activeTab, newPage);
+  };
 
   // Load meetings and accounts on component mount
   useEffect(() => {
     loadAvailableAccounts();
-    loadMeetings();
   }, []);
+
+  // Load meetings when accounts or filters change
+  useEffect(() => {
+    if (availableAccounts.length > 0) {
+      loadMeetings(activeTab, getCurrentPage(), true);
+    }
+  }, [showAllAccounts, currentUserEmail, activeTab]);
+
+  // アカウントフィルタ切り替え
+  const toggleAccountFilter = () => {
+    setShowAllAccounts(!showAllAccounts);
+  };
 
   const handleCollectMeetings = async () => {
     try {
       setCollecting(true);
-      const accounts = selectedAccount ? [selectedAccount] : undefined;
+      const accounts = showAllAccounts ? undefined : (currentUserEmail ? [currentUserEmail] : undefined);
       const result = await apiClient.collectMeetings(accounts, false, false);
       
-      await loadMeetings();
+      await loadMeetings(activeTab, getCurrentPage(), true);
       
       toast.success(`${result.stored}件の議事録を取得しました`);
     } catch (error: unknown) {
@@ -222,24 +267,26 @@ export default function EnhancedHitocariPage() {
     }
   };
 
-  const handleMeetingSelect = async (meeting: Meeting) => {
-    setSelectedMeeting(meeting);
-    setStructuredData(null);
-    setCandidateSuggestions([]);
-    setSelectedCandidate(null);
-    setViewMode('detail');
-
+  const handleMeetingSelect = async (meetingSummary: MeetingSummary) => {
+    // 詳細データを取得
     try {
+      const fullMeeting = await apiClient.getMeeting(meetingSummary.id);
+      setSelectedMeeting(fullMeeting);
+      setStructuredData(null);
+      setCandidateSuggestions([]);
+      setSelectedCandidate(null);
+      setViewMode('detail');
+
       setLoadingStructured(true);
-      const data = await apiClient.getStructuredData(meeting.id);
+      const data = await apiClient.getStructuredData(fullMeeting.id);
       if (data && data.data && Object.keys(data.data).length > 0) {
         setStructuredData(data);
       } else {
-        await generateCandidateSuggestions(meeting);
+        await generateCandidateSuggestions(fullMeeting);
       }
     } catch (error) {
-      console.error('Failed to load structured data:', error);
-      await generateCandidateSuggestions(meeting);
+      console.error('Failed to load meeting detail:', error);
+      toast.error('議事録の詳細を取得できませんでした');
     } finally {
       setLoadingStructured(false);
     }
@@ -339,7 +386,7 @@ export default function EnhancedHitocariPage() {
       setStructuredData(result);
       setCandidateSuggestions([]);
       
-      await loadMeetings();
+      await loadMeetings(activeTab, getCurrentPage());
       toast.success('構造化処理が完了しました');
     } catch (error) {
       console.error('Failed to process structured data:', error);
@@ -398,7 +445,7 @@ export default function EnhancedHitocariPage() {
           <Button
             variant="outline"
             size="icon"
-            onClick={loadMeetings}
+            onClick={() => loadMeetings()}
             disabled={loading}
           >
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -413,30 +460,38 @@ export default function EnhancedHitocariPage() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="議事録を検索..."
+                placeholder="議事録を検索（タイトル、主催者、参加者）..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10"
               />
             </div>
             
-            <div className="flex items-center space-x-2">
-              <Label htmlFor="account-select" className="text-sm">
-                アカウントでフィルタ:
-              </Label>
-              <select
-                id="account-select"
-                value={selectedAccount}
-                onChange={(e) => setSelectedAccount(e.target.value)}
-                className="rounded border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                <option value="">すべてのアカウント</option>
-                {availableAccounts.map((account) => (
-                  <option key={account} value={account}>
-                    {account}
-                  </option>
-                ))}
-              </select>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Label htmlFor="account-filter" className="text-sm">
+                  アカウントフィルタ:
+                </Label>
+                <div className="flex items-center space-x-3">
+                  <span className={`text-sm ${!showAllAccounts ? 'font-medium' : 'text-muted-foreground'}`}>
+                    {currentUserEmail || 'マイアカウント'}
+                  </span>
+                  <Switch
+                    id="account-filter"
+                    checked={showAllAccounts}
+                    onCheckedChange={toggleAccountFilter}
+                  />
+                  <span className={`text-sm ${showAllAccounts ? 'font-medium' : 'text-muted-foreground'}`}>
+                    全てのアカウント
+                  </span>
+                </div>
+              </div>
+              
+              {meetingsResponse && (
+                <div className="text-sm text-muted-foreground">
+                  {meetingsResponse.total}件中 {((meetingsResponse.page - 1) * meetingsResponse.page_size) + 1}-{Math.min(meetingsResponse.page * meetingsResponse.page_size, meetingsResponse.total)}件を表示
+                </div>
+              )}
             </div>
           </div>
         </CardContent>
@@ -444,30 +499,95 @@ export default function EnhancedHitocariPage() {
 
 
       {/* Meetings Tabs */}
-      <Tabs defaultValue="all" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-4">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="all">全て ({filteredMeetings.length})</TabsTrigger>
-          <TabsTrigger value="structured">構造化済み ({structuredMeetings.length})</TabsTrigger>
-          <TabsTrigger value="unstructured">未処理 ({unstructuredMeetings.length})</TabsTrigger>
+          <TabsTrigger value="all">
+            全て {meetingsResponse && activeTab === 'all' ? `(${meetingsResponse.total})` : ''}
+          </TabsTrigger>
+          <TabsTrigger value="structured">
+            構造化済み {meetingsResponse && activeTab === 'structured' ? `(${meetingsResponse.total})` : ''}
+          </TabsTrigger>
+          <TabsTrigger value="unstructured">
+            未処理 {meetingsResponse && activeTab === 'unstructured' ? `(${meetingsResponse.total})` : ''}
+          </TabsTrigger>
         </TabsList>
         
         <TabsContent value="all" className="space-y-4">
           <MeetingsList meetings={filteredMeetings} />
+          <PaginationControls />
         </TabsContent>
         
         <TabsContent value="structured" className="space-y-4">
-          <MeetingsList meetings={structuredMeetings} />
+          <MeetingsList meetings={filteredMeetings} />
+          <PaginationControls />
         </TabsContent>
         
         <TabsContent value="unstructured" className="space-y-4">
-          <MeetingsList meetings={unstructuredMeetings} />
+          <MeetingsList meetings={filteredMeetings} />
+          <PaginationControls />
         </TabsContent>
       </Tabs>
     </div>
   );
 
+  // Pagination Controls Component
+  const PaginationControls = () => {
+    if (!meetingsResponse || meetingsResponse.total_pages <= 1) return null;
+    
+    const currentPage = getCurrentPage();
+    const { total_pages, has_previous, has_next } = meetingsResponse;
+    
+    return (
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-muted-foreground">
+          ページ {currentPage} / {total_pages}
+        </div>
+        <div className="flex items-center space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!has_previous || loading}
+            onClick={() => handlePageChange(currentPage - 1)}
+          >
+            前へ
+          </Button>
+          
+          <div className="flex items-center space-x-1">
+            {Array.from({ length: Math.min(5, total_pages) }, (_, i) => {
+              const pageNum = Math.max(1, Math.min(total_pages - 4, currentPage - 2)) + i;
+              if (pageNum <= total_pages) {
+                return (
+                  <Button
+                    key={pageNum}
+                    variant={pageNum === currentPage ? "default" : "outline"}
+                    size="sm"
+                    disabled={loading}
+                    onClick={() => handlePageChange(pageNum)}
+                    className="w-8"
+                  >
+                    {pageNum}
+                  </Button>
+                );
+              }
+              return null;
+            })}
+          </div>
+          
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!has_next || loading}
+            onClick={() => handlePageChange(currentPage + 1)}
+          >
+            次へ
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   // Meetings List Component
-  const MeetingsList = ({ meetings }: { meetings: Meeting[] }) => {
+  const MeetingsList = ({ meetings }: { meetings: MeetingSummary[] }) => {
     if (loading) {
       return (
         <div className="flex items-center justify-center py-12">
