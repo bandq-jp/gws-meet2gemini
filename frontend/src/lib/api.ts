@@ -1,7 +1,7 @@
 // Direct connection to backend API
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
 
-export interface Meeting {
+export interface MeetingSummary {
   id: string;
   doc_id: string;
   title: string;
@@ -10,11 +10,24 @@ export interface Meeting {
   organizer_name?: string;
   document_url?: string;
   invited_emails: string[];
-  text_content?: string;
-  metadata?: Record<string, unknown>;
   is_structured?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface Meeting extends MeetingSummary {
+  text_content?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface MeetingListResponse {
+  items: MeetingSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
 }
 
 export interface StructuredData {
@@ -165,13 +178,34 @@ class ApiClient {
   }
 
   // Meeting endpoints
-  async getMeetings(accounts?: string[]): Promise<Meeting[]> {
+  async getMeetings(
+    page = 1,
+    pageSize = 40,
+    accounts?: string[],
+    structured?: boolean
+  ): Promise<MeetingListResponse> {
+    const params = new URLSearchParams();
+    params.set('page', page.toString());
+    params.set('page_size', pageSize.toString());
+    
+    if (accounts && accounts.length > 0) {
+      accounts.forEach(account => params.append('accounts', account));
+    }
+    
+    if (structured !== undefined) {
+      params.set('structured', structured.toString());
+    }
+    
+    return this.request<MeetingListResponse>(`/meetings?${params.toString()}`);
+  }
+
+  async getMeetingsLegacy(accounts?: string[]): Promise<Meeting[]> {
     const params = new URLSearchParams();
     if (accounts && accounts.length > 0) {
       accounts.forEach(account => params.append('accounts', account));
     }
     const queryString = params.toString();
-    const endpoint = `/meetings${queryString ? `?${queryString}` : ''}`;
+    const endpoint = `/meetings/legacy${queryString ? `?${queryString}` : ''}`;
     
     return this.request<Meeting[]>(endpoint);
   }
@@ -195,6 +229,10 @@ class ApiClient {
     return this.request<{ stored: number }>(`/meetings/collect?${params.toString()}`, {
       method: 'POST',
     });
+  }
+
+  async getAvailableAccounts(): Promise<{ accounts: string[] }> {
+    return this.request<{ accounts: string[] }>('/meetings/accounts');
   }
 
   // Structured data endpoints
