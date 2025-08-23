@@ -197,23 +197,24 @@ export default function HitocariListPage() {
     const { total_pages, has_previous, has_next } = meetingsResponse;
     
     return (
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
+      <div className="flex flex-col space-y-3 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+        <div className="text-xs sm:text-sm text-muted-foreground text-center sm:text-left">
           ページ {currentPage} / {total_pages}
         </div>
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center justify-center space-x-1 sm:space-x-2">
           <Button
             variant="outline"
             size="sm"
             disabled={!has_previous || loading}
             onClick={() => handlePageChange(currentPage - 1)}
+            className="text-xs sm:text-sm px-2 sm:px-3"
           >
             前へ
           </Button>
           
           <div className="flex items-center space-x-1">
-            {Array.from({ length: Math.min(5, total_pages) }, (_, i) => {
-              const pageNum = Math.max(1, Math.min(total_pages - 4, currentPage - 2)) + i;
+            {Array.from({ length: Math.min(3, total_pages) }, (_, i) => {
+              const pageNum = Math.max(1, Math.min(total_pages - 2, currentPage - 1)) + i;
               if (pageNum <= total_pages) {
                 return (
                   <Button
@@ -222,7 +223,7 @@ export default function HitocariListPage() {
                     size="sm"
                     disabled={loading}
                     onClick={() => handlePageChange(pageNum)}
-                    className="w-8"
+                    className="w-8 h-8 text-xs sm:text-sm p-0"
                   >
                     {pageNum}
                   </Button>
@@ -237,6 +238,7 @@ export default function HitocariListPage() {
             size="sm"
             disabled={!has_next || loading}
             onClick={() => handlePageChange(currentPage + 1)}
+            className="text-xs sm:text-sm px-2 sm:px-3"
           >
             次へ
           </Button>
@@ -275,41 +277,44 @@ export default function HitocariListPage() {
     }
 
     return (
-      <div className="space-y-3">
+      <div className="space-y-2 sm:space-y-3">
         {meetings.map((meeting) => (
           <Link key={meeting.id} href={`/hitocari/${meeting.id}`}>
-            <Card className="hover:shadow-md transition-shadow cursor-pointer">
-              <CardContent className="p-6">
+            <Card className="hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98] transition-transform">
+              <CardContent className="p-4 sm:p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0 space-y-2">
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-medium truncate">
+                    <div className="flex flex-col space-y-2 sm:flex-row sm:items-center sm:space-y-0 sm:space-x-2">
+                      <h3 className="text-base sm:text-lg font-medium line-clamp-2 sm:truncate">
                         {meeting.title || '(無題)'}
                       </h3>
-                      <Badge variant={meeting.is_structured ? "default" : "secondary"}>
-                        {meeting.is_structured ? "構造化済み" : "未処理"}
+                      <Badge 
+                        variant={meeting.is_structured ? "default" : "secondary"}
+                        className="self-start sm:self-auto text-xs px-2 py-0.5"
+                      >
+                        {meeting.is_structured ? "構造化済" : "未処理"}
                       </Badge>
                     </div>
                     
-                    <div className="flex items-center space-x-4 text-sm text-muted-foreground overflow-hidden">
+                    <div className="space-y-1 sm:space-y-0 sm:flex sm:items-center sm:space-x-4 text-xs sm:text-sm text-muted-foreground">
                       <div className="flex items-center space-x-1 min-w-0">
-                        <User className="h-4 w-4 shrink-0" />
-                        <span className="truncate">{meeting.organizer_email}</span>
+                        <User className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                        <span className="truncate">{meeting.organizer_email?.split('@')[0] || meeting.organizer_email}</span>
                       </div>
                       {meeting.meeting_datetime && (
-                        <div className="flex items-center space-x-1 shrink-0">
-                          <Clock className="h-4 w-4" />
-                          <span>{formatDateTime(meeting.meeting_datetime)}</span>
+                        <div className="flex items-center space-x-1">
+                          <Clock className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                          <span className="truncate">{formatDateTime(meeting.meeting_datetime)}</span>
                         </div>
                       )}
-                      <div className="flex items-center space-x-1 shrink-0">
-                        <Users className="h-4 w-4" />
-                        <span>{meeting.invited_emails.length}名参加</span>
+                      <div className="flex items-center space-x-1">
+                        <Users className="h-3 w-3 sm:h-4 sm:w-4 shrink-0" />
+                        <span>{meeting.invited_emails.length}名</span>
                       </div>
                     </div>
                   </div>
                   
-                  <ChevronRight className="h-5 w-5 text-muted-foreground ml-4" />
+                  <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground ml-2 sm:ml-4 shrink-0" />
                 </div>
               </CardContent>
             </Card>
@@ -320,39 +325,41 @@ export default function HitocariListPage() {
   };
 
   return (
-    <div className="w-full px-6 py-6">
-      <div className="space-y-6">
+    <div className="w-full px-3 py-4 sm:px-6 sm:py-6">
+      <div className="space-y-4 sm:space-y-6">
         {/* Header with Actions */}
-        <div className="flex flex-col space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
-          <div className="flex items-center space-x-4">
+        <div className="flex flex-col space-y-3 sm:space-y-4 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+          <div className="flex items-center space-x-2 sm:space-x-4">
             <SidebarTrigger className="md:hidden" />
-            <div>
-              <h1 className="text-3xl font-bold tracking-tight">議事録管理</h1>
-              <p className="text-muted-foreground">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">議事録管理</h1>
+              <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">
                 Google Meet議事録の管理と構造化データ抽出
               </p>
             </div>
           </div>
           
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center space-x-2 sm:space-x-2 w-full sm:w-auto">
             <Button
               onClick={handleCollectMeetings}
               disabled={collecting}
-              className="flex items-center space-x-2"
+              className="flex-1 sm:flex-none items-center justify-center"
+              size="sm"
             >
               {collecting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Download className="h-4 w-4" />
               )}
-              <span>{collecting ? "取得中..." : "Google Driveから取得"}</span>
+              <span className="ml-2 sm:ml-2">{collecting ? "取得中" : "取得"}</span>
             </Button>
             
             <Button
               variant="outline"
-              size="icon"
+              size="sm"
               onClick={() => loadMeetings()}
               disabled={loading}
+              className="px-3"
             >
               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </Button>
@@ -361,41 +368,49 @@ export default function HitocariListPage() {
 
         {/* Search and Filter Controls */}
         <Card>
-          <CardContent className="p-6">
-            <div className="space-y-4">
+          <CardContent className="p-3 sm:p-6">
+            <div className="space-y-3 sm:space-y-4">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="議事録を検索（タイトル、主催者、参加者）..."
+                  placeholder="タイトル、主催者で検索..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 text-base sm:text-sm"
                 />
               </div>
               
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Label htmlFor="account-filter" className="text-sm">
-                    アカウントフィルタ:
+              <div className="flex flex-col space-y-3 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+                <div className="space-y-2 sm:space-y-0">
+                  <Label htmlFor="account-filter" className="text-sm font-medium block sm:hidden">
+                    アカウントフィルタ
                   </Label>
                   <div className="flex items-center space-x-3">
-                    <span className={`text-sm ${!showAllAccounts ? 'font-medium' : 'text-muted-foreground'}`}>
-                      {currentUserEmail || 'マイアカウント'}
-                    </span>
-                    <Switch
-                      id="account-filter"
-                      checked={showAllAccounts}
-                      onCheckedChange={toggleAccountFilter}
-                    />
-                    <span className={`text-sm ${showAllAccounts ? 'font-medium' : 'text-muted-foreground'}`}>
-                      全てのアカウント
-                    </span>
+                    <Label htmlFor="account-filter" className="text-sm hidden sm:block">
+                      フィルタ:
+                    </Label>
+                    <div className="flex items-center space-x-2 text-xs sm:text-sm">
+                      <span className={`truncate max-w-[100px] sm:max-w-none ${!showAllAccounts ? 'font-medium' : 'text-muted-foreground'}`}>
+                        {showAllAccounts ? '全アカウント' : (currentUserEmail?.split('@')[0] || 'マイアカウント')}
+                      </span>
+                      <Switch
+                        id="account-filter"
+                        checked={showAllAccounts}
+                        onCheckedChange={toggleAccountFilter}
+                        size="sm"
+                      />
+                    </div>
                   </div>
                 </div>
                 
                 {meetingsResponse && (
-                  <div className="text-sm text-muted-foreground">
-                    {meetingsResponse.total}件中 {((meetingsResponse.page - 1) * meetingsResponse.page_size) + 1}-{Math.min(meetingsResponse.page * meetingsResponse.page_size, meetingsResponse.total)}件を表示
+                  <div className="text-xs sm:text-sm text-muted-foreground text-right">
+                    <div className="sm:hidden">
+                      {meetingsResponse.total}件
+                    </div>
+                    <div className="hidden sm:block">
+                      {meetingsResponse.total}件中 {((meetingsResponse.page - 1) * meetingsResponse.page_size) + 1}-{Math.min(meetingsResponse.page * meetingsResponse.page_size, meetingsResponse.total)}件を表示
+                    </div>
                   </div>
                 )}
               </div>
@@ -404,16 +419,31 @@ export default function HitocariListPage() {
         </Card>
 
         {/* Meetings Tabs */}
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="all">
-              全て {meetingsResponse && activeTab === 'all' ? `(${meetingsResponse.total})` : ''}
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-3 sm:space-y-4">
+          <TabsList className="grid w-full grid-cols-3 h-auto">
+            <TabsTrigger value="all" className="text-xs sm:text-sm py-2 px-1 sm:px-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-1">
+                <span>全て</span>
+                {meetingsResponse && activeTab === 'all' && (
+                  <span className="text-xs sm:text-sm">({meetingsResponse.total})</span>
+                )}
+              </div>
             </TabsTrigger>
-            <TabsTrigger value="structured">
-              構造化済み {meetingsResponse && activeTab === 'structured' ? `(${meetingsResponse.total})` : ''}
+            <TabsTrigger value="structured" className="text-xs sm:text-sm py-2 px-1 sm:px-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-1">
+                <span>構造化</span>
+                {meetingsResponse && activeTab === 'structured' && (
+                  <span className="text-xs sm:text-sm">({meetingsResponse.total})</span>
+                )}
+              </div>
             </TabsTrigger>
-            <TabsTrigger value="unstructured">
-              未処理 {meetingsResponse && activeTab === 'unstructured' ? `(${meetingsResponse.total})` : ''}
+            <TabsTrigger value="unstructured" className="text-xs sm:text-sm py-2 px-1 sm:px-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-1">
+                <span>未処理</span>
+                {meetingsResponse && activeTab === 'unstructured' && (
+                  <span className="text-xs sm:text-sm">({meetingsResponse.total})</span>
+                )}
+              </div>
             </TabsTrigger>
           </TabsList>
           

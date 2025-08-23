@@ -485,11 +485,11 @@ export default function MeetingDetailPage() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4 sm:space-y-6 p-4 sm:p-6">
           {/* Zoho候補者情報セクション */}
           {data.zoho_candidate && (
             <div className="space-y-3">
-              <h4 className="text-base font-semibold text-foreground">Zoho CRM 候補者情報</h4>
+              <h4 className="text-sm sm:text-base font-semibold text-foreground">Zoho CRM 候補者情報</h4>
               <div className="grid grid-cols-1 border border-border rounded-lg overflow-hidden">
                 {[
                   { key: 'candidate_name', label: '候補者名' },
@@ -497,11 +497,11 @@ export default function MeetingDetailPage() {
                   { key: 'record_id', label: 'レコードID' },
                   { key: 'candidate_email', label: 'メールアドレス' },
                 ].map((field, index) => (
-                  <div key={field.key} className={`grid grid-cols-[200px_1fr] ${index > 0 ? 'border-t border-border' : ''}`}>
-                    <div className="bg-muted/30 px-3 py-2 text-sm font-medium text-muted-foreground border-r border-border">
+                  <div key={field.key} className={`flex flex-col sm:grid sm:grid-cols-[140px_1fr] lg:grid-cols-[180px_1fr] ${index > 0 ? 'border-t border-border' : ''}`}>
+                    <div className="bg-muted/30 px-3 py-2 text-xs sm:text-sm font-medium text-muted-foreground sm:border-r border-border">
                       {field.label}
                     </div>
-                    <div className="px-3 py-2 text-sm">
+                    <div className="px-3 py-2 text-xs sm:text-sm border-t sm:border-t-0 border-border sm:border-0">
                       {renderStructuredValue(data.zoho_candidate?.[field.key as keyof typeof data.zoho_candidate])}
                     </div>
                   </div>
@@ -518,18 +518,18 @@ export default function MeetingDetailPage() {
 
               return (
                 <div key={section.title} className="space-y-3">
-                  <h4 className="text-base font-semibold text-foreground">{section.title}</h4>
+                  <h4 className="text-sm sm:text-base font-semibold text-foreground">{section.title}</h4>
                   <div className="grid grid-cols-1 border border-border rounded-lg overflow-hidden">
                     {section.items.map((item, index) => {
                       const value = data.data[item.key];
                       if (value === null || value === undefined || value === '') return null;
                       
                       return (
-                        <div key={item.key} className={`grid grid-cols-[200px_1fr] ${index > 0 ? 'border-t border-border' : ''}`}>
-                          <div className="bg-muted/30 px-3 py-2 text-sm font-medium text-muted-foreground border-r border-border">
+                        <div key={item.key} className={`flex flex-col sm:grid sm:grid-cols-[140px_1fr] lg:grid-cols-[180px_1fr] ${index > 0 ? 'border-t border-border' : ''}`}>
+                          <div className="bg-muted/30 px-3 py-2 text-xs sm:text-sm font-medium text-muted-foreground sm:border-r border-border">
                             {item.label}
                           </div>
-                          <div className="px-3 py-2 text-sm">
+                          <div className="px-3 py-2 text-xs sm:text-sm border-t sm:border-t-0 border-border sm:border-0">
                             {renderStructuredValue(value)}
                           </div>
                         </div>
@@ -608,7 +608,7 @@ export default function MeetingDetailPage() {
             </Button>
             {selectedCandidate && !candidateSuggestions.some(s => s.candidate.record_id === selectedCandidate.record_id) && (
               <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                <div className="text-sm font-medium text-green-800 truncate">
+                <div className="text-xs sm:text-sm font-medium text-green-800 truncate">
                   手動選択: {selectedCandidate.candidate_name}
                 </div>
                 <div className="text-xs text-green-700 mt-1 truncate">
@@ -623,8 +623,7 @@ export default function MeetingDetailPage() {
           <Button 
             onClick={handleProcessStructured}
             disabled={!selectedCandidate || processing}
-            className="w-full"
-            size="lg"
+            className="w-full h-12 sm:h-10 text-sm sm:text-base"
           >
             {processing ? (
               <>
