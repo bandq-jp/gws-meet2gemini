@@ -112,6 +112,102 @@ export interface CustomSchema {
   updated_at?: string;
 }
 
+// AI Cost interfaces
+export interface AiCostSummary {
+  total_cost_usd: string;
+  total_meetings: number;
+  total_api_calls: number;
+  total_tokens: number;
+  total_prompt_tokens: number;
+  total_output_tokens: number;
+  average_cost_per_call: string;
+}
+
+export interface CostBreakdown {
+  input_cost: string;
+  output_cost: string;
+  cache_cost: string;
+}
+
+export interface MeetingCost {
+  meeting_id: string;
+  meeting_title: string;
+  total_cost: string;
+  total_tokens: number;
+  api_calls_count: number;
+  created_at: string;
+  note?: string;
+}
+
+export interface AiCostOverview {
+  summary: AiCostSummary;
+  cost_breakdown: CostBreakdown;
+  recent_meetings: MeetingCost[];
+  last_updated?: string;
+}
+
+export interface ApiCallDetail {
+  id: string;
+  group_name: string;
+  model: string;
+  prompt_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+  input_cost: string;
+  output_cost: string;
+  cache_cost: string;
+  total_cost: string;
+  pricing_tier: string;
+  latency_ms: number;
+  created_at: string;
+}
+
+export interface MeetingCostDetail {
+  meeting_id: string;
+  meeting_title: string;
+  summary: {
+    total_cost: string;
+    total_prompt_tokens: number;
+    total_output_tokens: number;
+    total_cached_tokens: number;
+    api_calls_count: number;
+    input_cost: string;
+    output_cost: string;
+    cache_cost: string;
+  };
+  call_details: ApiCallDetail[];
+  created_at: string;
+}
+
+export interface PricingInfo {
+  model: string;
+  currency: string;
+  pricing_per_million_tokens: {
+    input: {
+      standard: string;
+      high_volume: string;
+    };
+    output: {
+      standard: string;
+      high_volume: string;
+    };
+    context_cache: {
+      standard: string;
+      high_volume: string;
+    };
+  };
+  thresholds: {
+    high_volume_threshold: number;
+  };
+  notes: string[];
+  calculation_example: {
+    description: string;
+    input_cost: string;
+    output_cost: string;
+    total_cost: string;
+  };
+}
+
 
 export class ApiError extends Error {
   status: number;
@@ -357,6 +453,20 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ new_name: newName }),
     });
+  }
+
+  // AI Cost endpoints
+  async getAiCostSummary(limit = 1000): Promise<AiCostOverview> {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    return this.request<AiCostOverview>(`/ai-costs/summary?${params.toString()}`);
+  }
+
+  async getMeetingCostDetail(meetingId: string): Promise<MeetingCostDetail> {
+    return this.request<MeetingCostDetail>(`/ai-costs/meeting/${encodeURIComponent(meetingId)}`);
+  }
+
+  async getPricingInfo(): Promise<PricingInfo> {
+    return this.request<PricingInfo>('/ai-costs/pricing-info');
   }
 }
 
