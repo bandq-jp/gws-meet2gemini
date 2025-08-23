@@ -21,15 +21,22 @@ for _name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
 def health():
     return {"status": "ok"}
 
-# CORS (for local HTML test client, Swagger, etc.)
-_cors_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS (社内ドメインのみ許可、本番では明示的な設定必須)
+_cors_origins_env = os.getenv("CORS_ALLOW_ORIGINS", "")
+_cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+
+# デフォルトはローカル開発用のみ
+if not _cors_origins and os.getenv("ENV", "local") == "local":
+    _cors_origins = ["http://localhost:3000"]
+
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    )
 
 app.include_router(api_v1_router, prefix="/api/v1")
 
