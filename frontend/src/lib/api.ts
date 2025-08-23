@@ -52,6 +52,15 @@ export interface ZohoCandidate {
   candidate_email?: string;
 }
 
+export interface ZohoLayoutCheck {
+  status: "success" | "error";
+  layout_id?: string;
+  layout_name?: string;
+  layout_display_label?: string;
+  is_valid_layout: boolean;
+  message: string;
+}
+
 export interface GeminiSettings {
   gemini_enabled: boolean;
   gemini_model: string;
@@ -262,6 +271,12 @@ class ApiClient {
   }> {
     return this.request<{ record: Record<string, unknown>; record_id: string }>(
       `/zoho/app-hc/${encodeURIComponent(recordId)}`
+    );
+  }
+
+  async checkZohoCandidateLayout(recordId: string): Promise<ZohoLayoutCheck> {
+    return this.request<ZohoLayoutCheck>(
+      `/zoho/app-hc/${encodeURIComponent(recordId)}/layout-check`
     );
   }
 

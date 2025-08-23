@@ -9,7 +9,7 @@ from app.infrastructure.supabase.repositories.custom_schema_repository_impl impo
 from app.infrastructure.gemini.structured_extractor import StructuredDataExtractor
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
 from app.presentation.api.v1.settings import get_current_gemini_settings
-from app.infrastructure.zoho.client import ZohoWriteClient, ZohoAuthError
+from app.infrastructure.zoho.client import ZohoWriteClient, ZohoAuthError, ZohoClient
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -30,6 +30,11 @@ class ProcessStructuredDataUseCase:
         # Require Zoho candidate selection
         if not zoho_record_id:
             raise ValueError("Zoho candidate selection is required for structured output processing")
+        
+        # Zohoレコードのレイアウトチェック
+        layout_validation = self._validate_zoho_record_layout(zoho_record_id, zoho_candidate_name)
+        if not layout_validation["is_valid"]:
+            raise ValueError(layout_validation["error_message"])
         
         # カスタムスキーマを取得（指定されている場合）
         custom_schema = None
@@ -214,4 +219,71 @@ class ProcessStructuredDataUseCase:
                 "status": "error",
                 "message": f"Zoho書き込みで予期しないエラーが発生しました: {str(e)}",
                 "error": str(e)
+            }
+    
+    def _validate_zoho_record_layout(
+        self, 
+        zoho_record_id: str, 
+        candidate_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Zohoレコードのレイアウトが「自動入力・マッチング用」かどうかを検証する
+        
+        Args:
+            zoho_record_id: ZohoレコードID
+            candidate_name: 候補者名（ログ用）
+            
+        Returns:
+            Dict with validation result
+        """
+        try:
+            logger.info(f"Zohoレイアウト検証開始: record_id={zoho_record_id}, candidate={candidate_name}")
+            
+            zoho_client = ZohoClient()
+            layout_check = zoho_client.check_record_layout(zoho_record_id)
+            
+            if layout_check["status"] != "success":
+                logger.error(
+                    f"Zohoレイアウトチェック失敗: record_id={zoho_record_id}, "
+                    f"candidate={candidate_name}, error={layout_check['message']}"
+                )
+                return {
+                    "is_valid": False,
+                    "error_message": f"レイアウトチェックに失敗しました: {layout_check['message']}"
+                }
+            
+            is_valid_layout = layout_check.get("is_valid_layout", False)
+            layout_name = layout_check.get("layout_display_label", "不明")
+            
+            if not is_valid_layout:
+                error_msg = (
+                    f"構造化出力はサポートされていないレイアウトです。"
+                    f"現在のレイアウト: 「{layout_name}」。"
+                    f"「自動入力・マッチング用」レイアウトに変更してから再実行してください。"
+                )
+                logger.warning(
+                    f"Zohoレイアウト不適切: record_id={zoho_record_id}, "
+                    f"candidate={candidate_name}, layout={layout_name}"
+                )
+                return {
+                    "is_valid": False,
+                    "error_message": error_msg
+                }
+            
+            logger.info(
+                f"Zohoレイアウト検証成功: record_id={zoho_record_id}, "
+                f"candidate={candidate_name}, layout={layout_name}"
+            )
+            return {
+                "is_valid": True,
+                "layout_info": layout_check
+            }
+            
+        except Exception as e:
+            logger.error(
+                f"Zohoレイアウト検証でエラー: record_id={zoho_record_id}, "
+                f"candidate={candidate_name}, error={str(e)}"
+            )
+            return {
+                "is_valid": False,
+                "error_message": f"レイアウト検証でエラーが発生しました: {str(e)}"
             }

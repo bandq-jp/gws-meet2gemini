@@ -37,6 +37,7 @@ import {
   MeetingListResponse,
   StructuredData, 
   ZohoCandidate,
+  ZohoLayoutCheck,
   extractNamesFromTitle,
   createCandidateSearchVariations 
 } from "@/lib/api";
@@ -143,6 +144,8 @@ export default function EnhancedHitocariPage() {
   const [loadingStructured, setLoadingStructured] = useState(false);
   const [showCandidateSearch, setShowCandidateSearch] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [candidateLayoutCheck, setCandidateLayoutCheck] = useState<ZohoLayoutCheck | null>(null);
+  const [layoutCheckLoading, setLayoutCheckLoading] = useState(false);
 
 
   // Load available accounts function
@@ -421,6 +424,44 @@ export default function EnhancedHitocariPage() {
     setStructuredData(null);
     setCandidateSuggestions([]);
     setSelectedCandidate(null);
+    setCandidateLayoutCheck(null);
+  };
+
+  // 候補者のレイアウトをチェックする関数
+  const checkCandidateLayout = async (candidate: ZohoCandidate) => {
+    if (!candidate?.record_id) return;
+
+    try {
+      setLayoutCheckLoading(true);
+      const layoutCheck = await apiClient.checkZohoCandidateLayout(candidate.record_id);
+      setCandidateLayoutCheck(layoutCheck);
+      
+      if (!layoutCheck.is_valid_layout) {
+        const currentLayout = layoutCheck.layout_display_label || '不明';
+        toast.warning(
+          `${candidate.candidate_name}は構造化出力に対応していないレイアウトです。\n\n` +
+          `現在のレイアウト: 「${currentLayout}」\n` +
+          `必要なレイアウト: 「自動入力・マッチング用」\n\n` +
+          `Zoho CRMでレイアウトを変更してから再度お試しください。`,
+          { duration: 10000 }
+        );
+      }
+    } catch (error) {
+      console.error('Layout check failed:', error);
+      setCandidateLayoutCheck(null);
+      toast.error('レイアウトチェックに失敗しました');
+    } finally {
+      setLayoutCheckLoading(false);
+    }
+  };
+
+  // 候補者選択を処理する関数
+  const handleCandidateSelect = async (candidate: ZohoCandidate) => {
+    setSelectedCandidate(candidate);
+    setCandidateLayoutCheck(null); // 前のチェック結果をクリア
+    
+    // レイアウトチェックを実行
+    await checkCandidateLayout(candidate);
   };
 
   // List View Component
@@ -934,7 +975,7 @@ export default function EnhancedHitocariPage() {
                       ? 'ring-2 ring-primary bg-primary/5' 
                       : 'hover:bg-muted/50'
                   }`}
-                  onClick={() => setSelectedCandidate(suggestion.candidate)}
+                  onClick={() => handleCandidateSelect(suggestion.candidate)}
                 >
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
@@ -978,11 +1019,70 @@ export default function EnhancedHitocariPage() {
           )}
         </div>
 
+        {/* Layout Validation Warning */}
+        {selectedCandidate && candidateLayoutCheck && (
+          <div className={`p-4 rounded-lg border ${
+            candidateLayoutCheck.is_valid_layout 
+              ? 'bg-green-50 border-green-200 text-green-800'
+              : 'bg-red-50 border-red-200 text-red-800'
+          }`}>
+            <div className="flex items-start gap-2">
+              {candidateLayoutCheck.is_valid_layout ? (
+                <UserCheck className="w-5 h-5 text-green-600 mt-0.5" />
+              ) : (
+                <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+              )}
+              <div className="flex-1">
+                <div className="font-medium mb-1">
+                  {candidateLayoutCheck.is_valid_layout 
+                    ? '✓ 構造化出力対応レイアウト' 
+                    : '⚠ 非対応レイアウト'}
+                </div>
+                <div className="text-sm">
+                  {candidateLayoutCheck.is_valid_layout 
+                    ? 'この候補者は構造化出力に対応しています。'
+                    : `この候補者は構造化出力に対応していません。Zoho CRMでレイアウトを「自動入力・マッチング用」に変更してください。`
+                  }
+                </div>
+                {candidateLayoutCheck.layout_display_label && (
+                  <div className="text-xs mt-2 space-y-1">
+                    <div className="flex justify-between">
+                      <span>現在のレイアウト:</span>
+                      <span className="font-mono">「{candidateLayoutCheck.layout_display_label}」</span>
+                    </div>
+                    {!candidateLayoutCheck.is_valid_layout && (
+                      <div className="flex justify-between">
+                        <span>必要なレイアウト:</span>
+                        <span className="font-mono text-green-700">「自動入力・マッチング用」</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Layout Check Loading */}
+        {layoutCheckLoading && selectedCandidate && (
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center gap-2 text-blue-800">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-sm">レイアウトを確認中...</span>
+            </div>
+          </div>
+        )}
+
         {/* Action Button */}
         <Separator />
         <Button 
           onClick={handleProcessStructured}
-          disabled={!selectedCandidate || processing}
+          disabled={
+            !selectedCandidate || 
+            processing || 
+            layoutCheckLoading ||
+            (candidateLayoutCheck && !candidateLayoutCheck.is_valid_layout)
+          }
           className="w-full"
           size="lg"
         >
@@ -991,15 +1091,25 @@ export default function EnhancedHitocariPage() {
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               構造化処理中...
             </>
-          ) : selectedCandidate ? (
+          ) : layoutCheckLoading ? (
             <>
-              <Sparkles className="h-4 w-4 mr-2" />
-              {selectedCandidate.candidate_name} で構造化処理を{structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? '再実行' : '実行'}
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              レイアウト確認中...
             </>
-          ) : (
+          ) : !selectedCandidate ? (
             <>
               <AlertCircle className="h-4 w-4 mr-2" />
               候補者を選択してください
+            </>
+          ) : candidateLayoutCheck && !candidateLayoutCheck.is_valid_layout ? (
+            <>
+              <AlertCircle className="h-4 w-4 mr-2" />
+              「自動入力・マッチング用」レイアウトに変更が必要
+            </>
+          ) : (
+            <>
+              <Sparkles className="h-4 w-4 mr-2" />
+              {selectedCandidate.candidate_name} で構造化処理を{structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? '再実行' : '実行'}
             </>
           )}
         </Button>
@@ -1017,7 +1127,7 @@ export default function EnhancedHitocariPage() {
       <CandidateSearchDialog
         open={showCandidateSearch}
         onOpenChange={setShowCandidateSearch}
-        onCandidateSelect={setSelectedCandidate}
+        onCandidateSelect={handleCandidateSelect}
         selectedCandidate={selectedCandidate}
       />
     </>

@@ -76,3 +76,32 @@ async def get_app_hc_detail(record_id: str):
             status_code=500, 
             detail=f"Zoho CRM service unavailable: {str(e)}. Record retrieval temporarily disabled."
         )
+
+
+@router.get("/app-hc/{record_id}/layout-check", response_model=dict)
+async def check_app_hc_layout(record_id: str):
+    """求職者レコードのレイアウトをチェックして、構造化出力可能かどうかを判定する
+
+    Returns: {
+        status: "success"|"error",
+        layout_id: str,
+        layout_name: str, 
+        layout_display_label: str,
+        is_valid_layout: bool,
+        message: str
+    }
+    """
+    try:
+        client = ZohoClient()
+        layout_check_result = client.check_record_layout(record_id)
+        return layout_check_result
+    except ZohoAuthError as e:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Zoho authentication failed: {str(e)}. Please check Zoho CRM credentials."
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Layout check service unavailable: {str(e)}."
+        )

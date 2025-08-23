@@ -179,6 +179,54 @@ class ZohoClient:
         items = data.get("data") or []
         return items[0] if items else {}
     
+    def check_record_layout(self, record_id: str) -> Dict[str, Any]:
+        """レコードのレイアウトをチェックし、「自動入力・マッチング用」かどうかを判定する
+        
+        Args:
+            record_id: ZohoレコードID
+            
+        Returns:
+            Dict containing layout info and validation result
+        """
+        try:
+            record = self.get_app_hc_record(record_id)
+            if not record:
+                return {
+                    "status": "error",
+                    "message": "レコードが見つかりません",
+                    "is_valid_layout": False
+                }
+            
+            layout_info = record.get("Layout", {})
+            layout_name = layout_info.get("name", "")
+            layout_display_label = layout_info.get("display_label", "")
+            layout_id = layout_info.get("id", "")
+            
+            # 「自動入力・マッチング用」レイアウトかチェック
+            is_auto_input_layout = (
+                layout_name == "自動入力・マッチング用" or 
+                layout_display_label == "自動入力・マッチング用"
+            )
+            
+            return {
+                "status": "success",
+                "layout_id": layout_id,
+                "layout_name": layout_name,
+                "layout_display_label": layout_display_label,
+                "is_valid_layout": is_auto_input_layout,
+                "message": (
+                    "適切なレイアウトです" if is_auto_input_layout 
+                    else f"このレコードは'{layout_display_label}'レイアウトです。構造化出力を行うには「自動入力・マッチング用」レイアウトに変更してください。"
+                )
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"レイアウトチェックでエラーが発生しました: {str(e)}",
+                "is_valid_layout": False
+            }
+    
 
 # class ZohoBaseClient:
 #     def __init__(self) -> None:
