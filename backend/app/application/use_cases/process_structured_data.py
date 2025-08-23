@@ -2,10 +2,12 @@ from __future__ import annotations
 import logging
 from typing import Optional, Dict, Any
 from uuid import UUID
+from dataclasses import asdict
 
 from app.infrastructure.supabase.repositories.meeting_repository_impl import MeetingRepositoryImpl
 from app.infrastructure.supabase.repositories.structured_repository_impl import StructuredRepositoryImpl
 from app.infrastructure.supabase.repositories.custom_schema_repository_impl import CustomSchemaRepositoryImpl
+from app.infrastructure.supabase.repositories.ai_usage_repository_impl import AiUsageRepositoryImpl
 from app.infrastructure.gemini.structured_extractor import StructuredDataExtractor
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
 from app.presentation.api.v1.settings import get_current_gemini_settings
@@ -92,6 +94,17 @@ class ProcessStructuredDataUseCase:
         # Supabaseに構造化データを保存
         structured_repo.upsert_structured(structured_data)
         logger.info(f"構造化データをSupabaseに保存完了: meeting_id={meeting_id}, candidate={zoho_candidate_name}")
+        
+        # 使用量ログの保存（失敗しても処理は継続）
+        try:
+            usage_repo = AiUsageRepositoryImpl()
+            usage_repo.insert_many(
+                meeting_id=meeting_id,
+                events=[asdict(event) for event in extractor.usage_events]
+            )
+            logger.info(f"AI使用量ログを保存完了: meeting_id={meeting_id}, events_count={len(extractor.usage_events)}")
+        except Exception as e:
+            logger.warning(f"AI使用量ログ保存に失敗: meeting_id={meeting_id}, error={str(e)}")
         
         # Zoho CRMに構造化データを書き込み（失敗しても処理は継続）
         zoho_result = self._write_to_zoho(

@@ -2,3 +2,5 @@ service_account.json
 .env
 __pycache__/
 backend/tests/meet-txt
+
+supabase/.temp
