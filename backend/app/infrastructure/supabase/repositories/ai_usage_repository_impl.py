@@ -88,7 +88,7 @@ class AiUsageRepositoryImpl:
             
             # 最新の使用量データを取得
             result = sb.table(self.TABLE).select(
-                "model, group_name, prompt_token_count, candidates_token_count, "
+                "id, meeting_id, model, group_name, prompt_token_count, candidates_token_count, "
                 "cached_content_token_count, total_token_count, latency_ms, created_at"
             ).order("created_at", desc=True).limit(limit).execute()
             

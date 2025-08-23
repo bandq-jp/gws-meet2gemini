@@ -118,7 +118,7 @@ class GetAiCostsUseCase:
                 cost = self.cost_calculator.calculate_single_usage(
                     prompt_tokens=log.get("prompt_token_count", 0),
                     candidates_tokens=log.get("candidates_token_count", 0),
-                    thoughts_tokens=log.get("thoughts_token_count", 0),
+                    thoughts_tokens=0,  # DBスキーマには存在しないため0で設定
                     cached_tokens=log.get("cached_content_token_count", 0)
                 )
                 
