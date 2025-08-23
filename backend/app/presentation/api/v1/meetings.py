@@ -5,6 +5,7 @@ import logging
 
 from app.presentation.schemas.meeting import MeetingOut, MeetingListResponse
 from app.application.use_cases.collect_meetings import CollectMeetingsUseCase
+from app.infrastructure.background.job_tracker import JobTracker
 
 from app.application.use_cases.get_meeting_list import GetMeetingListUseCase
 from app.application.use_cases.get_meeting_list_paginated import GetMeetingListPaginatedUseCase
@@ -14,28 +15,61 @@ from app.infrastructure.config.settings import get_settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/collect", response_model=dict)
+@router.post("/collect", response_model=dict, status_code=202)
 async def collect_meetings(
     accounts: Optional[List[str]] = Query(default=None),
     include_structure: bool = Query(default=False),
     force_update: bool = Query(default=False),
 ):
+    """Kick off meeting collection in the background and return immediately."""
     use_case = CollectMeetingsUseCase()
     try:
-        logger.debug(
-            "POST /api/v1/meetings/collect called: accounts=%s include_structure=%s force_update=%s",
+        logger.info(
+            "POST /api/v1/meetings/collect queued: accounts=%s include_structure=%s force_update=%s",
             accounts,
             include_structure,
             force_update,
         )
-        count = await use_case.execute(
-            accounts, include_structure=include_structure, force_update=force_update
+        job_id = JobTracker.create_job(
+            name="collect_meetings",
+            params={
+                "accounts": accounts or [],
+                "include_structure": include_structure,
+                "force_update": force_update,
+            },
         )
-        logger.debug("Meetings collected and stored: %d", count)
-        return {"stored": count}
+        JobTracker.mark_running(job_id, message="Collecting from Google Drive")
+
+        import asyncio
+
+        async def _run():
+            try:
+                await use_case.execute(
+                    accounts,
+                    include_structure=include_structure,
+                    force_update=force_update,
+                    job_id=job_id,
+                )
+            except Exception as e:  # pragma: no cover
+                logger.exception("Background collect failed: %s", e)
+                JobTracker.mark_failed(job_id, error=str(e))
+
+        asyncio.create_task(_run())
+        return {
+            "message": "Meeting collection started (background).",
+            "job_id": job_id,
+            "status_url": f"/api/v1/meetings/collect/status/{job_id}",
+        }
     except RuntimeError as e:
-        logger.exception("Collect meetings failed: %s", e)
+        logger.exception("Collect meetings queueing failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/collect/status/{job_id}", response_model=dict)
+async def collect_status(job_id: str):
+    data = JobTracker.get(job_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="job not found")
+    return data
 
 @router.get("/", response_model=MeetingListResponse)
 async def list_meetings_paginated(
