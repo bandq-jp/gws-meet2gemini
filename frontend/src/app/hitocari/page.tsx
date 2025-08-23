@@ -134,6 +134,14 @@ export default function HitocariListPage() {
     loadMeetings(activeTab, newPage);
   };
 
+  // ローカルストレージからアカウントフィルタ設定を読み込み
+  useEffect(() => {
+    const savedShowAllAccounts = localStorage.getItem('hitocari-showAllAccounts');
+    if (savedShowAllAccounts !== null) {
+      setShowAllAccounts(savedShowAllAccounts === 'true');
+    }
+  }, []);
+
   // Load meetings and accounts on component mount
   useEffect(() => {
     loadAvailableAccounts();
@@ -148,7 +156,10 @@ export default function HitocariListPage() {
 
   // アカウントフィルタ切り替え
   const toggleAccountFilter = () => {
-    setShowAllAccounts(!showAllAccounts);
+    const newValue = !showAllAccounts;
+    setShowAllAccounts(newValue);
+    // ローカルストレージに保存
+    localStorage.setItem('hitocari-showAllAccounts', String(newValue));
   };
 
   const handleCollectMeetings = async () => {
