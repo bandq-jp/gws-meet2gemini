@@ -110,21 +110,18 @@ class GeminiClient:
         except (AttributeError, IndexError):
             pass
         
-        # usage_metadataを辞書に変換（to_dict()メソッドがある場合はそれを使用）
+        # usage_metadataを辞書に変換（ModalityTokenCountオブジェクトの問題を回避）
         usage_dict = None
         if usage:
-            if hasattr(usage, "to_dict"):
-                usage_dict = usage.to_dict()
-            elif hasattr(usage, "__dict__"):
-                usage_dict = dict(usage.__dict__)
-            else:
-                # フォールバック: 必要な属性を直接取得
-                usage_dict = {
-                    "prompt_token_count": getattr(usage, "prompt_token_count", None),
-                    "candidates_token_count": getattr(usage, "candidates_token_count", None), 
-                    "cached_content_token_count": getattr(usage, "cached_content_token_count", None),
-                    "total_token_count": getattr(usage, "total_token_count", None)
-                }
+            # 安全に基本フィールドのみを抽出（ModalityTokenCountを避ける）
+            usage_dict = {
+                "prompt_token_count": getattr(usage, "prompt_token_count", None),
+                "candidates_token_count": getattr(usage, "candidates_token_count", None),
+                "cached_content_token_count": getattr(usage, "cached_content_token_count", None),
+                "total_token_count": getattr(usage, "total_token_count", None),
+                "thoughts_token_count": getattr(usage, "thoughts_token_count", None),
+                "tool_use_prompt_token_count": getattr(usage, "tool_use_prompt_token_count", None)
+            }
         
         return GeminiResult(
             text=getattr(response, "text", None) if response else None,
