@@ -1,7 +1,12 @@
-import { auth } from '@clerk/nextjs/server';
+import { auth, currentUser } from '@clerk/nextjs/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { GoogleAuth } from 'google-auth-library';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+// 環境設定
+const USE_LOCAL_BACKEND = process.env.USE_LOCAL_BACKEND === 'true';
+const LOCAL_API_BASE_URL = process.env.DEV_BACKEND_BASE || 'http://localhost:8000';
+const CLOUD_RUN_BASE_URL = process.env.CLOUD_RUN_BASE || '';
+const GCP_SA_JSON = process.env.GCP_SA_JSON || '';
 
 export async function GET(
   request: NextRequest,
@@ -35,64 +40,141 @@ export async function DELETE(
   return handleRequest(request, resolvedParams, 'DELETE');
 }
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  const resolvedParams = await params;
+  return handleRequest(request, resolvedParams, 'PATCH');
+}
+
 async function handleRequest(
   request: NextRequest,
   params: { path: string[] },
   method: string
 ) {
   try {
-    // Check authentication
+    // Clerk認証チェック
     const { userId } = await auth();
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Build the target URL
+    // 本番環境での社内ドメイン制限（ローカル開発では無効）
+    const IS_LOCAL_DEV = process.env.NODE_ENV === 'development';
+    if (!IS_LOCAL_DEV) {
+      const user = await currentUser();
+      const ALLOWED_DOMAINS = process.env.ALLOWED_EMAIL_DOMAINS?.split(',') || ['@bandq.jp'];
+      
+      if (user) {
+        const userEmails = user.emailAddresses?.map(email => email.emailAddress) || [];
+        const hasAllowedEmail = userEmails.some(email => 
+          ALLOWED_DOMAINS.some(domain => email.endsWith(domain))
+        );
+        
+        if (!hasAllowedEmail) {
+          console.warn(`[Proxy] Access denied for user ${userId}. Email domains: ${userEmails.join(', ')}`);
+          return NextResponse.json({ error: 'Access denied - Invalid domain' }, { status: 403 });
+        }
+      }
+    }
+
+    // URL構築
     const path = params.path.join('/');
     const searchParams = request.nextUrl.searchParams.toString();
-    const targetUrl = `${API_BASE_URL}/api/v1/${path}${searchParams ? `?${searchParams}` : ''}`;
+    const baseUrl = USE_LOCAL_BACKEND ? LOCAL_API_BASE_URL : CLOUD_RUN_BASE_URL;
+    const targetUrl = `${baseUrl}/api/v1/${path}${searchParams ? `?${searchParams}` : ''}`;
 
+    console.log(`[Proxy] Mode: ${USE_LOCAL_BACKEND ? 'LOCAL' : 'PRODUCTION'}`);
     console.log(`[Proxy] ${method} ${targetUrl}`);
 
-    // Prepare headers
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-    };
-
-    // Prepare request options
-    const requestOptions: RequestInit = {
-      method,
-      headers,
-    };
-
-    // Add body for POST/PUT requests
-    if (method === 'POST' || method === 'PUT') {
-      const body = await request.text();
-      if (body) {
-        requestOptions.body = body;
+    // リクエストボディの準備
+    let body: string | undefined = undefined;
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+      const requestBody = await request.text();
+      if (requestBody) {
+        body = requestBody;
       }
     }
 
-    // Make the request to the backend
-    const response = await fetch(targetUrl, requestOptions);
+    // ローカル開発の場合は直接fetch
+    if (USE_LOCAL_BACKEND) {
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      };
+
+      const response = await fetch(targetUrl, {
+        method,
+        headers,
+        body,
+      });
+
+      console.log(`[Proxy] Local Response: ${response.status} ${response.statusText}`);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[Proxy] Error response: ${errorText}`);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { detail: errorText || response.statusText };
+        }
+        return NextResponse.json(errorData, { status: response.status });
+      }
+
+      const responseData = await response.json();
+      return NextResponse.json(responseData);
+    }
+
+    // 本番環境: Cloud Run への ID Token 付きリクエスト
+    if (!GCP_SA_JSON) {
+      console.error('[Proxy] GCP_SA_JSON not configured for production');
+      return NextResponse.json(
+        { error: 'Service account not configured' }, 
+        { status: 500 }
+      );
+    }
+
+    if (!CLOUD_RUN_BASE_URL) {
+      console.error('[Proxy] CLOUD_RUN_BASE_URL not configured for production');
+      return NextResponse.json(
+        { error: 'Cloud Run URL not configured' }, 
+        { status: 500 }
+      );
+    }
+
+    // Google Auth を使用してID Tokenを取得
+    const googleAuth = new GoogleAuth({
+      credentials: JSON.parse(GCP_SA_JSON)
+    });
     
-    console.log(`[Proxy] Response: ${response.status} ${response.statusText}`);
+    const client = await googleAuth.getIdTokenClient(CLOUD_RUN_BASE_URL);
+    
+    const requestConfig = {
+      url: targetUrl,
+      method: method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      validateStatus: () => true, // すべてのステータスコードを有効とする
+      data: body || undefined,
+    };
 
-    // Return the response
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[Proxy] Error response: ${errorText}`);
-      let errorData;
-      try {
-        errorData = JSON.parse(errorText);
-      } catch {
-        errorData = { detail: errorText || response.statusText };
-      }
-      return NextResponse.json(errorData, { status: response.status });
+    const response = await client.request(requestConfig);
+    
+    console.log(`[Proxy] Cloud Run Response: ${response.status} ${response.statusText}`);
+
+    // レスポンス処理
+    if (response.status >= 400) {
+      console.error(`[Proxy] Error response:`, response.data);
+      return NextResponse.json(
+        response.data || { detail: response.statusText }, 
+        { status: response.status }
+      );
     }
 
-    const responseData = await response.json();
-    return NextResponse.json(responseData);
+    return NextResponse.json(response.data);
 
   } catch (error: unknown) {
     console.error('[Proxy] Request failed:', error);

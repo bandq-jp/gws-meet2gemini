@@ -25,6 +25,7 @@
     "class-variance-authority": "latest",
     "clsx": "latest",
     "date-fns": "latest",
+    "google-auth-library": "^9.15.0",
     "lucide-react": "latest",
     "next": "latest",
     "react": "latest",

@@ -1,7 +1,18 @@
-import { clerkMiddleware } from '@clerk/nextjs/server';
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 
+// 保護対象のルートを定義
+const isProtectedRoute = createRouteMatcher([
+  '/',
+  '/hitocari(.*)',
+  '/api/proxy(.*)',
+]);
 
-export default clerkMiddleware();
+export default clerkMiddleware(async (auth, req) => {
+  // 保護されたルートへのアクセスの場合は認証必須
+  if (isProtectedRoute(req)) {
+    await auth.protect();
+  }
+});
 
 export const config = {
   matcher: [
