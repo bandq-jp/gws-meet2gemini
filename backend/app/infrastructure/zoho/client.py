@@ -476,9 +476,17 @@ class ZohoWriteClient:
         payload = json.dumps({"data": [zoho_data]}).encode("utf-8")
         req = request.Request(url, data=payload, headers=headers, method="PUT")
         
+        # デバッグログを追加
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Zoho更新リクエスト: URL={url}, データ数={len(zoho_data)}, レコードID={record_id}")
+        logger.debug(f"送信データ: {zoho_data}")
+        
         try:
             with request.urlopen(req, timeout=30) as resp:
                 response_data = json.loads(resp.read().decode("utf-8"))
+                logger.info(f"Zoho更新成功: status_code={resp.getcode()}, record_id={record_id}")
+                logger.debug(f"Zoho応答: {response_data}")
                 return {
                     "status": "success", 
                     "status_code": resp.getcode(),
@@ -487,9 +495,38 @@ class ZohoWriteClient:
                 }
         except error.HTTPError as e:
             error_body = e.read().decode("utf-8", "ignore")
+            logger.error(f"Zoho更新HTTPエラー: status_code={e.code}, record_id={record_id}, body={error_body}")
+            
+            # エラー内容をより詳しく取得
+            error_msg = f"HTTP {e.code}: {error_body}"
+            try:
+                error_json = json.loads(error_body)
+                # Zoho APIのエラーメッセージを抽出
+                if "data" in error_json and error_json["data"]:
+                    zoho_errors = []
+                    for item in error_json["data"]:
+                        if "message" in item:
+                            zoho_errors.append(item["message"])
+                        if "details" in item:
+                            zoho_errors.append(str(item["details"]))
+                    if zoho_errors:
+                        error_msg = "; ".join(zoho_errors)
+                elif "message" in error_json:
+                    error_msg = error_json["message"]
+            except (json.JSONDecodeError, KeyError):
+                pass  # JSONパースに失敗した場合は元のerror_msgを使用
+            
             return {
                 "status": "error",
                 "status_code": e.code,
-                "error": error_body,
+                "error": error_msg,
+                "raw_error": error_body,
+                "attempted_data": zoho_data
+            }
+        except Exception as e:
+            logger.error(f"Zoho更新予期しないエラー: record_id={record_id}, error={str(e)}")
+            return {
+                "status": "error",
+                "error": f"Unexpected error: {str(e)}",
                 "attempted_data": zoho_data
             }
