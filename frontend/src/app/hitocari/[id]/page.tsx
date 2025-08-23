@@ -279,15 +279,20 @@ export default function MeetingDetailPage() {
       if (value.length === 0) return <span className="text-muted-foreground">-</span>;
       return (
         <div className="flex flex-wrap gap-1">
-          {value.map((v, i) => (
-            <Badge key={i} variant="secondary" className="text-xs">
-              {String(v)}
-            </Badge>
-          ))}
+          {value.map((v, i) => {
+            const stringValue = String(v);
+            return (
+              <Badge key={i} variant="secondary" className="text-xs max-w-full">
+                <span className="break-words whitespace-normal leading-tight">
+                  {stringValue}
+                </span>
+              </Badge>
+            );
+          })}
         </div>
       );
     }
-    return <span className="break-words">{String(value)}</span>;
+    return <span className="break-words whitespace-normal leading-relaxed">{String(value)}</span>;
   };
 
   if (loading) {
@@ -501,8 +506,10 @@ export default function MeetingDetailPage() {
                     <div className="bg-muted/30 px-3 py-2 text-xs sm:text-sm font-medium text-muted-foreground sm:border-r border-border">
                       {field.label}
                     </div>
-                    <div className="px-3 py-2 text-xs sm:text-sm border-t sm:border-t-0 border-border sm:border-0">
-                      {renderStructuredValue(data.zoho_candidate?.[field.key as keyof typeof data.zoho_candidate])}
+                    <div className="px-3 py-2 text-xs sm:text-sm border-t sm:border-t-0 border-border sm:border-0 min-w-0">
+                      <div className="break-words overflow-wrap-anywhere">
+                        {renderStructuredValue(data.zoho_candidate?.[field.key as keyof typeof data.zoho_candidate])}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -529,8 +536,10 @@ export default function MeetingDetailPage() {
                           <div className="bg-muted/30 px-3 py-2 text-xs sm:text-sm font-medium text-muted-foreground sm:border-r border-border">
                             {item.label}
                           </div>
-                          <div className="px-3 py-2 text-xs sm:text-sm border-t sm:border-t-0 border-border sm:border-0">
-                            {renderStructuredValue(value)}
+                          <div className="px-3 py-2 text-xs sm:text-sm border-t sm:border-t-0 border-border sm:border-0 min-w-0">
+                            <div className="break-words overflow-wrap-anywhere">
+                              {renderStructuredValue(value)}
+                            </div>
                           </div>
                         </div>
                       );
