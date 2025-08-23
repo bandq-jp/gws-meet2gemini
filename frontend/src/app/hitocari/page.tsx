@@ -281,6 +281,16 @@ export default function EnhancedHitocariPage() {
       const data = await apiClient.getStructuredData(fullMeeting.id);
       if (data && data.data && Object.keys(data.data).length > 0) {
         setStructuredData(data);
+        // 既存の構造化データがある場合、対応する候補者を自動選択
+        if (data.zoho_candidate) {
+          const existingCandidate: ZohoCandidate = {
+            record_id: data.zoho_candidate.record_id || '',
+            candidate_id: data.zoho_candidate.candidate_id || '',
+            candidate_name: data.zoho_candidate.candidate_name || '',
+            candidate_email: data.zoho_candidate.candidate_email || '',
+          };
+          setSelectedCandidate(existingCandidate);
+        }
       } else {
         await generateCandidateSuggestions(fullMeeting);
       }
@@ -743,10 +753,13 @@ export default function EnhancedHitocariPage() {
                   </div>
                 </CardContent>
               </Card>
-            ) : structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? (
-              <StructuredDataCard data={structuredData} />
             ) : (
-              <CandidateSelectionCard />
+              <>
+                {structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 && (
+                  <StructuredDataCard data={structuredData} />
+                )}
+                <CandidateSelectionCard />
+              </>
             )}
           </div>
 
@@ -797,13 +810,41 @@ export default function EnhancedHitocariPage() {
   const StructuredDataCard = ({ data }: { data: StructuredData }) => (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center space-x-2">
-          <Sparkles className="h-5 w-5 text-green-600" />
-          <span>構造化出力</span>
-        </CardTitle>
-        <CardDescription>
-          AI による議事録の構造化データ抽出結果
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div className="space-y-1.5">
+            <CardTitle className="flex items-center space-x-2">
+              <Sparkles className="h-5 w-5 text-green-600" />
+              <span>構造化出力</span>
+            </CardTitle>
+            <CardDescription>
+              AI による議事録の構造化データ抽出結果
+            </CardDescription>
+          </div>
+          <Button 
+            onClick={handleProcessStructured}
+            disabled={!selectedCandidate || processing}
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+          >
+            {processing ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                処理中...
+              </>
+            ) : selectedCandidate ? (
+              <>
+                <Sparkles className="h-4 w-4 mr-2" />
+                再実行
+              </>
+            ) : (
+              <>
+                <AlertCircle className="h-4 w-4 mr-2" />
+                候補者を選択
+              </>
+            )}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Zoho候補者情報セクション */}
@@ -873,7 +914,10 @@ export default function EnhancedHitocariPage() {
           <span>求職者の選択</span>
         </CardTitle>
         <CardDescription>
-          構造化処理を行う前に、対応する求職者を選択してください
+          {structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 
+            ? "構造化処理を再実行するために、対応する求職者を選択してください"
+            : "構造化処理を行う前に、対応する求職者を選択してください"
+          }
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -950,7 +994,7 @@ export default function EnhancedHitocariPage() {
           ) : selectedCandidate ? (
             <>
               <Sparkles className="h-4 w-4 mr-2" />
-              {selectedCandidate.candidate_name} で構造化処理を実行
+              {selectedCandidate.candidate_name} で構造化処理を{structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? '再実行' : '実行'}
             </>
           ) : (
             <>
