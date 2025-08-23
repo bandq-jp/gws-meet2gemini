@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import re
 import os
 import json
@@ -29,66 +29,87 @@ class DriveDocsCollector:
         self.logger.debug("collect_meeting_docs: subjects=%s include_structure=%s", subjects, include_structure)
         results: List[MeetingDocument] = []
         skipped_accounts: List[str] = []
-        for subject in subjects:
-            self.logger.debug("Start collecting for subject=%s", subject)
+
+        # Run each account collection in a separate thread to avoid blocking the event loop
+        import asyncio
+        async def _run_one(subject: str) -> Tuple[str, List[MeetingDocument] | Exception]:
             try:
-                drive = self._build_drive(subject)
-                docs = self._build_docs(subject)
-                folders = self._list_all_folders(drive)
-                self.logger.debug("Total folders found=%d", len(folders))
-                meet_folders = [fid for fid, meta in folders.items() if meta.get("name", "").lower() == "meet recordings".lower()]
-                if not meet_folders:
-                    self.logger.warning("No 'Meet Recordings' folder found for subject=%s", subject)
-                for fid in meet_folders:
-                    self.logger.debug("Scanning folder id=%s name=%s", fid, folders.get(fid, {}).get("name"))
-                    files = self._list_files_in_folder(drive, fid)
-                    self.logger.debug("Files in folder=%d", len(files))
-                    for f in files:
-                        mime = f.get("mimeType")
-                        self.logger.debug("File id=%s name=%s mime=%s", f.get("id"), f.get("name"), mime)
-                        if mime != "application/vnd.google-apps.document":
-                            self.logger.debug("Skip non-Google Doc id=%s", f.get("id"))
-                            continue
-                        text = self._export_doc_as_text(drive, f["id"]) or ""
-                        self.logger.debug("Exported text length id=%s len=%d", f.get("id"), len(text))
-                        invited = self._get_invited_emails(drive, f["id"]) or []
-                        self.logger.debug("Invited emails count id=%s count=%d", f.get("id"), len(invited))
-                        organizer_name = None
-                        if isinstance(f.get("owners"), list) and f["owners"]:
-                            owner = f["owners"][0]
-                            organizer_name = owner.get("displayName")
-                        title = f.get("name")
-                        meeting_dt = self._parse_meeting_datetime(title) or f.get("modifiedTime")
-                        if meeting_dt == f.get("modifiedTime"):
-                            self.logger.debug("Datetime parsed from modifiedTime id=%s", f.get("id"))
-                        else:
-                            self.logger.debug("Datetime parsed from title id=%s", f.get("id"))
-                        meeting = MeetingDocument(
-                            id=None,
-                            doc_id=f["id"],
-                            title=title,
-                            meeting_datetime=meeting_dt,
-                            organizer_email=subject,
-                            organizer_name=organizer_name,
-                            document_url=f.get("webViewLink"),
-                            invited_emails=invited,
-                            text_content=text,
-                            metadata=f,
-                        )
-                        results.append(meeting)
-                self.logger.debug("Accumulated results for subject=%s count=%d", subject, len(results))
-            except (RefreshError, HttpError) as e:
-                self.logger.warning("Skip subject due to auth/API error: subject=%s error=%s", subject, e)
-                skipped_accounts.append(subject)
-                continue
+                return subject, await asyncio.to_thread(self._collect_for_account_sync, subject)
             except Exception as e:
-                self.logger.error("Skip subject due to unexpected error: subject=%s error=%s", subject, e)
+                return subject, e
+
+        task_results = await asyncio.gather(*[_run_one(s) for s in subjects])
+
+        for subject, account_result in task_results:
+            if isinstance(account_result, list):
+                results.extend(account_result)
+            else:
                 skipped_accounts.append(subject)
-                continue
+                self.logger.warning("Skip subject due to error: subject=%s error=%s", subject, account_result)
 
         if skipped_accounts:
             self.logger.warning("Skipped accounts: %s", ", ".join(skipped_accounts))
         return results
+
+    def _collect_for_account_sync(self, subject: str) -> List[MeetingDocument]:
+        """Blocking collection logic for a single account, safe to run in a thread."""
+        self.logger.debug("Start collecting for subject=%s (sync)", subject)
+        try:
+            drive = self._build_drive(subject)
+            _ = self._build_docs(subject)  # reserved for future use
+            folders = self._list_all_folders(drive)
+            self.logger.debug("Total folders found=%d", len(folders))
+            meet_folders = [fid for fid, meta in folders.items() if meta.get("name", "").lower() == "meet recordings".lower()]
+            if not meet_folders:
+                self.logger.warning("No 'Meet Recordings' folder found for subject=%s", subject)
+                return []
+
+            results: List[MeetingDocument] = []
+            for fid in meet_folders:
+                self.logger.debug("Scanning folder id=%s name=%s", fid, folders.get(fid, {}).get("name"))
+                files = self._list_files_in_folder(drive, fid)
+                self.logger.debug("Files in folder=%d", len(files))
+                for f in files:
+                    mime = f.get("mimeType")
+                    self.logger.debug("File id=%s name=%s mime=%s", f.get("id"), f.get("name"), mime)
+                    if mime != "application/vnd.google-apps.document":
+                        self.logger.debug("Skip non-Google Doc id=%s", f.get("id"))
+                        continue
+                    text = self._export_doc_as_text(drive, f["id"]) or ""
+                    self.logger.debug("Exported text length id=%s len=%d", f.get("id"), len(text))
+                    invited = self._get_invited_emails(drive, f["id"]) or []
+                    self.logger.debug("Invited emails count id=%s count=%d", f.get("id"), len(invited))
+                    organizer_name = None
+                    if isinstance(f.get("owners"), list) and f["owners"]:
+                        owner = f["owners"][0]
+                        organizer_name = owner.get("displayName")
+                    title = f.get("name")
+                    meeting_dt = self._parse_meeting_datetime(title) or f.get("modifiedTime")
+                    if meeting_dt == f.get("modifiedTime"):
+                        self.logger.debug("Datetime parsed from modifiedTime id=%s", f.get("id"))
+                    else:
+                        self.logger.debug("Datetime parsed from title id=%s", f.get("id"))
+                    meeting = MeetingDocument(
+                        id=None,
+                        doc_id=f["id"],
+                        title=title,
+                        meeting_datetime=meeting_dt,
+                        organizer_email=subject,
+                        organizer_name=organizer_name,
+                        document_url=f.get("webViewLink"),
+                        invited_emails=invited,
+                        text_content=text,
+                        metadata=f,
+                    )
+                    results.append(meeting)
+            self.logger.debug("Finished subject=%s collected=%d", subject, len(results))
+            return results
+        except (RefreshError, HttpError) as e:
+            self.logger.warning("Auth/API error for subject=%s: %s", subject, e)
+            raise
+        except Exception as e:
+            self.logger.error("Unexpected error for subject=%s: %s", subject, e)
+            raise
 
     def _build_drive(self, subject: Optional[str]):
         creds = self._build_credentials(subject)

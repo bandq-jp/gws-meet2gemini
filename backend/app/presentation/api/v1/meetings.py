@@ -14,27 +14,38 @@ from app.infrastructure.config.settings import get_settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/collect", response_model=dict)
+@router.post("/collect", response_model=dict, status_code=202)
 async def collect_meetings(
     accounts: Optional[List[str]] = Query(default=None),
     include_structure: bool = Query(default=False),
     force_update: bool = Query(default=False),
 ):
+    """Kick off meeting collection in the background and return immediately."""
     use_case = CollectMeetingsUseCase()
     try:
-        logger.debug(
-            "POST /api/v1/meetings/collect called: accounts=%s include_structure=%s force_update=%s",
+        logger.info(
+            "POST /api/v1/meetings/collect queued: accounts=%s include_structure=%s force_update=%s",
             accounts,
             include_structure,
             force_update,
         )
-        count = await use_case.execute(
-            accounts, include_structure=include_structure, force_update=force_update
-        )
-        logger.debug("Meetings collected and stored: %d", count)
-        return {"stored": count}
+
+        import asyncio
+
+        async def _run():
+            try:
+                await use_case.execute(
+                    accounts,
+                    include_structure=include_structure,
+                    force_update=force_update,
+                )
+            except Exception as e:  # pragma: no cover
+                logger.exception("Background collect failed: %s", e)
+
+        asyncio.create_task(_run())
+        return {"message": "Meeting collection started (background)."}
     except RuntimeError as e:
-        logger.exception("Collect meetings failed: %s", e)
+        logger.exception("Collect meetings queueing failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/", response_model=MeetingListResponse)
