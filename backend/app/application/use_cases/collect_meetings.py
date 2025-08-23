@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import List, Optional
 import logging
 import asyncio
+from app.infrastructure.background.job_tracker import JobTracker
 
 from app.infrastructure.google.drive_docs_collector import DriveDocsCollector
 from app.infrastructure.supabase.repositories.meeting_repository_impl import MeetingRepositoryImpl
@@ -15,6 +16,7 @@ class CollectMeetingsUseCase:
         accounts: Optional[List[str]] = None,
         include_structure: bool = False,
         force_update: bool = False,
+        job_id: Optional[str] = None,
     ) -> None:
         logger.info(
             "CollectMeetingsUseCase started: accounts=%s include_structure=%s force_update=%s",
@@ -30,6 +32,8 @@ class CollectMeetingsUseCase:
                 accounts, include_structure=include_structure
             )
             logger.info("Collected meetings from Drive: %d", len(collected))
+            if job_id:
+                JobTracker.update(job_id, collected=len(collected))
 
             stored = 0
             skipped = 0
@@ -74,7 +78,17 @@ class CollectMeetingsUseCase:
                 skipped,
                 len(collected),
             )
+            if job_id:
+                JobTracker.mark_success(
+                    job_id,
+                    message="Collection completed",
+                    stored=stored,
+                    skipped=skipped,
+                    collected=len(collected),
+                )
         except Exception as e:
             logger.exception("CollectMeetingsUseCase error: %s", e)
             # Do not re-raise; this runs in background
+            if job_id:
+                JobTracker.mark_failed(job_id, error=str(e))
             return None

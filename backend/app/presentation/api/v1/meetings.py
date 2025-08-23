@@ -5,6 +5,7 @@ import logging
 
 from app.presentation.schemas.meeting import MeetingOut, MeetingListResponse
 from app.application.use_cases.collect_meetings import CollectMeetingsUseCase
+from app.infrastructure.background.job_tracker import JobTracker
 
 from app.application.use_cases.get_meeting_list import GetMeetingListUseCase
 from app.application.use_cases.get_meeting_list_paginated import GetMeetingListPaginatedUseCase
@@ -29,6 +30,15 @@ async def collect_meetings(
             include_structure,
             force_update,
         )
+        job_id = JobTracker.create_job(
+            name="collect_meetings",
+            params={
+                "accounts": accounts or [],
+                "include_structure": include_structure,
+                "force_update": force_update,
+            },
+        )
+        JobTracker.mark_running(job_id, message="Collecting from Google Drive")
 
         import asyncio
 
@@ -38,15 +48,28 @@ async def collect_meetings(
                     accounts,
                     include_structure=include_structure,
                     force_update=force_update,
+                    job_id=job_id,
                 )
             except Exception as e:  # pragma: no cover
                 logger.exception("Background collect failed: %s", e)
+                JobTracker.mark_failed(job_id, error=str(e))
 
         asyncio.create_task(_run())
-        return {"message": "Meeting collection started (background)."}
+        return {
+            "message": "Meeting collection started (background).",
+            "job_id": job_id,
+            "status_url": f"/api/v1/meetings/collect/status/{job_id}",
+        }
     except RuntimeError as e:
         logger.exception("Collect meetings queueing failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.get("/collect/status/{job_id}", response_model=dict)
+async def collect_status(job_id: str):
+    data = JobTracker.get(job_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="job not found")
+    return data
 
 @router.get("/", response_model=MeetingListResponse)
 async def list_meetings_paginated(
