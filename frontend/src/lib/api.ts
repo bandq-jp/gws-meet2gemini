@@ -1,5 +1,5 @@
-// Direct connection to backend API
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
+// BFF プロキシ経由でバックエンドAPI接続
+const API_BASE_URL = '/api/proxy';
 
 export interface MeetingSummary {
   id: string;
@@ -129,24 +129,13 @@ class ApiClient {
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     
-    // Prepare headers - add token if available
+    // Prepare headers - BFFプロキシが認証を処理
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
 
-    // Add API token if provided in environment
-    if (typeof window !== 'undefined') {
-      // Client-side: read from environment variable
-      const apiToken = process.env.NEXT_PUBLIC_API_TOKEN;
-      if (apiToken && apiToken.trim()) {
-        headers['Authorization'] = `Bearer ${apiToken}`;
-        console.log('Using API token for authentication');
-      }
-    }
-
     const response = await fetch(url, {
       headers,
-      mode: 'cors', // Enable CORS for cross-origin requests
       ...options,
     });
 
