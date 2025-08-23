@@ -145,6 +145,7 @@ export default function HitocariListPage() {
   // Load meetings and accounts on component mount
   useEffect(() => {
     loadAvailableAccounts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Load meetings when accounts or filters change
@@ -152,7 +153,8 @@ export default function HitocariListPage() {
     if (availableAccounts.length > 0) {
       loadMeetings(activeTab, getCurrentPage(), true);
     }
-  }, [showAllAccounts, currentUserEmail, activeTab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAllAccounts, currentUserEmail, activeTab, availableAccounts.length]);
 
   // アカウントフィルタ切り替え
   const toggleAccountFilter = () => {
@@ -383,7 +385,7 @@ export default function HitocariListPage() {
               <div className="flex flex-col space-y-3 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
                 <div className="space-y-2 sm:space-y-0">
                   <Label htmlFor="account-filter" className="text-sm font-medium block sm:hidden">
-                    アカウントフィルタ
+                    アカウントフィルタ（全社）
                   </Label>
                   <div className="flex items-center space-x-3">
                     <Label htmlFor="account-filter" className="text-sm hidden sm:block">
@@ -397,7 +399,6 @@ export default function HitocariListPage() {
                         id="account-filter"
                         checked={showAllAccounts}
                         onCheckedChange={toggleAccountFilter}
-                        size="sm"
                       />
                     </div>
                   </div>
