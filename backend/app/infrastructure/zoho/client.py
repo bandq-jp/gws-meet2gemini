@@ -320,9 +320,213 @@ class ZohoClient:
     #     return items[0] if items else {}
 
 
-# class ZohoWriteClient(ZohoBaseClient):
-    # def update_record(self, module: str, record_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        # url = f"https://www.zohoapis.jp/crm/v2/{module}/{record_id}"
-        # headers = self._make_headers()
-        # response = requests.put(url, headers=headers, data=json.dumps({"data": [data]}))
-        # return {"statusCode": response.status_code, "body": response.text}
+class ZohoWriteClient:
+    """Zoho CRM書き込み専用クライアント（構造化出力からZohoレコード更新用）"""
+    
+    def __init__(self) -> None:
+        self.settings = get_settings()
+        self._access_token: Optional[str] = None
+        self._token_expiry: float = 0.0
+        
+        # 構造化出力フィールド → Zohoフィールドのマッピング
+        self.field_mapping = {
+            # グループ1: 転職活動状況・エージェント関連
+            "transfer_activity_status": "transfer_activity_status",
+            "agent_count": "agent_count", 
+            "current_agents": "current_agents",
+            "introduced_jobs": "introduced_jobs",
+            "job_appeal_points": "job_appeal_points",
+            "job_concerns": "job_concerns",
+            "companies_in_selection": "companies_in_selection",
+            "other_offer_salary": "other_offer_salary",
+            "other_company_intention": "other_company_intention",
+            
+            # グループ2: 転職理由・希望時期・メモ・転職軸
+            "transfer_reasons": "transfer_reasons",
+            "transfer_trigger": "transfer_trigger",
+            "desired_timing": "desired_timing",
+            "timing_details": "timing_details",
+            "current_job_status": "current_job_status",
+            "transfer_status_memo": "transfer_status_memo",
+            "transfer_axis_primary": "field45",  # 転職軸（重要ポイント）
+            "transfer_priorities": "transfer_priorities",
+            
+            # グループ3: 職歴・経験
+            "career_history": "career_history",
+            "current_duties": "field131",  # 現職での担当業務
+            "company_good_points": "company_good_points", 
+            "company_bad_points": "company_bad_points",
+            "enjoyed_work": "enjoyed_work",
+            "difficult_work": "difficult_work",
+            
+            # グループ4: 業界・職種
+            "experience_industry": "experience_industry",
+            "experience_field_hr": "experience_field_hr",
+            "desired_industry": "desired_industry",
+            "industry_reason": "industry_reason",
+            "desired_position": "desired_position",
+            "position_industry_reason": "position_industry_reason",
+            
+            # グループ5: 年収・待遇・働き方
+            "current_salary": "current_salary",
+            "salary_breakdown": "field48",  # 現年収内訳
+            "desired_first_year_salary": "desired_first_year_salary",
+            "base_incentive_ratio": "base_incentive_ratio",
+            "max_future_salary": "max_future_salary",
+            "salary_memo": "salary_memo",
+            "remote_time_memo": "remote_time_memo",
+            "ca_ra_focus": "ca_ra_focus",
+            "customer_acquisition": "customer_acquisition",
+            "new_existing_ratio": "new_existing_ratio",
+            
+            # グループ6: 会社カルチャー・規模・キャリア
+            "business_vision": "business_vision",
+            "desired_employee_count": "desired_employee_count",
+            "culture_scale_memo": "culture_scale_memo",
+            "career_vision": "career_vision",
+        }
+    
+    def _token_valid(self) -> bool:
+        return bool(self._access_token) and (time.time() < self._token_expiry - 30)
+    
+    def _fetch_access_token(self) -> str:
+        if not (self.settings.zoho_client_id and self.settings.zoho_client_secret and self.settings.zoho_refresh_token):
+            raise ZohoAuthError("Zoho credentials are not configured. Set ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN.")
+        
+        token_url = f"{self.settings.zoho_accounts_base_url}/oauth/v2/token"
+        data = parse.urlencode({
+            "refresh_token": self.settings.zoho_refresh_token,
+            "client_id": self.settings.zoho_client_id,
+            "client_secret": self.settings.zoho_client_secret,
+            "grant_type": "refresh_token",
+        }).encode("utf-8")
+        
+        req = request.Request(token_url, data=data, method="POST")
+        try:
+            with request.urlopen(req, timeout=30) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except error.HTTPError as e:
+            raise ZohoAuthError(f"Failed to refresh token: {e.read().decode('utf-8', 'ignore')}") from e
+        
+        access = payload.get("access_token")
+        if not access:
+            raise ZohoAuthError(f"Invalid token response: {payload}")
+        self._access_token = access
+        self._token_expiry = time.time() + int(payload.get("expires_in", 3600))
+        return access
+    
+    def _get_access_token(self) -> str:
+        if self._token_valid():
+            return self._access_token  # type: ignore[return-value]
+        return self._fetch_access_token()
+    
+    def _convert_structured_data_to_zoho(self, structured_data: Dict[str, Any]) -> Dict[str, Any]:
+        """構造化出力データをZohoフィールド形式に変換"""
+        zoho_data = {}
+        
+        for structured_field, value in structured_data.items():
+            if value is None:
+                continue  # null値はスキップ
+                
+            zoho_field = self.field_mapping.get(structured_field)
+            if not zoho_field:
+                continue  # マッピングが見つからない場合はスキップ
+            
+            # データ型変換
+            if isinstance(value, list):
+                if len(value) == 0:
+                    continue  # 空配列はスキップ
+                # multiselectpicklistフィールドは配列のまま送信、その他は改行区切りテキストに変換
+                multiselect_fields = [
+                    "transfer_reasons", "desired_industry", "desired_position", 
+                    "business_vision", "career_vision", "desired_employee_count",
+                    "experience_industry", "experience_field_hr"  # 追加
+                ]
+                if structured_field in multiselect_fields:
+                    zoho_data[zoho_field] = value  # 配列のまま送信
+                else:
+                    # その他の配列は改行区切りテキストに変換
+                    zoho_data[zoho_field] = "\n".join(str(v) for v in value if v)
+            elif isinstance(value, (int, float)):
+                zoho_data[zoho_field] = value
+            elif isinstance(value, str) and value.strip():
+                zoho_data[zoho_field] = value.strip()
+        
+        return zoho_data
+    
+    def update_jobseeker_record(self, record_id: str, structured_data: Dict[str, Any]) -> Dict[str, Any]:
+        """jobSeekerレコードを構造化データで更新"""
+        module_api = self.settings.zoho_app_hc_module
+        
+        # 構造化データをZoho形式に変換
+        zoho_data = self._convert_structured_data_to_zoho(structured_data)
+        
+        if not zoho_data:
+            return {"status": "no_data", "message": "No valid data to update"}
+        
+        # Zoho CRM API呼び出し
+        base_url = self.settings.zoho_api_base_url.rstrip("/")
+        url = f"{base_url}/crm/v2/{module_api}/{record_id}"
+        
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {self._get_access_token()}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = json.dumps({"data": [zoho_data]}).encode("utf-8")
+        req = request.Request(url, data=payload, headers=headers, method="PUT")
+        
+        # デバッグログを追加
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Zoho更新リクエスト: URL={url}, データ数={len(zoho_data)}, レコードID={record_id}")
+        logger.debug(f"送信データ: {zoho_data}")
+        
+        try:
+            with request.urlopen(req, timeout=30) as resp:
+                response_data = json.loads(resp.read().decode("utf-8"))
+                logger.info(f"Zoho更新成功: status_code={resp.getcode()}, record_id={record_id}")
+                logger.debug(f"Zoho応答: {response_data}")
+                return {
+                    "status": "success", 
+                    "status_code": resp.getcode(),
+                    "data": response_data,
+                    "updated_fields": list(zoho_data.keys())
+                }
+        except error.HTTPError as e:
+            error_body = e.read().decode("utf-8", "ignore")
+            logger.error(f"Zoho更新HTTPエラー: status_code={e.code}, record_id={record_id}, body={error_body}")
+            
+            # エラー内容をより詳しく取得
+            error_msg = f"HTTP {e.code}: {error_body}"
+            try:
+                error_json = json.loads(error_body)
+                # Zoho APIのエラーメッセージを抽出
+                if "data" in error_json and error_json["data"]:
+                    zoho_errors = []
+                    for item in error_json["data"]:
+                        if "message" in item:
+                            zoho_errors.append(item["message"])
+                        if "details" in item:
+                            zoho_errors.append(str(item["details"]))
+                    if zoho_errors:
+                        error_msg = "; ".join(zoho_errors)
+                elif "message" in error_json:
+                    error_msg = error_json["message"]
+            except (json.JSONDecodeError, KeyError):
+                pass  # JSONパースに失敗した場合は元のerror_msgを使用
+            
+            return {
+                "status": "error",
+                "status_code": e.code,
+                "error": error_msg,
+                "raw_error": error_body,
+                "attempted_data": zoho_data
+            }
+        except Exception as e:
+            logger.error(f"Zoho更新予期しないエラー: record_id={record_id}, error={str(e)}")
+            return {
+                "status": "error",
+                "error": f"Unexpected error: {str(e)}",
+                "attempted_data": zoho_data
+            }

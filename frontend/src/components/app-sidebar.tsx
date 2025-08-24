@@ -33,6 +33,7 @@ import {
   UserCheck,
   MessageSquare,
   PieChart,
+  DollarSign,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -154,6 +155,14 @@ export function AppSidebar() {
             id: "communication",
             enabled: false,
             description: "候補者とのやり取り管理",
+          },
+          {
+            title: "AIコスト",
+            icon: DollarSign,
+            href: "/hitocari/ai-costs",
+            id: "ai-costs",
+            enabled: true,
+            description: "AI使用量とコスト分析",
           },
           {
             title: "設定",

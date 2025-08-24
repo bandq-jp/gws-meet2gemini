@@ -14,11 +14,28 @@ from __future__ import annotations
 import json
 import time
 import concurrent.futures
-from typing import Dict, Any, Optional
+import logging
+from typing import Dict, Any, Optional, List
 from functools import partial
+from dataclasses import dataclass, asdict
 
 from app.domain.schemas.structured_extraction_schema import StructuredExtractionSchema
 from app.infrastructure.gemini.client import GeminiClient
+
+
+@dataclass
+class UsageEvent:
+    """Gemini API 使用量イベント"""
+    group_name: str
+    model: str
+    prompt_token_count: Optional[int]
+    candidates_token_count: Optional[int]
+    cached_content_token_count: Optional[int]
+    total_token_count: Optional[int]
+    finish_reason: Optional[str]
+    response_chars: Optional[int]
+    latency_ms: int
+    usage_raw: Optional[Dict[str, Any]]
 
 
 class StructuredDataExtractor:
@@ -38,12 +55,14 @@ class StructuredDataExtractor:
             temperature: 温度パラメータ
             max_tokens: 最大出力トークン数
         """
+        self.logger = logging.getLogger(__name__)
         self.gemini_client = GeminiClient(
             api_key=api_key,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens
         )
+        self.usage_events: List[UsageEvent] = []
     
     def extract_structured_data_group(
         self,
@@ -91,23 +110,46 @@ class StructuredDataExtractor:
         # リトライロジック
         for attempt in range(max_retries):
             try:
-                response_text = self.gemini_client.generate_content(
+                self.logger.info(f"Starting Gemini extraction for group: {group_name}, attempt: {attempt + 1}/{max_retries}")
+                # usage 情報を取得するため return_usage=True を指定
+                result = self.gemini_client.generate_content(
                     prompt=prompt,
-                    schema=schema
+                    schema=schema,
+                    return_usage=True
                 )
                 
-                if response_text:
-                    return json.loads(response_text)
+                if result and result.text:
+                    # usage 情報を収集
+                    usage_dict = result.usage or {}
+                    event = UsageEvent(
+                        group_name=group_name,
+                        model=result.model,
+                        prompt_token_count=usage_dict.get("prompt_token_count"),
+                        candidates_token_count=usage_dict.get("candidates_token_count"),
+                        cached_content_token_count=usage_dict.get("cached_content_token_count"),
+                        total_token_count=usage_dict.get("total_token_count"),
+                        finish_reason=result.finish_reason,
+                        response_chars=len(result.text) if result.text else 0,
+                        latency_ms=result.latency_ms,
+                        usage_raw=usage_dict
+                    )
+                    self.usage_events.append(event)
+                    
+                    self.logger.info(f"Gemini extraction successful for group: {group_name}, model: {result.model}, tokens: {usage_dict.get('total_token_count')}, latency: {result.latency_ms}ms")
+                    return json.loads(result.text)
                 else:
+                    self.logger.warning(f"Gemini extraction returned empty result for group: {group_name}, attempt: {attempt + 1}")
                     if attempt < max_retries - 1:
                         time.sleep(1)
                         continue
                         
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                self.logger.error(f"JSON decode error for group: {group_name}, attempt: {attempt + 1}, error: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(1)
                     continue
-            except Exception:
+            except Exception as e:
+                self.logger.error(f"Unexpected error for group: {group_name}, attempt: {attempt + 1}, error: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(2)
                     continue
@@ -131,9 +173,17 @@ class StructuredDataExtractor:
             
         Returns:
             すべてのグループから抽出された構造化データ
+            
+        Note:
+            使用量情報は self.usage_events に記録される
         """
         schema_groups = StructuredExtractionSchema.get_all_schema_groups()
         combined_result: Dict[str, Any] = {}
+        
+        self.logger.info(f"Starting structured data extraction with {len(schema_groups)} groups, parallel={use_parallel}, text_length={len(text_content)}")
+        
+        # 使用量イベントをリセット（新しい抽出処理の開始）
+        self.usage_events.clear()
         
         if use_parallel:
             extract_func = partial(

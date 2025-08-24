@@ -13,6 +13,7 @@ class GeminiSettings(BaseModel):
     gemini_model: str = Field(default="gemini-2.5-pro", description="使用するGeminiモデル")
     gemini_max_tokens: int = Field(default=20000, ge=1024, le=32768, description="最大トークン数")
     gemini_temperature: float = Field(default=0.1, ge=0.0, le=2.0, description="温度パラメータ")
+    gemini_fallback_enabled: bool = Field(default=True, description="Pro失敗時にFlashへ自動フォールバック")
 
 
 class SettingsResponse(BaseModel):
@@ -39,6 +40,7 @@ async def get_settings_endpoint():
             gemini_model=_current_settings["gemini"].gemini_model,  # 保存された設定
             gemini_max_tokens=_current_settings["gemini"].gemini_max_tokens,
             gemini_temperature=_current_settings["gemini"].gemini_temperature,
+            gemini_fallback_enabled=_current_settings["gemini"].gemini_fallback_enabled,
         )
         
         return SettingsResponse(gemini=gemini_settings)

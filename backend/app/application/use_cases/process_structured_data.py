@@ -1,15 +1,20 @@
 from __future__ import annotations
-from typing import Optional
+import logging
+from typing import Optional, Dict, Any
 from uuid import UUID
+from dataclasses import asdict
 
 from app.infrastructure.supabase.repositories.meeting_repository_impl import MeetingRepositoryImpl
 from app.infrastructure.supabase.repositories.structured_repository_impl import StructuredRepositoryImpl
 from app.infrastructure.supabase.repositories.custom_schema_repository_impl import CustomSchemaRepositoryImpl
+from app.infrastructure.supabase.repositories.ai_usage_repository_impl import AiUsageRepositoryImpl
 from app.infrastructure.gemini.structured_extractor import StructuredDataExtractor
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
 from app.presentation.api.v1.settings import get_current_gemini_settings
+from app.infrastructure.zoho.client import ZohoWriteClient, ZohoAuthError
 
-# from app.infrastructure.zoho.cliant import ZohoWriteClient
+# ログ設定
+logger = logging.getLogger(__name__)
 
 
 class ProcessStructuredDataUseCase:
@@ -86,24 +91,35 @@ class ProcessStructuredDataUseCase:
             zoho_candidate=zoho_candidate
         )
         
+        # Supabaseに構造化データを保存
         structured_repo.upsert_structured(structured_data)
-
-        # zoho_client = ZohoWriteClient()
-        # try:
-        #     zoho_result = zoho_client.update_record(
-        #         module="jobSeeker",
-        #         record_id=zoho_record_id,
-        #         data=data
-        #     )
-        # except Exception as e:
-        #     raise RuntimeError(f"Zohoの更新に失敗しました: {str(e)}")
+        logger.info(f"構造化データをSupabaseに保存完了: meeting_id={meeting_id}, candidate={zoho_candidate_name}")
+        
+        # 使用量ログの保存（失敗しても処理は継続）
+        try:
+            usage_repo = AiUsageRepositoryImpl()
+            usage_repo.insert_many(
+                meeting_id=meeting_id,
+                events=[asdict(event) for event in extractor.usage_events]
+            )
+            logger.info(f"AI使用量ログを保存完了: meeting_id={meeting_id}, events_count={len(extractor.usage_events)}")
+        except Exception as e:
+            logger.warning(f"AI使用量ログ保存に失敗: meeting_id={meeting_id}, error={str(e)}")
+        
+        # Zoho CRMに構造化データを書き込み（失敗しても処理は継続）
+        zoho_result = self._write_to_zoho(
+            zoho_record_id=zoho_record_id,
+            structured_data=data,
+            candidate_name=zoho_candidate_name
+        )
         
         return {
             "meeting_id": meeting_id, 
             "data": data, 
             "zoho_candidate": zoho_candidate,
             "custom_schema_id": custom_schema_id,
-            "schema_version": schema_version
+            "schema_version": schema_version,
+            "zoho_write_result": zoho_result  # Zoho書き込み結果を含める
         }
     
     def _extract_with_custom_schema(
@@ -137,3 +153,78 @@ class ProcessStructuredDataUseCase:
                 continue
         
         return combined_result
+    
+    def _write_to_zoho(
+        self,
+        zoho_record_id: str,
+        structured_data: Dict[str, Any], 
+        candidate_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """構造化データをZoho CRMに書き込み
+        
+        Args:
+            zoho_record_id: Zohoレコード ID
+            structured_data: 構造化出力データ
+            candidate_name: 候補者名（ログ用）
+            
+        Returns:
+            書き込み結果辞書
+        """
+        try:
+            logger.info(f"Zoho書き込み開始: record_id={zoho_record_id}, candidate={candidate_name}")
+            
+            # ZohoWriteClientでレコード更新
+            zoho_client = ZohoWriteClient()
+            result = zoho_client.update_jobseeker_record(
+                record_id=zoho_record_id,
+                structured_data=structured_data
+            )
+            
+            if result["status"] == "success":
+                updated_count = len(result.get("updated_fields", []))
+                logger.info(
+                    f"Zoho書き込み成功: record_id={zoho_record_id}, "
+                    f"candidate={candidate_name}, updated_fields={updated_count}"
+                )
+                return {
+                    "status": "success",
+                    "message": f"Zohoレコードを正常に更新しました（{updated_count}フィールド）",
+                    "updated_fields_count": updated_count,
+                    "updated_fields": result.get("updated_fields", []),
+                    "zoho_response": result.get("data")
+                }
+            else:
+                # Zoho書き込み失敗（構造化出力処理は成功として継続）
+                error_msg = result.get("error", "Unknown error")
+                logger.warning(
+                    f"Zoho書き込み失敗: record_id={zoho_record_id}, "
+                    f"candidate={candidate_name}, error={error_msg}"
+                )
+                return {
+                    "status": "failed",
+                    "message": f"Zoho書き込みに失敗しました: {error_msg}",
+                    "error": error_msg,
+                    "attempted_data_count": len(result.get("attempted_data", {}))
+                }
+                
+        except ZohoAuthError as e:
+            logger.error(
+                f"Zoho認証エラー: record_id={zoho_record_id}, "
+                f"candidate={candidate_name}, error={str(e)}"
+            )
+            return {
+                "status": "auth_error",
+                "message": "Zoho認証に失敗しました。管理者に連絡してください。",
+                "error": str(e)
+            }
+            
+        except Exception as e:
+            logger.error(
+                f"Zoho書き込み予期しないエラー: record_id={zoho_record_id}, "
+                f"candidate={candidate_name}, error={str(e)}"
+            )
+            return {
+                "status": "error",
+                "message": f"Zoho書き込みで予期しないエラーが発生しました: {str(e)}",
+                "error": str(e)
+            }

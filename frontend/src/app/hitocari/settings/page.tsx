@@ -14,15 +14,12 @@ import {
   Database,
   Cloud,
   Bell,
-  Shield,
-  Save,
   RefreshCw,
   Key,
   Server,
-  Mail,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { apiClient, CustomSchema, SchemaField } from "@/lib/api";
+import { apiClient, CustomSchema } from "@/lib/api";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 
 // 設定状態の型を明確化
@@ -59,7 +56,7 @@ interface SettingsState {
 }
 
 export default function HitocariSettingsPage() {
-  const [loading, setLoading] = useState(false);
+  // const [loading, setLoading] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
   
   // カスタムスキーマ関連の状態
@@ -105,6 +102,7 @@ export default function HitocariSettingsPage() {
     loadSettings();
     loadSchemas();
     loadDefaultSchemaDefinition();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadSettings = async () => {
@@ -158,18 +156,18 @@ export default function HitocariSettingsPage() {
   };
 
 
-  const handleTest = async (service: string) => {
-    setLoading(true);
-    try {
-      // TODO: サービス接続テスト
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Mock delay
-      toast.success(`${service}の接続テストが成功しました`);
-    } catch (error) {
-      toast.error(`${service}の接続テストに失敗しました`);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // const handleTest = async (service: string) => {
+  //   setLoading(true);
+  //   try {
+  //     // TODO: サービス接続テスト
+  //     await new Promise(resolve => setTimeout(resolve, 1000)); // Mock delay
+  //     toast.success(`${service}の接続テストが成功しました`);
+  //   } catch (error) {
+  //     toast.error(`${service}の接続テストに失敗しました`);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   const updateSetting = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
