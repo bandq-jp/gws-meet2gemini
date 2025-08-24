@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import time
 import concurrent.futures
+import logging
 from typing import Dict, Any, Optional, List
 from functools import partial
 from dataclasses import dataclass, asdict
@@ -54,6 +55,7 @@ class StructuredDataExtractor:
             temperature: 温度パラメータ
             max_tokens: 最大出力トークン数
         """
+        self.logger = logging.getLogger(__name__)
         self.gemini_client = GeminiClient(
             api_key=api_key,
             model=model,
@@ -108,6 +110,7 @@ class StructuredDataExtractor:
         # リトライロジック
         for attempt in range(max_retries):
             try:
+                self.logger.info(f"Starting Gemini extraction for group: {group_name}, attempt: {attempt + 1}/{max_retries}")
                 # usage 情報を取得するため return_usage=True を指定
                 result = self.gemini_client.generate_content(
                     prompt=prompt,
@@ -132,17 +135,21 @@ class StructuredDataExtractor:
                     )
                     self.usage_events.append(event)
                     
+                    self.logger.info(f"Gemini extraction successful for group: {group_name}, model: {result.model}, tokens: {usage_dict.get('total_token_count')}, latency: {result.latency_ms}ms")
                     return json.loads(result.text)
                 else:
+                    self.logger.warning(f"Gemini extraction returned empty result for group: {group_name}, attempt: {attempt + 1}")
                     if attempt < max_retries - 1:
                         time.sleep(1)
                         continue
                         
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                self.logger.error(f"JSON decode error for group: {group_name}, attempt: {attempt + 1}, error: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(1)
                     continue
-            except Exception:
+            except Exception as e:
+                self.logger.error(f"Unexpected error for group: {group_name}, attempt: {attempt + 1}, error: {str(e)}")
                 if attempt < max_retries - 1:
                     time.sleep(2)
                     continue
@@ -172,6 +179,8 @@ class StructuredDataExtractor:
         """
         schema_groups = StructuredExtractionSchema.get_all_schema_groups()
         combined_result: Dict[str, Any] = {}
+        
+        self.logger.info(f"Starting structured data extraction with {len(schema_groups)} groups, parallel={use_parallel}, text_length={len(text_content)}")
         
         # 使用量イベントをリセット（新しい抽出処理の開始）
         self.usage_events.clear()
