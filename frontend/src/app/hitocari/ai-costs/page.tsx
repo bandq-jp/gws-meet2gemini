@@ -24,9 +24,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 
-interface AiCostsPageProps {}
-
-export default function AiCostsPage({}: AiCostsPageProps) {
+export default function AiCostsPage() {
   const [overview, setOverview] = useState<AiCostOverview | null>(null);
   const [selectedMeetingDetail, setSelectedMeetingDetail] = useState<MeetingCostDetail | null>(null);
   const [pricingInfo, setPricingInfo] = useState<PricingInfo | null>(null);
