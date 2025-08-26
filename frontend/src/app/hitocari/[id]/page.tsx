@@ -21,6 +21,7 @@ import {
   Search,
   Mail,
   Calendar,
+  AlertTriangle,
 } from "lucide-react";
 import { 
   apiClient, 
@@ -115,6 +116,8 @@ export default function MeetingDetailPage() {
   const [candidateSuggestions, setCandidateSuggestions] = useState<CandidateMatchSuggestion[]>([]);
   const [selectedCandidate, setSelectedCandidate] = useState<ZohoCandidate | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [extractOnlyProcessing, setExtractOnlyProcessing] = useState(false);
+  const [zohoSyncProcessing, setZohoSyncProcessing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingStructured, setLoadingStructured] = useState(false);
   const [showCandidateSearch, setShowCandidateSearch] = useState(false);
@@ -263,6 +266,71 @@ export default function MeetingDetailPage() {
     }
   };
 
+  const handleExtractOnlyStructured = async () => {
+    if (!selectedMeeting) return;
+
+    try {
+      setExtractOnlyProcessing(true);
+      const result = await apiClient.extractStructuredDataOnly(selectedMeeting.id, {});
+
+      // Convert StructuredDataOnly to StructuredData format
+      const convertedResult: StructuredData = {
+        meeting_id: result.meeting_id,
+        data: result.data,
+        custom_schema_id: result.custom_schema_id,
+        schema_version: result.schema_version,
+        zoho_candidate: undefined // Zoho候補者情報はなし
+      };
+
+      setStructuredData(convertedResult);
+      setCandidateSuggestions([]);
+      
+      toast.success('構造化出力が完了しました（Zoho同期なし）');
+    } catch (error) {
+      console.error('Failed to extract structured data only:', error);
+      toast.error('構造化出力に失敗しました');
+    } finally {
+      setExtractOnlyProcessing(false);
+    }
+  };
+
+  const handleSyncToZoho = async () => {
+    if (!selectedMeeting || !selectedCandidate || !structuredData) return;
+
+    try {
+      setZohoSyncProcessing(true);
+      const result = await apiClient.syncStructuredDataToZoho(selectedMeeting.id, {
+        zoho_candidate_id: selectedCandidate.candidate_id,
+        zoho_record_id: selectedCandidate.record_id,
+        zoho_candidate_name: selectedCandidate.candidate_name,
+        zoho_candidate_email: selectedCandidate.candidate_email,
+      });
+
+      // Update structured data with Zoho candidate info
+      setStructuredData(prev => prev ? {
+        ...prev,
+        zoho_candidate: result.zoho_candidate
+      } : prev);
+
+      if (result.zoho_sync_result.status === 'success') {
+        const updatedCount = result.zoho_sync_result.updated_fields_count || 0;
+        const syncedCount = result.synced_data_fields?.length || 0;
+        toast.success(`Zoho同期が完了しました（送信: ${syncedCount}フィールド、更新: ${updatedCount}フィールド）`, {
+          duration: 5000
+        });
+      } else {
+        toast.error(`Zoho同期に失敗しました: ${result.zoho_sync_result.message}`, {
+          duration: 8000
+        });
+      }
+    } catch (error) {
+      console.error('Failed to sync to Zoho:', error);
+      toast.error('Zoho同期に失敗しました');
+    } finally {
+      setZohoSyncProcessing(false);
+    }
+  };
+
   const formatDateTime = (dateString: string) => {
     try {
       const date = parseISO(dateString);
@@ -361,6 +429,16 @@ export default function MeetingDetailPage() {
                       </Button>
                     )}
                   </div>
+                  
+                  {/* 文字起こしの警告 */}
+                  {selectedMeeting.text_content && !selectedMeeting.text_content.includes('文字起こし') && (
+                    <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                      <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+                      <span className="text-sm font-medium text-red-800">
+                        この会議では文字起こしがオンになっていません
+                      </span>
+                    </div>
+                  )}
                   
                   <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
                     <div className="flex items-center space-x-1 min-w-0">
@@ -465,30 +543,59 @@ export default function MeetingDetailPage() {
                 AI による議事録の構造化データ抽出結果
               </CardDescription>
             </div>
-            <Button 
-              onClick={handleProcessStructured}
-              disabled={!selectedCandidate || processing}
-              variant="outline"
-              size="sm"
-              className="shrink-0"
-            >
-              {processing ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  処理中...
-                </>
-              ) : selectedCandidate ? (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  再実行
-                </>
-              ) : (
-                <>
-                  <AlertCircle className="h-4 w-4 mr-2" />
-                  候補者を選択
-                </>
-              )}
-            </Button>
+            <div className="flex gap-2">
+              {/* 手動Zoho同期ボタン（常に表示） */}
+              <Button 
+                onClick={handleSyncToZoho}
+                disabled={!selectedCandidate || zohoSyncProcessing}
+                variant={data.zoho_candidate ? "outline" : "default"}
+                size="sm"
+                className="shrink-0"
+              >
+                {zohoSyncProcessing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    同期中...
+                  </>
+                ) : selectedCandidate ? (
+                  <>
+                    <UserCheck className="h-4 w-4 mr-2" />
+                    {data.zoho_candidate ? 'Zoho再同期' : 'Zoho同期'}
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="h-4 w-4 mr-2" />
+                    候補者を選択
+                  </>
+                )}
+              </Button>
+              
+              {/* 既存の再実行ボタン */}
+              <Button 
+                onClick={handleProcessStructured}
+                disabled={!selectedCandidate || processing}
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+              >
+                {processing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    処理中...
+                  </>
+                ) : selectedCandidate ? (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    再実行
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="h-4 w-4 mr-2" />
+                    候補者を選択
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4 sm:space-y-6 p-4 sm:p-6">
@@ -628,30 +735,53 @@ export default function MeetingDetailPage() {
             )}
           </div>
 
-          {/* Action Button */}
+          {/* Action Buttons */}
           <Separator />
-          <Button 
-            onClick={handleProcessStructured}
-            disabled={!selectedCandidate || processing}
-            className="w-full h-12 sm:h-10 text-sm sm:text-base"
-          >
-            {processing ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                構造化処理中...
-              </>
-            ) : selectedCandidate ? (
-              <>
-                <Sparkles className="h-4 w-4 mr-2" />
-                {selectedCandidate.candidate_name} で構造化処理を{structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? '再実行' : '実行'}
-              </>
-            ) : (
-              <>
-                <AlertCircle className="h-4 w-4 mr-2" />
-                候補者を選択してください
-              </>
-            )}
-          </Button>
+          <div className="space-y-3">
+            {/* 構造化出力専用ボタン */}
+            <Button 
+              onClick={handleExtractOnlyStructured}
+              disabled={extractOnlyProcessing}
+              variant="secondary"
+              className="w-full h-12 sm:h-10 text-sm sm:text-base"
+            >
+              {extractOnlyProcessing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  構造化出力中...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  構造化出力のみ実行（Zoho同期なし）
+                </>
+              )}
+            </Button>
+            
+            {/* 既存の構造化処理ボタン */}
+            <Button 
+              onClick={handleProcessStructured}
+              disabled={!selectedCandidate || processing}
+              className="w-full h-12 sm:h-10 text-sm sm:text-base"
+            >
+              {processing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  構造化処理中...
+                </>
+              ) : selectedCandidate ? (
+                <>
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  {selectedCandidate.candidate_name} で構造化処理を{structuredData && structuredData.data && Object.keys(structuredData.data).length > 0 ? '再実行' : '実行'}
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="h-4 w-4 mr-2" />
+                  候補者を選択してください
+                </>
+              )}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );

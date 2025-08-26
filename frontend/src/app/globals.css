@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
-
 :root {
   /* Base palette (blackish, whitish + brand blues) */
   --brand-100: #a3d8e2; /* light */
@@ -83,34 +81,6 @@
   --color-sidebar: var(--sidebar);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: hsl(224, 71.4%, 4.1%);
-    --foreground: hsl(210, 20%, 98%);
-    --card: hsl(224, 71.4%, 6%);
-    --card-foreground: hsl(210, 20%, 98%);
-    --popover: hsl(224, 71.4%, 6%);
-    --popover-foreground: hsl(210, 20%, 98%);
-    --primary: var(--brand-300);
-    --primary-foreground: hsl(224, 71.4%, 4.1%);
-    --secondary: color-mix(in oklab, var(--brand-400) 18%, black 82%);
-    --secondary-foreground: hsl(210, 20%, 98%);
-    --muted: hsl(215, 17%, 14%);
-    --muted-foreground: hsl(217.9, 10.6%, 64.9%);
-    --accent: color-mix(in oklab, var(--brand-200) 20%, black 80%);
-    --accent-foreground: hsl(210, 20%, 98%);
-    --destructive: hsl(0, 62.8%, 30.6%);
-    --destructive-foreground: hsl(210, 20%, 98%);
-    --border: hsl(215, 27.9%, 16.9%);
-    --input: hsl(215, 27.9%, 16.9%);
-    --ring: var(--brand-300);
-    --chart-1: hsl(220, 70%, 50%);
-    --chart-2: hsl(160, 60%, 45%);
-    --chart-3: hsl(30, 80%, 55%);
-    --chart-4: hsl(280, 65%, 60%);
-    --chart-5: hsl(340, 75%, 55%);
-  }
-}
 
 body {
   background: radial-gradient(1000px 600px at 90% -10%, color-mix(in oklab, var(--brand-100) 25%, transparent) 0%, transparent 60%),
@@ -120,16 +90,6 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-.dark {
-  --sidebar: hsl(240 5.9% 10%);
-  --sidebar-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-primary: var(--brand-300);
-  --sidebar-primary-foreground: hsl(0 0% 100%);
-  --sidebar-accent: color-mix(in oklab, var(--brand-400) 20%, black 80%);
-  --sidebar-accent-foreground: hsl(240 4.8% 95.9%);
-  --sidebar-border: hsl(240 3.7% 15.9%);
-  --sidebar-ring: var(--brand-300);
-}
 
 @layer base {
   * {
@@ -137,6 +97,19 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+  }
+  
+  /* Force disable dark mode */
+  html.dark,
+  .dark,
+  [data-theme="dark"] {
+    color-scheme: light !important;
+  }
+  
+  html.dark *,
+  .dark *,
+  [data-theme="dark"] * {
+    color-scheme: light !important;
   }
 }
 

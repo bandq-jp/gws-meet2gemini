@@ -2,8 +2,14 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.application.use_cases.process_structured_data import ProcessStructuredDataUseCase
+from app.application.use_cases.extract_structured_data_only import ExtractStructuredDataOnlyUseCase
+from app.application.use_cases.sync_structured_data_to_zoho import SyncStructuredDataToZohoUseCase
 from app.application.use_cases.get_structured_data import GetStructuredDataUseCase
-from app.presentation.schemas.structured import StructuredOut, StructuredProcessRequest
+from app.presentation.schemas.structured import (
+    StructuredOut, StructuredProcessRequest,
+    ExtractOnlyRequest, ExtractOnlyOut,
+    SyncToZohoRequest, SyncToZohoOut
+)
 
 router = APIRouter()
 
@@ -18,6 +24,33 @@ def process_structured(meeting_id: str, request: StructuredProcessRequest):
             zoho_candidate_name=request.zoho_candidate_name,
             zoho_candidate_email=request.zoho_candidate_email,
             custom_schema_id=request.custom_schema_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/extract-only/{meeting_id}", response_model=ExtractOnlyOut)
+def extract_structured_only(meeting_id: str, request: ExtractOnlyRequest):
+    """構造化出力のみを実行（Zoho書き込みは行わない）"""
+    try:
+        use_case = ExtractStructuredDataOnlyUseCase()
+        return use_case.execute(
+            meeting_id=meeting_id,
+            custom_schema_id=request.custom_schema_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/sync-to-zoho/{meeting_id}", response_model=SyncToZohoOut)
+def sync_structured_to_zoho(meeting_id: str, request: SyncToZohoRequest):
+    """既存の構造化データをZoho CRMに手動で同期"""
+    try:
+        use_case = SyncStructuredDataToZohoUseCase()
+        return use_case.execute(
+            meeting_id=meeting_id,
+            zoho_candidate_id=request.zoho_candidate_id,
+            zoho_record_id=request.zoho_record_id,
+            zoho_candidate_name=request.zoho_candidate_name,
+            zoho_candidate_email=request.zoho_candidate_email
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

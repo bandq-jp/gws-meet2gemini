@@ -33,6 +33,17 @@ class Settings:
     zoho_app_hc_name_field_api: str | None = os.getenv("ZOHO_APP_HC_NAME_FIELD_API") or None
     zoho_app_hc_id_field_api: str | None = os.getenv("ZOHO_APP_HC_ID_FIELD_API") or None
 
+    # Cloud Tasks / Cloud Run
+    gcp_project: str = os.getenv("GCP_PROJECT", os.getenv("GOOGLE_CLOUD_PROJECT", ""))
+    tasks_location: str = os.getenv("TASKS_LOCATION", os.getenv("REGION", "asia-northeast1"))
+    tasks_queue: str = os.getenv("TASKS_QUEUE", "meet2gemini-collect")
+    # Cloud Run のワーカーURL（後述の worker エンドポイントのフルURL）
+    tasks_worker_url: str = os.getenv("TASKS_WORKER_URL", "")
+    # OIDC で署名するサービスアカウント（Cloud Tasks 側）
+    tasks_oidc_service_account: str = os.getenv("TASKS_OIDC_SERVICE_ACCOUNT", "")
+    # 監査/追加制御用：期待するQueue名（ヘッダ検証）
+    expected_queue_name: str = os.getenv("TASKS_EXPECTED_QUEUE_NAME", "meet2gemini-collect")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

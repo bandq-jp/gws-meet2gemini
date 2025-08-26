@@ -45,6 +45,33 @@ export interface StructuredData {
   updated_at?: string;
 }
 
+export interface StructuredDataOnly {
+  meeting_id: string;
+  data: Record<string, unknown>;
+  custom_schema_id?: string;
+  schema_version?: string;
+}
+
+export interface ZohoSyncResult {
+  meeting_id: string;
+  zoho_candidate: {
+    candidate_id?: string;
+    record_id?: string;
+    candidate_name?: string;
+    candidate_email?: string;
+  };
+  zoho_sync_result: {
+    status: string;
+    message: string;
+    updated_fields_count?: number;
+    updated_fields?: string[];
+    zoho_response?: Record<string, unknown>;
+    error?: string;
+    attempted_data_count?: number;
+  };
+  synced_data_fields: string[];
+}
+
 export interface ZohoCandidate {
   record_id: string;
   candidate_id: string;
@@ -336,6 +363,33 @@ class ApiClient {
     }
   ): Promise<StructuredData> {
     return this.request<StructuredData>(`/structured/process/${encodeURIComponent(meetingId)}`, {
+      method: 'POST',
+      body: JSON.stringify(candidateData),
+    });
+  }
+
+  async extractStructuredDataOnly(
+    meetingId: string,
+    requestData: {
+      custom_schema_id?: string;
+    } = {}
+  ): Promise<StructuredDataOnly> {
+    return this.request<StructuredDataOnly>(`/structured/extract-only/${encodeURIComponent(meetingId)}`, {
+      method: 'POST',
+      body: JSON.stringify(requestData),
+    });
+  }
+
+  async syncStructuredDataToZoho(
+    meetingId: string,
+    candidateData: {
+      zoho_candidate_id?: string;
+      zoho_record_id: string;
+      zoho_candidate_name?: string;
+      zoho_candidate_email?: string;
+    }
+  ): Promise<ZohoSyncResult> {
+    return this.request<ZohoSyncResult>(`/structured/sync-to-zoho/${encodeURIComponent(meetingId)}`, {
       method: 'POST',
       body: JSON.stringify(candidateData),
     });

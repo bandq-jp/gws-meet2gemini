@@ -109,6 +109,14 @@ export function AppSidebar() {
             description: "Google Meet議事録の管理と構造化データ抽出",
           },
           {
+            title: "マイページ",
+            icon: User,
+            href: "/hitocari/mypage",
+            id: "mypage",
+            enabled: true,
+            description: "自分の議事録をまとめて表示",
+          },
+          {
             title: "Zoho CRM",
             icon: Database,
             href: "/hitocari/zoho",
