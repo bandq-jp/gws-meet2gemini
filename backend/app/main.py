@@ -28,6 +28,9 @@ logging.getLogger("app.application.use_cases").setLevel(_log_level)
 for _name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(_name).setLevel(_log_level)
 
+# httpx のHTTPリクエストログを無効化（Supabase等の大量リクエストログを抑制）
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 app = FastAPI(title="Meet2Gemini API")
 
 # アプリケーション開始時のログ
