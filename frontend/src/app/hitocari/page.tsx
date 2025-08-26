@@ -334,7 +334,7 @@ export default function HitocariListPage() {
           <div className="flex items-center space-x-2 sm:space-x-4">
             <SidebarTrigger className="md:hidden" />
             <div className="min-w-0">
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">議事録管理</h1>
+              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">議事録管理 -Beta版-</h1>
               <p className="text-sm sm:text-base text-muted-foreground hidden sm:block">
                 Google Meet議事録の管理と構造化データ抽出
               </p>
