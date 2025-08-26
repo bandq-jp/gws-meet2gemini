@@ -21,6 +21,7 @@ import {
   Search,
   Mail,
   Calendar,
+  AlertTriangle,
 } from "lucide-react";
 import { 
   apiClient, 
@@ -428,6 +429,16 @@ export default function MeetingDetailPage() {
                       </Button>
                     )}
                   </div>
+                  
+                  {/* 文字起こしの警告 */}
+                  {selectedMeeting.text_content && !selectedMeeting.text_content.includes('文字起こし') && (
+                    <div className="flex items-center space-x-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                      <AlertTriangle className="h-4 w-4 text-red-600 shrink-0" />
+                      <span className="text-sm font-medium text-red-800">
+                        この会議では文字起こしがオンになっていません
+                      </span>
+                    </div>
+                  )}
                   
                   <div className="grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
                     <div className="flex items-center space-x-1 min-w-0">

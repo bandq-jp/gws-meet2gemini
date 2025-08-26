@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,6 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   FileText,
   Clock,
-  User,
   Users,
   ChevronRight,
   Calendar,
@@ -20,7 +19,7 @@ import {
   apiClient, 
   MeetingSummary,
 } from "@/lib/api";
-import { formatDistanceToNow, parseISO, isToday, format } from "date-fns";
+import { formatDistanceToNow, parseISO, isToday } from "date-fns";
 import { ja } from "date-fns/locale";
 
 export default function MyPage() {
@@ -29,7 +28,7 @@ export default function MyPage() {
   const [loading, setLoading] = useState(true);
 
   // Load user's meetings
-  const loadMyMeetings = async () => {
+  const loadMyMeetings = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -48,13 +47,13 @@ export default function MyPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.emailAddresses]);
 
   useEffect(() => {
     if (user?.emailAddresses?.[0]?.emailAddress) {
       loadMyMeetings();
     }
-  }, [user?.emailAddresses]);
+  }, [user?.emailAddresses, loadMyMeetings]);
 
   // Filter meetings by date
   const { todayMeetings, recentMeetings } = useMemo(() => {
@@ -100,14 +99,6 @@ export default function MyPage() {
     }
   };
 
-  const formatDateOnly = (dateString: string) => {
-    try {
-      const date = parseISO(dateString);
-      return format(date, 'M月d日', { locale: ja });
-    } catch {
-      return dateString;
-    }
-  };
 
   // Meeting Card Component
   const MeetingCard = ({ meeting }: { meeting: MeetingSummary }) => (

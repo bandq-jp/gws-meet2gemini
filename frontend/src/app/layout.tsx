@@ -54,9 +54,9 @@ export default function RootLayout({
         }
       }}
     >
-      <html lang="ja">
+      <html lang="ja" className="light">
         <body
-          className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+          className={`${geistSans.variable} ${geistMono.variable} antialiased light`}
         >
           <SidebarLayout>
             {children}
