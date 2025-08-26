@@ -11,7 +11,7 @@ from app.infrastructure.supabase.repositories.ai_usage_repository_impl import Ai
 from app.infrastructure.gemini.structured_extractor import StructuredDataExtractor
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
 from app.presentation.api.v1.settings import get_current_gemini_settings
-from app.infrastructure.zoho.client import ZohoWriteClient, ZohoAuthError
+from app.infrastructure.zoho.client import ZohoWriteClient, ZohoAuthError, ZohoFieldMappingError
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -171,21 +171,19 @@ class ProcessStructuredDataUseCase:
             書き込み結果辞書
         """
         try:
-            logger.info(f"Zoho書き込み開始: record_id={zoho_record_id}, candidate={candidate_name}")
+            logger.info(f"🎯 [自動処理] Zoho書き込み開始: 求職者「{candidate_name or '不明'}」(record_id={zoho_record_id})")
             
             # ZohoWriteClientでレコード更新
             zoho_client = ZohoWriteClient()
             result = zoho_client.update_jobseeker_record(
                 record_id=zoho_record_id,
-                structured_data=structured_data
+                structured_data=structured_data,
+                candidate_name=candidate_name
             )
             
             if result["status"] == "success":
                 updated_count = len(result.get("updated_fields", []))
-                logger.info(
-                    f"Zoho書き込み成功: record_id={zoho_record_id}, "
-                    f"candidate={candidate_name}, updated_fields={updated_count}"
-                )
+                logger.info(f"✅ [自動処理] Zoho書き込み成功: 求職者「{candidate_name or '不明'}」(record_id={zoho_record_id}), 更新フィールド数={updated_count}")
                 return {
                     "status": "success",
                     "message": f"Zohoレコードを正常に更新しました（{updated_count}フィールド）",
@@ -196,10 +194,7 @@ class ProcessStructuredDataUseCase:
             else:
                 # Zoho書き込み失敗（構造化出力処理は成功として継続）
                 error_msg = result.get("error", "Unknown error")
-                logger.warning(
-                    f"Zoho書き込み失敗: record_id={zoho_record_id}, "
-                    f"candidate={candidate_name}, error={error_msg}"
-                )
+                logger.warning(f"⚠️ [自動処理] Zoho書き込み失敗: 求職者「{candidate_name or '不明'}」(record_id={zoho_record_id}), error={error_msg}")
                 return {
                     "status": "failed",
                     "message": f"Zoho書き込みに失敗しました: {error_msg}",
@@ -207,11 +202,17 @@ class ProcessStructuredDataUseCase:
                     "attempted_data_count": len(result.get("attempted_data", {}))
                 }
                 
+        except ZohoFieldMappingError as e:
+            logger.error(f"🚫 [自動処理] Zohoフィールドマッピングエラー: 求職者「{candidate_name or '不明'}」(record_id={zoho_record_id}), error={str(e)}")
+            return {
+                "status": "field_mapping_error",
+                "message": f"Zohoフィールド構造に問題があります: {str(e)}",
+                "error": str(e),
+                "suggestion": "Zoho CRMのフィールド設定を確認するか、管理者に連絡してください。"
+            }
+            
         except ZohoAuthError as e:
-            logger.error(
-                f"Zoho認証エラー: record_id={zoho_record_id}, "
-                f"candidate={candidate_name}, error={str(e)}"
-            )
+            logger.error(f"🔐 [自動処理] Zoho認証エラー: 求職者「{candidate_name or '不明'}」(record_id={zoho_record_id}), error={str(e)}")
             return {
                 "status": "auth_error",
                 "message": "Zoho認証に失敗しました。管理者に連絡してください。",
@@ -219,10 +220,7 @@ class ProcessStructuredDataUseCase:
             }
             
         except Exception as e:
-            logger.error(
-                f"Zoho書き込み予期しないエラー: record_id={zoho_record_id}, "
-                f"candidate={candidate_name}, error={str(e)}"
-            )
+            logger.error(f"💥 [自動処理] Zoho書き込み予期しないエラー: 求職者「{candidate_name or '不明'}」(record_id={zoho_record_id}), error={str(e)}")
             return {
                 "status": "error",
                 "message": f"Zoho書き込みで予期しないエラーが発生しました: {str(e)}",

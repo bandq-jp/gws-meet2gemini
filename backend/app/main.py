@@ -9,13 +9,32 @@ import logging
 
 from app.presentation.api.v1 import router as api_v1_router
 
-app = FastAPI(title="Meet2Gemini API")
-
 # Configure logging level from env (default INFO). Ensures DEBUG logs show when desired.
 _log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.getLogger().setLevel(_log_level)
+
+# ルートロガーの設定
+logging.basicConfig(
+    level=_log_level,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+
+# アプリケーション内のロガーを明示的に設定
+logging.getLogger("app").setLevel(_log_level)
+logging.getLogger("app.infrastructure.zoho.client").setLevel(_log_level)
+logging.getLogger("app.application.use_cases").setLevel(_log_level)
+
+# uvicorn のロガー設定
 for _name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     logging.getLogger(_name).setLevel(_log_level)
+
+app = FastAPI(title="Meet2Gemini API")
+
+# アプリケーション開始時のログ
+logger = logging.getLogger("app.main")
+logger.info("🚀 Meet2Gemini API サーバー起動中...")
+logger.info(f"📊 ログレベル: {_log_level}")
+logger.info("🎯 Zoho書き込みログが有効です")
 
 @app.get("/health")
 def health():
