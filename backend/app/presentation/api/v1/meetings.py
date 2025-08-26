@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import List, Optional
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Body, Request, Response, status
+from pydantic import BaseModel
 import logging
 
 from app.presentation.schemas.meeting import MeetingOut, MeetingListResponse
@@ -11,6 +12,7 @@ from app.application.use_cases.get_meeting_list import GetMeetingListUseCase
 from app.application.use_cases.get_meeting_list_paginated import GetMeetingListPaginatedUseCase
 from app.application.use_cases.get_meeting_detail import GetMeetingDetailUseCase
 from app.infrastructure.config.settings import get_settings
+from app.infrastructure.gcp.tasks import enqueue_collect_meetings_task
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -107,3 +109,83 @@ async def get_available_accounts():
 async def get_meeting_detail(meeting_id: str):
     use_case = GetMeetingDetailUseCase()
     return await use_case.execute(meeting_id)
+
+@router.post("/collect-task", response_model=dict, status_code=202)
+async def enqueue_collect_meetings(
+    accounts: Optional[List[str]] = Query(default=None),
+    include_structure: bool = Query(default=False),
+    force_update: bool = Query(default=False),
+):
+    """
+    収集処理をCloud Tasksへエンキューする新エンドポイント。
+    即時にjob_idを返し、statusURLで監視できる点は既存と同じ。
+    """
+    # 既存collectと同じくJobを作る（statusは既存の /collect/status/{job_id} を使う）
+    job_id = JobTracker.create_job(
+        name="collect_meetings(tasks)",
+        params={
+            "accounts": accounts or [],
+            "include_structure": include_structure,
+            "force_update": force_update,
+        },
+    )
+    JobTracker.mark_running(job_id, message="Queued to Cloud Tasks")
+
+    # ワーカーに渡すpayload
+    payload = {
+        "job_id": job_id,
+        "accounts": accounts or [],
+        "include_structure": include_structure,
+        "force_update": force_update,
+    }
+
+    task_name = None  # 連続実行の重複を抑止したい場合は日付ベースのnameを付ける
+    task_fullname = enqueue_collect_meetings_task(payload, task_name=task_name)
+
+    return {
+        "message": "Enqueued to Cloud Tasks.",
+        "job_id": job_id,
+        "task_name": task_fullname,
+        "status_url": f"/api/v1/meetings/collect/status/{job_id}",
+    }
+
+
+class CollectWorkerIn(BaseModel):
+    job_id: str
+    accounts: Optional[List[str]] = None
+    include_structure: bool = False
+    force_update: bool = False
+
+@router.post("/collect/worker", status_code=204)
+async def collect_worker(request: Request, body: CollectWorkerIn = Body(...)):
+    """
+    Cloud Tasks からのみ叩かれるワーカー受け口。
+    - Cloud Run 側は認証必須（Run Invoker）にし、Cloud Tasks のSAのみ叩けるようにIAM制御
+    - 追加でX-Cloud-Tasks-QueueNameヘッダ等を軽く検証（保険）
+    """
+    settings = get_settings()
+
+    # Cloud Tasks 経由の共通ヘッダ（存在チェック）
+    qhdr = request.headers.get("X-Cloud-Tasks-QueueName")
+    if not qhdr and request.headers.get("X-Requested-By") != "cloud-tasks-enqueue":
+        # ローカル検証などを許したい場合は APP_AUTH_TOKEN 等にフォールバックしても良い
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    if settings.expected_queue_name and qhdr and qhdr != settings.expected_queue_name:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid queue")
+
+    # 本体実行（既存UseCaseをそのまま呼ぶ）
+    use_case = CollectMeetingsUseCase()
+    try:
+        await use_case.execute(
+            body.accounts if body.accounts else None,
+            include_structure=body.include_structure,
+            force_update=body.force_update,
+            job_id=body.job_id,
+        )
+        # UseCase 側で JobTracker.mark_success/failed まで面倒をみてくれる
+        # （途中メトリクス更新もUseCase内で済む）
+        return Response(status_code=204)
+    except Exception as e:
+        JobTracker.mark_failed(body.job_id, error=str(e))
+        raise
