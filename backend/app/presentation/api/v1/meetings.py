@@ -140,7 +140,11 @@ async def enqueue_collect_meetings(
     }
 
     task_name = None  # 連続実行の重複を抑止したい場合は日付ベースのnameを付ける
-    task_fullname = enqueue_collect_meetings_task(payload, task_name=task_name)
+    try:
+        task_fullname = enqueue_collect_meetings_task(payload, task_name=task_name)
+    except Exception as e:
+        JobTracker.mark_failed(job_id, error=f"enqueue failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Cloud Tasks enqueue failed: {e}")
 
     return {
         "message": "Enqueued to Cloud Tasks.",
