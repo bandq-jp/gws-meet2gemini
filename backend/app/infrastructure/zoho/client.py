@@ -451,16 +451,16 @@ class ZohoWriteClient:
             if structured_field in multiselect_fields:
                 # multiselectpicklistフィールドは常に配列として処理
                 if isinstance(value, list):
-                    # 既に配列の場合：空値を除去してから送信
-                    clean_values = [str(v).strip() for v in value if v and str(v).strip()]
-                    zoho_data[zoho_field] = clean_values if clean_values else []
+                    # 既に配列の場合：構造化出力をそのまま送信（「特になし」なども保持）
+                    clean_values = [str(v).strip() for v in value if str(v).strip()]
+                    zoho_data[zoho_field] = clean_values
                 elif isinstance(value, str):
-                    # 文字列の場合：空値や「特になし」等をチェックして配列に変換
+                    # 文字列の場合：改行区切りで分割して配列に変換（「特になし」などもそのまま保持）
                     clean_value = value.strip()
-                    if clean_value and clean_value not in ['特になし', 'なし', '無し', '-', '']:
+                    if clean_value:
                         # 改行区切りで分割して配列にする
                         values = [v.strip() for v in clean_value.split('\n') if v.strip()]
-                        zoho_data[zoho_field] = values if values else []
+                        zoho_data[zoho_field] = values if values else [clean_value]
                     else:
                         zoho_data[zoho_field] = []
                 else:

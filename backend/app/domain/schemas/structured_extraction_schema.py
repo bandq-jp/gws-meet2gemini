@@ -275,14 +275,14 @@ class StructuredExtractionSchema:
             "type": "object",
             "properties": {
                 "experience_industry": {
-                    "type": "string",
-                    "enum": industries_long,
-                    "description": "経験業界：これまでに経験した業界",
+                    "type": "array",
+                    "items": {"type": "string", "enum": industries_long},
+                    "description": "経験業界：これまでに経験した業界（複数選択可）",
                 },
                 "experience_field_hr": {
-                    "type": "string",
-                    "enum": experience_fields_hr_long,
-                    "description": "経験領域（人材）：人材紹介業の経験がある場合に担当した領域（業界）。特化していない場合は総合型",
+                    "type": "array",
+                    "items": {"type": "string", "enum": experience_fields_hr_long},
+                    "description": "経験領域（人材）：人材紹介業の経験がある場合に担当した領域（業界）（複数選択可）。特化していない場合は総合型",
                 },
                 "desired_industry": {
                     "type": "array",
