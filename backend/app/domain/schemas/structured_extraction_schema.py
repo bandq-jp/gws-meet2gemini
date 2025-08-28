@@ -142,11 +142,11 @@ class StructuredExtractionSchema:
                     "items": {"type": "string"},
                     "description": "フリーメモ（転職状況）",
                 },
-                "transfer_axis_primary": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "転職軸（最重要）：今回転職する上での軸（最重要）を自由に記載",
-                },
+                # "transfer_axis_primary": {
+                #     "type": "array",
+                #     "items": {"type": "string"},
+                #     "description": "転職軸（最重要）：今回転職する上での軸（最重要）を自由に記載",
+                # },
                 "transfer_priorities": {
                     "type": "array",
                     "items": {"type": "string"},

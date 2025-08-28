@@ -347,13 +347,13 @@ class ZohoWriteClient:
             "other_company_intention": "other_company_intention",
             
             # グループ2: 転職理由・希望時期・メモ・転職軸
-            "transfer_reasons": "transfer_reasons",
+            "transfer_reasons": "field58",  # 転職検討理由（複数選択可）'
             "transfer_trigger": "field96",  # 転職検討理由 / きっかけ'
             "desired_timing": "field66",  # 転職希望の時期'
             "timing_details": "field27",  # 転職希望時期の詳細'
             "current_job_status": "field67",  # 現職状況'
             "transfer_status_memo": "transfer_status_memo",
-            "transfer_axis_primary": "field45",  # 転職軸（重要ポイント）
+            # "transfer_axis_primary": "field45",  # 転職軸（重要ポイント）- 使用しない
             "transfer_priorities": "transfer_priorities",
             
             # グループ3: 職歴・経験
@@ -642,13 +642,13 @@ class ZohoFieldValidator(ZohoClient):
             "other_company_intention": "other_company_intention",
             
             # グループ2: 転職理由・希望時期・メモ・転職軸
-            "transfer_reasons": "transfer_reasons",
+            "transfer_reasons": "field58",  # 転職検討理由（複数選択可）'
             "transfer_trigger": "field96",  # 転職検討理由 / きっかけ'
             "desired_timing": "field66",  # 転職希望の時期'
             "timing_details": "field27",  # 転職希望時期の詳細'
             "current_job_status": "field67",  # 現職状況'
             "transfer_status_memo": "transfer_status_memo",
-            "transfer_axis_primary": "field45",  # 転職軸（重要ポイント）
+            # "transfer_axis_primary": "field45",  # 転職軸（重要ポイント）- 使用しない
             "transfer_priorities": "transfer_priorities",
             
             # グループ3: 職歴・経験
