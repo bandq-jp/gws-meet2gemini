@@ -15,6 +15,7 @@ import json
 import time
 import concurrent.futures
 import logging
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 from functools import partial
 from dataclasses import dataclass, asdict
@@ -89,7 +90,12 @@ class StructuredDataExtractor:
         # 話者情報の構築
         speaker_info = self._build_speaker_info(candidate_name, agent_name)
         
+        # 現在の日付を取得
+        current_date = datetime.now().strftime("%Y/%m/%d")
+        
         prompt = f"""
+現在の日付：{current_date}
+
 以下の議事録テキストから、{group_name}に関する情報を構造化して抽出してください。
 {speaker_info}
 【テキスト内容】
