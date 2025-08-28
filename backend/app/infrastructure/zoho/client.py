@@ -348,19 +348,19 @@ class ZohoWriteClient:
             
             # グループ2: 転職理由・希望時期・メモ・転職軸
             "transfer_reasons": "transfer_reasons",
-            "transfer_trigger": "transfer_trigger",
-            "desired_timing": "desired_timing",
-            "timing_details": "timing_details",
-            "current_job_status": "current_job_status",
+            "transfer_trigger": "field96",  # 転職検討理由 / きっかけ'
+            "desired_timing": "field66",  # 転職希望の時期'
+            "timing_details": "field27",  # 転職希望時期の詳細'
+            "current_job_status": "field67",  # 現職状況'
             "transfer_status_memo": "transfer_status_memo",
             "transfer_axis_primary": "field45",  # 転職軸（重要ポイント）
             "transfer_priorities": "transfer_priorities",
             
             # グループ3: 職歴・経験
-            "career_history": "career_history",
+            "career_history": "field85",  # 職歴'
             "current_duties": "field131",  # 現職での担当業務
-            "company_good_points": "company_good_points", 
-            "company_bad_points": "company_bad_points",
+            "company_good_points": "field46",  # 現職企業の良いところ'
+            "company_bad_points": "field56",  # 現職企業の悪いところ'
             "enjoyed_work": "enjoyed_work",
             "difficult_work": "difficult_work",
             
@@ -373,8 +373,8 @@ class ZohoWriteClient:
             "position_industry_reason": "position_industry_reason",
             
             # グループ5: 年収・待遇・働き方
-            "current_salary": "current_salary",
-            "salary_breakdown": "field48",  # 現年収内訳
+            "current_salary": "field28",  # 現年収（数字のみ）'
+            "salary_breakdown": "field35",  # 現年収内訳'
             "desired_first_year_salary": "desired_first_year_salary",
             "base_incentive_ratio": "base_incentive_ratio",
             "max_future_salary": "max_future_salary",
@@ -643,19 +643,19 @@ class ZohoFieldValidator(ZohoClient):
             
             # グループ2: 転職理由・希望時期・メモ・転職軸
             "transfer_reasons": "transfer_reasons",
-            "transfer_trigger": "transfer_trigger",
-            "desired_timing": "desired_timing",
-            "timing_details": "timing_details",
-            "current_job_status": "current_job_status",
+            "transfer_trigger": "field96",  # 転職検討理由 / きっかけ'
+            "desired_timing": "field66",  # 転職希望の時期'
+            "timing_details": "field27",  # 転職希望時期の詳細'
+            "current_job_status": "field67",  # 現職状況'
             "transfer_status_memo": "transfer_status_memo",
             "transfer_axis_primary": "field45",  # 転職軸（重要ポイント）
             "transfer_priorities": "transfer_priorities",
             
             # グループ3: 職歴・経験
-            "career_history": "career_history",
+            "career_history": "field85",  # 職歴'
             "current_duties": "field131",  # 現職での担当業務
-            "company_good_points": "company_good_points", 
-            "company_bad_points": "company_bad_points",
+            "company_good_points": "field46",  # 現職企業の良いところ'
+            "company_bad_points": "field56",  # 現職企業の悪いところ'
             "enjoyed_work": "enjoyed_work",
             "difficult_work": "difficult_work",
             
@@ -668,8 +668,8 @@ class ZohoFieldValidator(ZohoClient):
             "position_industry_reason": "position_industry_reason",
             
             # グループ5: 年収・待遇・働き方
-            "current_salary": "current_salary",
-            "salary_breakdown": "field48",  # 現年収内訳
+            "current_salary": "field28",  # 現年収（数字のみ）'
+            "salary_breakdown": "field35",  # 現年収内訳'
             "desired_first_year_salary": "desired_first_year_salary",
             "base_incentive_ratio": "base_incentive_ratio",
             "max_future_salary": "max_future_salary",
