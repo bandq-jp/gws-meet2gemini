@@ -18,4 +18,5 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "zohocrmsdk8-0>=3.0.0",
     "google-cloud-tasks>=2.19.3",
+    "openai>=1.101.0",
 ]

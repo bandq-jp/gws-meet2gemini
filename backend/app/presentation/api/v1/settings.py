@@ -3,6 +3,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.infrastructure.config.settings import get_settings as get_backend_settings
+import os
+from dataclasses import dataclass
 
 router = APIRouter()
 
@@ -80,3 +82,38 @@ async def get_available_gemini_models():
 def get_current_gemini_settings() -> GeminiSettings:
     """現在のGemini設定を取得（他のモジュールから使用）"""
     return _current_settings["gemini"]
+
+
+# -------- LLM (Provider-agnostic) helpers --------
+
+@dataclass
+class LLMSettings:
+    provider: str
+    model: str
+    temperature: float | None
+    max_output_tokens: int
+    reasoning_effort: str | None
+
+
+def get_current_llm_settings() -> LLMSettings:
+    """環境変数から現在のLLM設定を取得（OpenAI/Gemini切り替え）。"""
+    provider = os.getenv("LLM_PROVIDER", "gemini").lower()
+    if provider == "openai":
+        # OpenAI Responses API models (e.g., gpt-4.1, gpt-4.1-mini, gpt-5-*, ...)
+        temp = os.getenv("OPENAI_TEMPERATURE")
+        return LLMSettings(
+            provider="openai",
+            model=os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+            temperature=float(temp) if temp not in (None, "") else None,
+            max_output_tokens=int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "4096")),
+            reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT") or None,
+        )
+    # Gemini (backward-compat via current in-memory settings)
+    g = get_current_gemini_settings()
+    return LLMSettings(
+        provider="gemini",
+        model=g.gemini_model,
+        temperature=g.gemini_temperature,
+        max_output_tokens=g.gemini_max_tokens,
+        reasoning_effort=None,
+    )

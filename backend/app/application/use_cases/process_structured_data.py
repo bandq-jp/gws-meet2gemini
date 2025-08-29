@@ -8,9 +8,8 @@ from app.infrastructure.supabase.repositories.meeting_repository_impl import Mee
 from app.infrastructure.supabase.repositories.structured_repository_impl import StructuredRepositoryImpl
 from app.infrastructure.supabase.repositories.custom_schema_repository_impl import CustomSchemaRepositoryImpl
 from app.infrastructure.supabase.repositories.ai_usage_repository_impl import AiUsageRepositoryImpl
-from app.infrastructure.gemini.structured_extractor import StructuredDataExtractor
+from app.infrastructure import get_llm_extractor
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
-from app.presentation.api.v1.settings import get_current_gemini_settings
 from app.infrastructure.zoho.client import ZohoWriteClient, ZohoAuthError, ZohoFieldMappingError
 
 # ログ設定
@@ -51,14 +50,8 @@ class ProcessStructuredDataUseCase:
             if custom_schema:
                 schema_version = f"default-{custom_schema.id}"
         
-        # 現在の設定を取得
-        gemini_settings = get_current_gemini_settings()
-        
-        extractor = StructuredDataExtractor(
-            model=gemini_settings.gemini_model,
-            temperature=gemini_settings.gemini_temperature,
-            max_tokens=gemini_settings.gemini_max_tokens
-        )
+        # LLM抽出器（Gemini/OpenAIを環境変数で切替）
+        extractor = get_llm_extractor()
         # Extract candidate and agent names for better context
         candidate_name = zoho_candidate_name
         agent_name = meeting.get("organizer_name")
@@ -98,10 +91,21 @@ class ProcessStructuredDataUseCase:
         # 使用量ログの保存（失敗しても処理は継続）
         try:
             usage_repo = AiUsageRepositoryImpl()
-            usage_repo.insert_many(
-                meeting_id=meeting_id,
-                events=[asdict(event) for event in extractor.usage_events]
-            )
+            # サプライヤ間互換: dataclass/Dictの両方に対応
+            events_payload = []
+            for ev in getattr(extractor, "usage_events", []) or []:
+                try:
+                    from dataclasses import is_dataclass
+
+                    if is_dataclass(ev):
+                        events_payload.append(asdict(ev))
+                    elif isinstance(ev, dict):
+                        events_payload.append(ev)
+                except Exception:
+                    # 最低限のフォールバック
+                    if isinstance(ev, dict):
+                        events_payload.append(ev)
+            usage_repo.insert_many(meeting_id=meeting_id, events=events_payload)
             logger.info(f"AI使用量ログを保存完了: meeting_id={meeting_id}, events_count={len(extractor.usage_events)}")
         except Exception as e:
             logger.warning(f"AI使用量ログ保存に失敗: meeting_id={meeting_id}, error={str(e)}")
