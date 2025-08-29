@@ -43,7 +43,6 @@ class OpenAIStructuredExtractor(LLMExtractorPort):
         schema: Dict[str, Any],
     ) -> (Dict[str, Any], Optional[Dict[str, Any]]):
         """Call Responses API with JSON Schema using text.format. Returns (data, usage)."""
-        # Primary attempt: use text.format with json_schema
         req_args = {
             **self._common_args(),
             "input": [
@@ -53,26 +52,15 @@ class OpenAIStructuredExtractor(LLMExtractorPort):
             "text": {
                 "format": {
                     "type": "json_schema",
-                    "json_schema": {
-                        "name": "structured_fields",
-                        "schema": schema,
-                        "strict": True,
-                    },
+                    "name": "structured_fields",
+                    "schema": schema,
+                    "strict": True,
                 }
             },
         }
-        try:
-            resp = self.client.responses.create(**req_args)
-        except Exception:
-            # Fallback: remove text.format and let model return JSON; we'll parse robustly
-            req_args_fallback = {
-                **self._common_args(),
-                "input": [
-                    {"role": "system", "content": [{"type": "input_text", "text": sys_prompt}]},
-                    {"role": "user", "content": [{"type": "input_text", "text": user_text}]},
-                ],
-            }
-            resp = self.client.responses.create(**req_args_fallback)
+        
+        resp = self.client.responses.create(**req_args)
+
         usage = None
         if getattr(resp, "usage", None) is not None:
             # Convert SDK object to plain dict if possible
@@ -84,40 +72,21 @@ class OpenAIStructuredExtractor(LLMExtractorPort):
                 except Exception:
                     usage = None
 
-        # Robustly parse output JSON
-        # Prefer convenience property when available
         text_payload = None
         try:
             text_payload = resp.output_text
         except Exception:
-            text_payload = None
-        if not text_payload:
-            # Walk content tree as fallback
-            try:
-                for item in getattr(resp, "output", []) or []:
-                    for c in getattr(item, "content", []) or []:
-                        if getattr(c, "type", None) in ("output_text", "text") and getattr(c, "text", None):
-                            text_payload = c.text
-                            break
-                    if text_payload:
-                        break
-            except Exception:
-                pass
+            pass
 
         if not text_payload:
             raise ValueError("OpenAI structured response missing text content")
 
         try:
             data = json.loads(text_payload)
-        except Exception as e:
-            # Try to extract a JSON object/array substring
-            import re
-            m = re.search(r"\{.*\}|\[.*\]", text_payload, flags=re.S)
-            if not m:
-                raise ValueError(
-                    f"OpenAI structured response could not be parsed as JSON: {e}; snippet={text_payload[:200]}"
-                )
-            data = json.loads(m.group(0))
+        except json.JSONDecodeError as e:
+            raise ValueError(
+                f"OpenAI structured response could not be parsed as JSON: {e}; snippet={text_payload[:200]}"
+            )
 
         return data, usage
 
@@ -158,6 +127,13 @@ class OpenAIStructuredExtractor(LLMExtractorPort):
             f"You are a precise information extractor. Extract only the fields defined in the JSON Schema for group '{group_name}'. "
             f"Unknown or unspecified fields must be null. Candidate: {candidate_name or 'N/A'} | Agent: {agent_name or 'N/A'}"
         )
+
+        # Add additionalProperties: False to the schema as required by OpenAI
+        schema_dict["additionalProperties"] = False
+        # Add all properties to the required list as required by OpenAI
+        if "properties" in schema_dict and isinstance(schema_dict["properties"], dict):
+            schema_dict["required"] = list(schema_dict["properties"].keys())
+
         data, usage = self._call_json_schema(
             sys_prompt=sys, user_text=text_content, schema=schema_dict
         )

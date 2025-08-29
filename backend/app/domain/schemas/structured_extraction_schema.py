@@ -22,6 +22,7 @@ class StructuredExtractionSchema:
         """グループ1: 転職活動状況・エージェント関連"""
         return {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "transfer_activity_status": {
                     "type": "string",
@@ -77,6 +78,7 @@ class StructuredExtractionSchema:
         """グループ2: 転職理由・希望時期・メモ・転職軸"""
         return {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "transfer_reasons": {
                     "type": "array",
@@ -161,6 +163,7 @@ class StructuredExtractionSchema:
         """グループ3: 職歴・経験（自由記述系）"""
         return {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "career_history": {
                     "type": "array",
@@ -273,6 +276,7 @@ class StructuredExtractionSchema:
         ]
         return {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "experience_industry": {
                     "type": "array",
@@ -324,6 +328,7 @@ class StructuredExtractionSchema:
         """グループ5: 年収・待遇・働き方"""
         return {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "current_salary": {
                     "type": "integer",
@@ -369,6 +374,7 @@ class StructuredExtractionSchema:
         """グループ6: 会社カルチャー・規模・キャリア"""
         return {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
                 "business_vision": {
                     "type": "array",
