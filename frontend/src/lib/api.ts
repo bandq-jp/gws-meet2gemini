@@ -308,7 +308,7 @@ class ApiClient {
       params.set('structured', structured.toString());
     }
     
-    return this.request<MeetingListResponse>(`/meetings?${params.toString()}`);
+    return this.request<MeetingListResponse>(`/meetings/?${params.toString()}`);
   }
 
   async getMeetingsLegacy(accounts?: string[]): Promise<Meeting[]> {
