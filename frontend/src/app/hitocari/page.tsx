@@ -10,6 +10,19 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
   Download,
   Search,
   RefreshCw,
@@ -19,6 +32,8 @@ import {
   Loader2,
   Users,
   ChevronRight,
+  Check,
+  ChevronsUpDown,
 } from "lucide-react";
 import { 
   apiClient, 
@@ -47,19 +62,74 @@ export default function HitocariListPage() {
   
   // Tab states
   const [activeTab, setActiveTab] = useState<'all' | 'structured' | 'unstructured'>('all');
+  
+  // Combobox states
+  const [open, setOpen] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState<string>("");
 
   // Load available accounts function
   const loadAvailableAccounts = async () => {
     try {
       const response = await apiClient.getAvailableAccounts();
       setAvailableAccounts(response.accounts);
-      if (response.accounts.length > 0 && !currentUserEmail) {
-        setCurrentUserEmail(response.accounts[0]); // デフォルトは最初のアカウント
+      
+      // ローカルストレージから保存された設定を復元
+      const savedShowAllAccounts = localStorage.getItem('hitocari-showAllAccounts');
+      const savedCurrentUserEmail = localStorage.getItem('hitocari-currentUserEmail');
+      
+      if (savedShowAllAccounts !== null) {
+        const isShowAll = savedShowAllAccounts === 'true';
+        setShowAllAccounts(isShowAll);
+        
+        if (isShowAll) {
+          setSelectedAccount("all");
+          setCurrentUserEmail("");
+        } else if (savedCurrentUserEmail && response.accounts.includes(savedCurrentUserEmail)) {
+          setCurrentUserEmail(savedCurrentUserEmail);
+          setSelectedAccount(savedCurrentUserEmail);
+        } else if (response.accounts.length > 0) {
+          // 保存されたアカウントが無い場合は最初のアカウントを使用
+          setCurrentUserEmail(response.accounts[0]);
+          setSelectedAccount(response.accounts[0]);
+        }
+      } else {
+        // 初回設定：最初のアカウントをデフォルトに
+        if (response.accounts.length > 0) {
+          setCurrentUserEmail(response.accounts[0]);
+          setSelectedAccount(response.accounts[0]);
+          setShowAllAccounts(false);
+        }
       }
     } catch (error) {
       console.error('Failed to load available accounts:', error);
       setAvailableAccounts([]);
     }
+  };
+
+  // アカウントオプションの作成
+  const accountOptions = [
+    { value: "all", label: "全アカウント" },
+    ...availableAccounts.map(email => ({
+      value: email,
+      label: email.split('@')[0]
+    }))
+  ];
+
+  // アカウント選択の処理
+  const handleAccountSelect = (value: string) => {
+    if (value === "all") {
+      setShowAllAccounts(true);
+      setCurrentUserEmail("");
+      localStorage.setItem('hitocari-showAllAccounts', 'true');
+      localStorage.removeItem('hitocari-currentUserEmail');
+    } else {
+      setShowAllAccounts(false);
+      setCurrentUserEmail(value);
+      localStorage.setItem('hitocari-showAllAccounts', 'false');
+      localStorage.setItem('hitocari-currentUserEmail', value);
+    }
+    setSelectedAccount(value);
+    setOpen(false);
   };
 
   // Define loadMeetings function for paginated data
@@ -134,19 +204,23 @@ export default function HitocariListPage() {
     loadMeetings(activeTab, newPage);
   };
 
-  // ローカルストレージからアカウントフィルタ設定を読み込み
-  useEffect(() => {
-    const savedShowAllAccounts = localStorage.getItem('hitocari-showAllAccounts');
-    if (savedShowAllAccounts !== null) {
-      setShowAllAccounts(savedShowAllAccounts === 'true');
-    }
-  }, []);
 
   // Load meetings and accounts on component mount
   useEffect(() => {
     loadAvailableAccounts();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  
+  // selectedAccountの状態をショートカットで更新するためのuseEffect
+  useEffect(() => {
+    if (availableAccounts.length > 0) {
+      if (showAllAccounts) {
+        setSelectedAccount("all");
+      } else if (currentUserEmail) {
+        setSelectedAccount(currentUserEmail);
+      }
+    }
+  }, [showAllAccounts, currentUserEmail, availableAccounts]);
 
   // Load meetings when accounts or filters change
   useEffect(() => {
@@ -156,13 +230,6 @@ export default function HitocariListPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAllAccounts, currentUserEmail, activeTab, availableAccounts.length]);
 
-  // アカウントフィルタ切り替え
-  const toggleAccountFilter = () => {
-    const newValue = !showAllAccounts;
-    setShowAllAccounts(newValue);
-    // ローカルストレージに保存
-    localStorage.setItem('hitocari-showAllAccounts', String(newValue));
-  };
 
   const handleCollectMeetings = async () => {
     try {
@@ -383,25 +450,49 @@ export default function HitocariListPage() {
               </div>
               
               <div className="flex flex-col space-y-3 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
-                <div className="space-y-2 sm:space-y-0">
-                  <Label htmlFor="account-filter" className="text-sm font-medium block sm:hidden">
-                    アカウントフィルタ（全社）
+                <div className="flex items-center space-x-3">
+                  <Label className="text-sm hidden sm:block">
+                    アカウント:
                   </Label>
-                  <div className="flex items-center space-x-3">
-                    <Label htmlFor="account-filter" className="text-sm hidden sm:block">
-                      フィルタ:
-                    </Label>
-                    <div className="flex items-center space-x-2 text-xs sm:text-sm">
-                      <span className={`truncate max-w-[100px] sm:max-w-none ${!showAllAccounts ? 'font-medium' : 'text-muted-foreground'}`}>
-                        {showAllAccounts ? '全アカウント' : (currentUserEmail?.split('@')[0] || 'マイアカウント')}
-                      </span>
-                      <Switch
-                        id="account-filter"
-                        checked={showAllAccounts}
-                        onCheckedChange={toggleAccountFilter}
-                      />
-                    </div>
-                  </div>
+                  <Popover open={open} onOpenChange={setOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={open}
+                        className="w-[200px] justify-between text-xs sm:text-sm"
+                      >
+                        {selectedAccount
+                          ? accountOptions.find((option) => option.value === selectedAccount)?.label
+                          : "アカウントを選択..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[200px] p-0">
+                      <Command>
+                        <CommandInput placeholder="アカウントを検索..." />
+                        <CommandList>
+                          <CommandEmpty>アカウントが見つかりません</CommandEmpty>
+                          <CommandGroup>
+                            {accountOptions.map((option) => (
+                              <CommandItem
+                                key={option.value}
+                                value={option.value}
+                                onSelect={() => handleAccountSelect(option.value)}
+                              >
+                                <Check
+                                  className={`mr-2 h-4 w-4 ${
+                                    selectedAccount === option.value ? "opacity-100" : "opacity-0"
+                                  }`}
+                                />
+                                {option.label}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 
                 {meetingsResponse && (
