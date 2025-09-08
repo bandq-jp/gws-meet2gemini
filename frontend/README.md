@@ -130,6 +130,36 @@ bun dev
 
 アプリケーションは `http://localhost:3000` で起動します。
 
+### 開発用インパーソネーション（他ユーザーとしてログイン）
+
+開発中に他のClerkユーザーとしてログインするには、以下を設定・利用します。
+
+- `.env.local` に以下を設定：
+  - `NEXT_PUBLIC_DEV_AUTH=true`
+  - `DEV_ALLOWED_IMPERSONATORS=<許可する管理者メール>`（カンマ区切りで複数可）
+- ブラウザで `/dev/impersonate` にアクセスし、対象の `userId` または `email` を指定してスイッチ
+  - 現在は Mode `ticket` のみサポート（完全になりすまし）。`impersonation` はダッシュボードの手動機能をご利用ください。
+
+API エンドポイント: `POST /api/dev/impersonate`
+
+```jsonc
+// body
+{
+  "targetUserId": "user_..." // または email: "user@example.com",
+  "mode": "ticket",
+  "expiresInSeconds": 60 // 任意
+}
+```
+
+保護:
+- 本番では無効（`NODE_ENV === 'production'` では 403）
+- `NEXT_PUBLIC_DEV_AUTH` が `true` のときのみ有効
+- 呼び出しユーザーは `DEV_ALLOWED_IMPERSONATORS`（指定なければ `ALLOWED_EMAIL_DOMAINS`）に一致する必要あり
+
+エラー時の確認ポイント:
+- 500 `Clerk secret not configured (CLERK_SECRET_KEY)`: `.env.local` に `CLERK_SECRET_KEY` を設定し、開発サーバ再起動
+- 400 `impersonation mode not supported`: このAPIでは `impersonation` は非対応のため `ticket` を使用してください
+
 ## 📱 レスポンシブデザイン対応
 
 ### モバイル（～768px）

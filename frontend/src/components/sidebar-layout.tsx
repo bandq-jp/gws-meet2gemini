@@ -16,8 +16,10 @@ export function SidebarLayout({ children }: SidebarLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Skip authentication check for sign-in, sign-up, and unauthorized pages
-  const isAuthPage = pathname?.startsWith('/sign-') || pathname === '/unauthorized';
+  // Skip auth check for sign-in, sign-up, unauthorized, and dev impersonate (when enabled)
+  const devAuthEnabled = process.env.NEXT_PUBLIC_DEV_AUTH === 'true';
+  const isDevImpersonate = devAuthEnabled && pathname?.startsWith('/dev/impersonate');
+  const isAuthPage = pathname?.startsWith('/sign-') || pathname === '/unauthorized' || isDevImpersonate;
 
   useEffect(() => {
     if (!isAuthPage && isLoaded && !userId) {
