@@ -24,7 +24,7 @@ class DriveDocsCollector:
         self.settings = get_settings()
         self.logger = logging.getLogger(__name__)
 
-    async def collect_meeting_docs(self, accounts: Optional[List[str]] = None, include_structure: bool = False) -> List[MeetingDocument]:
+    async def collect_meeting_docs(self, accounts: Optional[List[str]] = None, include_structure: bool = False, skip_failed_exports: bool = False) -> List[MeetingDocument]:
         subjects = accounts or self.settings.impersonate_subjects
         self.logger.debug("collect_meeting_docs: subjects=%s include_structure=%s", subjects, include_structure)
         results: List[MeetingDocument] = []
@@ -34,7 +34,7 @@ class DriveDocsCollector:
         import asyncio
         async def _run_one(subject: str) -> Tuple[str, List[MeetingDocument] | Exception]:
             try:
-                return subject, await asyncio.to_thread(self._collect_for_account_sync, subject)
+                return subject, await asyncio.to_thread(self._collect_for_account_sync, subject, skip_failed_exports)
             except Exception as e:
                 return subject, e
 
@@ -51,7 +51,7 @@ class DriveDocsCollector:
             self.logger.warning("Skipped accounts: %s", ", ".join(skipped_accounts))
         return results
 
-    def _collect_for_account_sync(self, subject: str) -> List[MeetingDocument]:
+    def _collect_for_account_sync(self, subject: str, skip_failed_exports: bool = False) -> List[MeetingDocument]:
         """Blocking collection logic for a single account, safe to run in a thread."""
         self.logger.debug("Start collecting for subject=%s (sync)", subject)
         try:
@@ -75,7 +75,16 @@ class DriveDocsCollector:
                     if mime != "application/vnd.google-apps.document":
                         self.logger.debug("Skip non-Google Doc id=%s", f.get("id"))
                         continue
-                    text = self._export_doc_as_text(drive, f["id"]) or ""
+                    
+                    # テキスト取得を試行
+                    text = self._export_doc_as_text(drive, f["id"])
+                    if text is None:  # エラーが発生した場合はNoneが返される
+                        self.logger.warning("Failed to export doc as text id=%s name=%s", f.get("id"), f.get("name"))
+                        if skip_failed_exports:
+                            self.logger.info("Skipping document due to text export failure id=%s name=%s", f.get("id"), f.get("name"))
+                            continue
+                        text = ""  # スキップしない場合は空文字列で継続
+                    
                     self.logger.debug("Exported text length id=%s len=%d", f.get("id"), len(text))
                     invited = self._get_invited_emails(drive, f["id"]) or []
                     self.logger.debug("Invited emails count id=%s count=%d", f.get("id"), len(invited))
@@ -181,13 +190,13 @@ class DriveDocsCollector:
                 break
         return files
 
-    def _export_doc_as_text(self, drive, file_id: str) -> str:
+    def _export_doc_as_text(self, drive, file_id: str) -> Optional[str]:
         try:
             data = drive.files().export(fileId=file_id, mimeType="text/plain").execute()
             return data.decode("utf-8")
         except Exception as e:
             self.logger.error("Failed to export doc as text id=%s error=%s", file_id, e)
-            return ""
+            return None
 
     def _get_invited_emails(self, drive, file_id: str) -> list[str]:
         try:

@@ -37,45 +37,57 @@ class CollectMeetingsUseCase:
 
             stored = 0
             skipped = 0
+            failed = 0
             for meeting in collected:
-                # Offload Supabase calls to thread to avoid blocking event loop
-                existing = await asyncio.to_thread(
-                    repo.get_by_doc_and_organizer,
-                    meeting.doc_id,
-                    meeting.organizer_email or "",
-                )
-                if existing and not force_update:
-                    try:
-                        existing_modified = (existing.get("metadata") or {}).get(
-                            "modifiedTime"
-                        )
-                        current_modified = (meeting.metadata or {}).get("modifiedTime")
-                        if (
-                            existing_modified
-                            and current_modified
-                            and existing_modified == current_modified
-                        ):
+                try:
+                    # Offload Supabase calls to thread to avoid blocking event loop
+                    existing = await asyncio.to_thread(
+                        repo.get_by_doc_and_organizer,
+                        meeting.doc_id,
+                        meeting.organizer_email or "",
+                    )
+                    if existing and not force_update:
+                        try:
+                            existing_modified = (existing.get("metadata") or {}).get(
+                                "modifiedTime"
+                            )
+                            current_modified = (meeting.metadata or {}).get("modifiedTime")
+                            if (
+                                existing_modified
+                                and current_modified
+                                and existing_modified == current_modified
+                            ):
+                                logger.debug(
+                                    "Skip unchanged meeting: doc_id=%s organizer=%s",
+                                    meeting.doc_id,
+                                    meeting.organizer_email,
+                                )
+                                skipped += 1
+                                continue
+                        except Exception as ex:
                             logger.debug(
-                                "Skip unchanged meeting: doc_id=%s organizer=%s",
+                                "Comparison failed for doc_id=%s organizer=%s: %s (proceed to upsert)",
                                 meeting.doc_id,
                                 meeting.organizer_email,
+                                ex,
                             )
-                            skipped += 1
-                            continue
-                    except Exception as ex:
-                        logger.debug(
-                            "Comparison failed for doc_id=%s organizer=%s: %s (proceed to upsert)",
-                            meeting.doc_id,
-                            meeting.organizer_email,
-                            ex,
-                        )
-                await asyncio.to_thread(repo.upsert_meeting, meeting)
-                stored += 1
+                    
+                    await asyncio.to_thread(repo.upsert_meeting, meeting)
+                    stored += 1
+                except Exception as e:
+                    failed += 1
+                    logger.error(
+                        "Failed to store meeting: doc_id=%s organizer=%s error=%s",
+                        meeting.doc_id,
+                        meeting.organizer_email or "unknown",
+                        str(e)
+                    )
 
             logger.info(
-                "CollectMeetingsUseCase finished. Stored/updated=%d, skipped=%d, total=%d",
+                "CollectMeetingsUseCase finished. Stored/updated=%d, skipped=%d, failed=%d, total=%d",
                 stored,
                 skipped,
+                failed,
                 len(collected),
             )
             if job_id:
@@ -84,6 +96,7 @@ class CollectMeetingsUseCase:
                     message="Collection completed",
                     stored=stored,
                     skipped=skipped,
+                    failed=failed,
                     collected=len(collected),
                 )
         except Exception as e:
