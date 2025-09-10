@@ -87,21 +87,21 @@ class MeetingRepositoryImpl:
             # text_contentを除いた軽量なフィールドのみ取得
             select_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,created_at,updated_at"
             
-            # 1) total取得
+            # 総件数取得
             count_q = sb.table(self.TABLE).select("id", count="exact")
             if accounts:
                 count_q = count_q.in_("organizer_email", accounts)
             count_res = count_q.execute()
             total = getattr(count_res, "count", None) or len(getattr(count_res, "data", []) or [])
             
-            # 2) ページ分のみ取得
+            # ページ分のみ取得
             page_q = sb.table(self.TABLE).select(select_fields).order("meeting_datetime", desc=True)
             if accounts:
                 page_q = page_q.in_("organizer_email", accounts)
             page_res = page_q.range(start, end).execute()
             items = getattr(page_res, "data", []) or []
             
-            # 3) 構造化有無の付与（空配列は照会しない）
+            # 構造化有無の付与（空配列は照会しない）
             page_ids = [it.get("id") for it in items if it.get("id")]
             structured_meetings = set()
             if page_ids:  # 空配列ガード - 今回の400の確実な対策
@@ -112,9 +112,36 @@ class MeetingRepositoryImpl:
             for it in items:
                 it["is_structured"] = it.get("id") in structured_meetings
             
-            # 4) structuredフィルタが指定されていればページ内で間引く
+            # structuredフィルタが指定されていればページ内で間引く
             if structured is not None:
+                original_items = items
                 items = [it for it in items if it.get("is_structured", False) == structured]
+                
+                # フィルタした結果が空の場合、より多くのページを取得して再試行
+                if len(items) == 0 and len(original_items) > 0:
+                    # より多くのデータを取得して再フィルタ
+                    extended_size = page_size * 5  # 5倍のサイズで再取得
+                    extended_end = start + extended_size - 1
+                    
+                    extended_q = sb.table(self.TABLE).select(select_fields).order("meeting_datetime", desc=True)
+                    if accounts:
+                        extended_q = extended_q.in_("organizer_email", accounts)
+                    extended_res = extended_q.range(start, extended_end).execute()
+                    extended_items = getattr(extended_res, "data", []) or []
+                    
+                    # 構造化有無の付与
+                    extended_ids = [it.get("id") for it in extended_items if it.get("id")]
+                    if extended_ids:
+                        s_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", extended_ids).execute()
+                        s_data = getattr(s_res, "data", []) or []
+                        structured_meetings = {row["meeting_id"] for row in s_data}
+                        
+                        for it in extended_items:
+                            it["is_structured"] = it.get("id") in structured_meetings
+                        
+                        # フィルタして必要な分だけ取得
+                        filtered_items = [it for it in extended_items if it.get("is_structured", False) == structured]
+                        items = filtered_items[:page_size]
             
             total_pages = max(1, (total + page_size - 1) // page_size)
             return {
