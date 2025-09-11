@@ -43,12 +43,28 @@ class Settings:
     tasks_queue: str = os.getenv("TASKS_QUEUE", "meet2gemini-collect")
     # Cloud Run のワーカーURL（後述の worker エンドポイントのフルURL）
     tasks_worker_url: str = os.getenv("TASKS_WORKER_URL", "")
+    tasks_autoproc_worker_url: str = os.getenv("TASKS_AUTOPROC_WORKER_URL", "")
     # OIDC で署名するサービスアカウント（Cloud Tasks 側）
     tasks_oidc_service_account: str = os.getenv("TASKS_OIDC_SERVICE_ACCOUNT", "")
     # 監査/追加制御用：期待するQueue名（ヘッダ検証）
     expected_queue_name: str = os.getenv("TASKS_EXPECTED_QUEUE_NAME", "meet2gemini-collect")
 
+    # Auto-process settings
+    candidate_title_regex: str | None = os.getenv("CANDIDATE_TITLE_REGEX") or None
+    autoproc_max_items: int = int(os.getenv("AUTOPROC_MAX_ITEMS", "20"))
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    # Derive auto-process worker URL if not explicitly provided
+    if not s.tasks_autoproc_worker_url and s.tasks_worker_url:
+        # Best-effort replacement of known collect worker path → auto-process worker path
+        if "/collect/worker" in s.tasks_worker_url:
+            s.tasks_autoproc_worker_url = s.tasks_worker_url.replace(
+                "/collect/worker", "/structured/auto-process/worker"
+            )
+        else:
+            # Fallback to same URL (let operator set correct one explicitly)
+            s.tasks_autoproc_worker_url = s.tasks_worker_url
+    return s
