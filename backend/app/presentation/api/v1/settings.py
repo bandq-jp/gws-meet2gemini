@@ -34,13 +34,13 @@ async def get_settings_endpoint():
         # 環境変数から現在の設定を読み込み
         backend_settings = get_backend_settings()
         
-        # Gemini設定を構築
+        # Gemini設定を構築（環境変数から直接取得）
         gemini_settings = GeminiSettings(
             gemini_enabled=bool(backend_settings.gemini_api_key),  # API キーがあれば有効
-            gemini_model=_current_settings["gemini"].gemini_model,  # 保存された設定
-            gemini_max_tokens=_current_settings["gemini"].gemini_max_tokens,
-            gemini_temperature=_current_settings["gemini"].gemini_temperature,
-            gemini_fallback_enabled=_current_settings["gemini"].gemini_fallback_enabled,
+            gemini_model=backend_settings.gemini_model,
+            gemini_max_tokens=backend_settings.gemini_max_tokens,
+            gemini_temperature=backend_settings.gemini_temperature,
+            gemini_fallback_enabled=True,  # フォールバックモデルが設定されていれば有効
         )
         
         return SettingsResponse(gemini=gemini_settings)
@@ -79,4 +79,13 @@ async def get_available_gemini_models():
 
 def get_current_gemini_settings() -> GeminiSettings:
     """現在のGemini設定を取得（他のモジュールから使用）"""
-    return _current_settings["gemini"]
+    # 環境変数から現在の設定を取得
+    backend_settings = get_backend_settings()
+    
+    return GeminiSettings(
+        gemini_enabled=bool(backend_settings.gemini_api_key),  # API キーがあれば有効
+        gemini_model=backend_settings.gemini_model,
+        gemini_max_tokens=backend_settings.gemini_max_tokens,
+        gemini_temperature=backend_settings.gemini_temperature,
+        gemini_fallback_enabled=True,  # 環境変数でフォールバックモデルが設定されていれば有効
+    )
