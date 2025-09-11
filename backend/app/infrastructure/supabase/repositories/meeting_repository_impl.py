@@ -101,13 +101,16 @@ class MeetingRepositoryImpl:
             page_res = page_q.range(start, end).execute()
             items = getattr(page_res, "data", []) or []
             
-            # 構造化有無の付与（空配列は照会しない）
+            # 構造化有無の付与（空配列は照会しない）。長いINクエリを避けるため分割。
             page_ids = [it.get("id") for it in items if it.get("id")]
-            structured_meetings = set()
-            if page_ids:  # 空配列ガード - 今回の400の確実な対策
-                s_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", page_ids).execute()
-                s_data = getattr(s_res, "data", []) or []
-                structured_meetings = {row["meeting_id"] for row in s_data}
+            structured_meetings: set = set()
+            if page_ids:
+                chunk_size = 10
+                for i in range(0, len(page_ids), chunk_size):
+                    sub = page_ids[i:i+chunk_size]
+                    s_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", sub).execute()
+                    s_data = getattr(s_res, "data", []) or []
+                    structured_meetings.update({row["meeting_id"] for row in s_data})
                 
             for it in items:
                 it["is_structured"] = it.get("id") in structured_meetings
@@ -129,12 +132,16 @@ class MeetingRepositoryImpl:
                     extended_res = extended_q.range(start, extended_end).execute()
                     extended_items = getattr(extended_res, "data", []) or []
                     
-                    # 構造化有無の付与
+                    # 構造化有無の付与（INクエリ分割）
                     extended_ids = [it.get("id") for it in extended_items if it.get("id")]
+                    structured_meetings = set()
                     if extended_ids:
-                        s_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", extended_ids).execute()
-                        s_data = getattr(s_res, "data", []) or []
-                        structured_meetings = {row["meeting_id"] for row in s_data}
+                        chunk_size = 20
+                        for i in range(0, len(extended_ids), chunk_size):
+                            sub = extended_ids[i:i+chunk_size]
+                            s_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", sub).execute()
+                            s_data = getattr(s_res, "data", []) or []
+                            structured_meetings.update({row["meeting_id"] for row in s_data})
                         
                         for it in extended_items:
                             it["is_structured"] = it.get("id") in structured_meetings

@@ -74,6 +74,35 @@
 - 例: `GET /api/v1/structured/123`
 - レスポンス例: `{ "meeting_id": "123", "data": { ... } }`
 
+### 3) 自動処理（Docs タイトル x Zoho 求職者名 100%一致時のみ）
+- `POST /api/v1/structured/auto-process`
+  - 説明: Docsタイトルから候補者名を抽出し、Zoho APP-hcの「求職者名」と厳密一致（equals）した場合のみ、構造化＋Zoho書き込みを自動実行します。`sync=true` を指定すると同期実行でサマリを即時返却、未指定時は非同期実行で `job_id` を返却（進捗は `/api/v1/meetings/collect/status/{job_id}`）。
+  - Body(JSON):
+    - `accounts` (string[]): 対象のGoogleアカウント（省略時は `GOOGLE_SUBJECT_EMAILS` 全員）
+    - `max_items` (int): 1回の実行で処理する最大件数（デフォルト: `AUTOPROC_MAX_ITEMS` もしくは20）
+    - `dry_run` (bool): trueで一致判定のみ行い、Gemini/Zohoの外部I/Oを行わない
+    - `title_regex` (string): タイトルから候補者名を抽出する正規表現（未指定時は `CANDIDATE_TITLE_REGEX` を利用。どちらも未設定ならタイトル全体を候補者名として扱う）
+    - `sync` (bool): trueで同期実行（ローカル検証向け）
+  - レスポンス: `{ message, job_id, status_url }`（sync=true の場合は処理サマリ）
+
+- `POST /api/v1/structured/auto-process-task`
+  - 説明: Cloud Tasks に自動処理タスクを投入します。Cloud Run の Worker (`/api/v1/structured/auto-process/worker`) が実処理を行います。
+  - Body: 上記と同じ
+  - 注意: `TASKS_AUTOPROC_WORKER_URL`（未設定時は `TASKS_WORKER_URL` から自動導出）を正しく設定してください。
+
+- `POST /api/v1/structured/auto-process/worker`
+  - 説明: Cloud Tasks からのみ叩かれるWorker用エンドポイント。手動実行不要です。
+  - Header: `X-Cloud-Tasks-QueueName` or `X-Requested-By: cloud-tasks-enqueue`
+
+一致ロジックの詳細
+- 文字起こし未保存（`text_content` が空/None）の会議はスキップ
+- 会議名（Docsタイトル）に「初回」を含まない場合はスキップ
+- タイトルから候補者名を抽出（`title_regex` または `CANDIDATE_TITLE_REGEX`）
+  - 正規化（NFKC＋lower＋空白圧縮）後に、Zoho側の求職者名と完全一致（equals）
+- Zoho検索は APP-hc の「求職者名」に対して `equals` を使用。ヒットがちょうど1件の時のみ続行
+- 既に `structured_outputs` が存在する会議はスキップ（再処理しない）
+- 1回の実行あたり `max_items` 件まで処理（デフォルト20）
+
 ---
 
 ## cURL サンプル

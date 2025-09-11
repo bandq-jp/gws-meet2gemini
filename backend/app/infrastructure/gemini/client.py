@@ -18,6 +18,7 @@ import time
 import logging
 import dotenv
 from app.infrastructure.gemini.error_utils import classify_gemini_error
+from app.infrastructure.config.settings import get_settings
 
 dotenv.load_dotenv()
 
@@ -50,21 +51,23 @@ class GeminiClient:
             temperature: 温度パラメータ
             max_tokens: 最大出力トークン数
         """
+        settings = get_settings()
+        
         # API キーの取得
         if api_key:
             self.client = genai.Client(api_key=api_key)
         else:
-            gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            gemini_key = settings.gemini_api_key
             if not gemini_key:
                 raise ValueError(
                     "Gemini API key is required. Set GEMINI_API_KEY or GOOGLE_API_KEY."
                 )
             self.client = genai.Client(api_key=gemini_key)
         
-        # 設定可能なパラメータ
-        self.model = model or "gemini-2.5-pro"
-        self.temperature = temperature if temperature is not None else 0.1
-        self.max_tokens = max_tokens or 20000
+        # 設定可能なパラメータ（環境変数から優先）
+        self.model = model or settings.gemini_model
+        self.temperature = temperature if temperature is not None else settings.gemini_temperature
+        self.max_tokens = max_tokens or settings.gemini_max_tokens
     
     def generate_content(
         self,
@@ -118,12 +121,25 @@ class GeminiClient:
             )
 
         # --- モデル試行リストを作る ---
+        settings = get_settings()
         primary = model_override or self.model
-        fallback_map = {
-            "gemini-2.5-pro": ["gemini-2.5-flash"],
-            "gemini-1.5-pro": ["gemini-1.5-flash"],
-        }
-        models_to_try = [primary] + fallback_map.get(primary, [])
+        
+        # 環境変数ベースのフォールバックモデル決定
+        # プライマリモデルに対応するフォールバックモデルを決定
+        fallback_model = None
+        if "pro" in primary.lower():
+            # proモデルの場合は設定されたfallbackモデルを使用
+            fallback_model = settings.gemini_fallback_model
+        elif "flash" in primary.lower():
+            # flashモデルの場合はフォールバックなし（既に軽量モデル）
+            fallback_model = None
+        else:
+            # その他のモデルの場合も設定されたfallbackモデルを使用
+            fallback_model = settings.gemini_fallback_model
+            
+        models_to_try = [primary]
+        if fallback_model and fallback_model != primary:
+            models_to_try.append(fallback_model)
 
         last_exc: Exception | None = None
         for idx, model_name in enumerate(models_to_try):

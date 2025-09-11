@@ -5,6 +5,9 @@ from typing import Any, Dict, List, Optional
 from urllib import request, parse, error
 
 from app.infrastructure.config.settings import get_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class ZohoAuthError(RuntimeError):
@@ -183,6 +186,45 @@ class ZohoClient:
         data = self._get(f"/crm/v2/{module_api}/{record_id}") or {}
         items = data.get("data") or []
         return items[0] if items else {}
+
+    def search_app_hc_by_exact_name(self, name: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Search APP-hc by candidate name with strict equality (equals).
+
+        Returns records with minimal fields: id (Zoho record id), candidate name, candidate id (custom field).
+        0 or multiple hits should be handled by the caller (we do not pick one heuristically).
+        """
+        module_api = self.settings.zoho_app_hc_module
+
+        # Resolve field API names if not provided
+        name_field = self.settings.zoho_app_hc_name_field_api or self.get_field_api_name(module_api, "求職者名")
+        id_field = self.settings.zoho_app_hc_id_field_api or self.get_field_api_name(module_api, "求職者ID")
+        if not name_field:
+            raise RuntimeError(
+                "APP-hc name field API not resolvable. Set ZOHO_APP_HC_MODULE/ZOHO_APP_HC_NAME_FIELD_API explicitly or use /api/v1/zoho/modules and /api/v1/zoho/fields to discover."
+            )
+
+        # Build strict equals criteria
+        crit = f"({name_field}:equals:{name})"
+        params: Dict[str, Any] = {"criteria": crit, "per_page": limit}
+        fields = ["id", name_field]
+        if id_field:
+            fields.append(id_field)
+        params["fields"] = ",".join(fields)
+
+        logger.info("[zoho] search exact: module=%s name=%s", module_api, name)
+        data = self._get(f"/crm/v2/{module_api}/search", params) or {}
+        records = []
+        for r in data.get("data", []) or []:
+            records.append(
+                {
+                    "record_id": r.get("id"),
+                    "candidate_name": r.get(name_field),
+                    "candidate_id": (r.get(id_field) if id_field else None),
+                    "raw": r,
+                }
+            )
+        logger.info("[zoho] search exact results: count=%s", len(records))
+        return records
     
 
 # class ZohoBaseClient:
