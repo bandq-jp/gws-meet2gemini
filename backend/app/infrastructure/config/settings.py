@@ -78,11 +78,19 @@ def get_settings() -> Settings:
     # Derive auto-process worker URL if not explicitly provided
     if not s.tasks_autoproc_worker_url and s.tasks_worker_url:
         # Best-effort replacement of known collect worker path → auto-process worker path
-        if "/collect/worker" in s.tasks_worker_url:
+        if "/api/v1/meetings/collect/worker" in s.tasks_worker_url:
+            s.tasks_autoproc_worker_url = s.tasks_worker_url.replace(
+                "/api/v1/meetings/collect/worker", "/api/v1/structured/auto-process/worker"
+            )
+        elif "/collect/worker" in s.tasks_worker_url:
             s.tasks_autoproc_worker_url = s.tasks_worker_url.replace(
                 "/collect/worker", "/structured/auto-process/worker"
             )
         else:
-            # Fallback to same URL (let operator set correct one explicitly)
-            s.tasks_autoproc_worker_url = s.tasks_worker_url
+            # Fallback: construct the URL from base
+            if s.tasks_worker_url.endswith("/api/v1/meetings/collect/worker"):
+                base_url = s.tasks_worker_url.replace("/api/v1/meetings/collect/worker", "")
+                s.tasks_autoproc_worker_url = f"{base_url}/api/v1/structured/auto-process/worker"
+            else:
+                s.tasks_autoproc_worker_url = s.tasks_worker_url
     return s
