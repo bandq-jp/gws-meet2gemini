@@ -10,7 +10,7 @@ from app.infrastructure.supabase.repositories.custom_schema_repository_impl impo
 from app.infrastructure.supabase.repositories.ai_usage_repository_impl import AiUsageRepositoryImpl
 from app.infrastructure.gemini.structured_extractor import StructuredDataExtractor
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo
-from app.presentation.api.v1.settings import get_current_gemini_settings
+from app.infrastructure.config.settings import get_settings
 from app.infrastructure.zoho.client import ZohoWriteClient, ZohoAuthError, ZohoFieldMappingError
 
 # ログ設定
@@ -52,12 +52,16 @@ class ProcessStructuredDataUseCase:
                 schema_version = f"default-{custom_schema.id}"
         
         # 現在の設定を取得
-        gemini_settings = get_current_gemini_settings()
+        settings = get_settings()
+        gemini_settings = {
+            "model": settings.gemini_model,
+            "temperature": settings.gemini_temperature
+        }
         
         extractor = StructuredDataExtractor(
-            model=gemini_settings.gemini_model,
-            temperature=gemini_settings.gemini_temperature,
-            max_tokens=gemini_settings.gemini_max_tokens
+            model=gemini_settings["model"],
+            temperature=gemini_settings["temperature"],
+            max_tokens=settings.gemini_max_tokens
         )
         # Extract candidate and agent names for better context
         candidate_name = zoho_candidate_name

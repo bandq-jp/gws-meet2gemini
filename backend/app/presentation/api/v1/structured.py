@@ -1,11 +1,13 @@
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Response, status
 import logging
+from datetime import datetime, timezone
 
 from app.application.use_cases.process_structured_data import ProcessStructuredDataUseCase
 from app.application.use_cases.extract_structured_data_only import ExtractStructuredDataOnlyUseCase
 from app.application.use_cases.sync_structured_data_to_zoho import SyncStructuredDataToZohoUseCase
 from app.application.use_cases.get_structured_data import GetStructuredDataUseCase
+from app.application.use_cases.get_auto_process_stats import GetAutoProcessStatsUseCase
 from app.presentation.schemas.structured import (
     StructuredOut, StructuredProcessRequest,
     ExtractOnlyRequest, ExtractOnlyOut,
@@ -77,6 +79,8 @@ class AutoProcessIn(BaseModel):
     dry_run: bool = False
     title_regex: Optional[str] = None
     sync: bool = False
+    parallel_workers: Optional[int] = None
+    batch_size: Optional[int] = None
 
 
 @router.post("/auto-process", response_model=Dict[str, Any])
@@ -86,8 +90,8 @@ async def auto_process(
     """Run auto-processing. Use sync=true for inline execution (returns summary)."""
     use_case = AutoProcessMeetingsUseCase()
     try:
-        logger.info("[api] auto_process request: sync=%s dry_run=%s max_items=%s accounts=%s title_regex=%s",
-                    body.sync, body.dry_run, body.max_items, (body.accounts or []), (body.title_regex or "<none>"))
+        logger.info("[api] auto_process request: sync=%s dry_run=%s max_items=%s parallel_workers=%s batch_size=%s accounts=%s title_regex=%s",
+                    body.sync, body.dry_run, body.max_items, body.parallel_workers, body.batch_size, (body.accounts or []), (body.title_regex or "<none>"))
         # Synchronous mode for local testing
         if body.sync:
             summary = await use_case.execute(
@@ -95,6 +99,8 @@ async def auto_process(
                 max_items=body.max_items,
                 dry_run=body.dry_run,
                 title_regex_override=body.title_regex,
+                parallel_workers=body.parallel_workers,
+                batch_size=body.batch_size,
                 job_id=None,
             )
             logger.info("[api] auto_process sync finished: processed=%s errors=%s",
@@ -117,6 +123,8 @@ async def auto_process(
                     max_items=body.max_items,
                     dry_run=body.dry_run,
                     title_regex_override=body.title_regex,
+                    parallel_workers=body.parallel_workers,
+                    batch_size=body.batch_size,
                     job_id=job_id,
                 )
                 logger.info("[api] auto_process background finished: job_id=%s", job_id)
@@ -184,9 +192,95 @@ async def auto_process_worker(request: Request, body: AutoWorkerIn = Body(...)):
             max_items=body.max_items,
             dry_run=body.dry_run,
             title_regex_override=body.title_regex,
+            parallel_workers=body.parallel_workers,
+            batch_size=body.batch_size,
             job_id=body.job_id,
         )
         return Response(status_code=204)
     except Exception as e:
         JobTracker.mark_failed(body.job_id, error=str(e))
         raise
+
+
+# --- Statistics and monitoring endpoints ---
+
+@router.get("/auto-process/stats", response_model=Dict[str, Any])
+async def get_auto_process_stats(
+    days_back: int = Query(default=7, ge=1, le=30, description="Number of days to look back for statistics"),
+    detailed: bool = Query(default=False, description="Include detailed metrics")
+):
+    """Get auto-processing statistics and performance metrics."""
+    try:
+        use_case = GetAutoProcessStatsUseCase()
+        stats = use_case.execute(days_back=days_back, include_detailed_metrics=detailed)
+        
+        logger.info("[api] auto_process stats requested: days_back=%s detailed=%s", days_back, detailed)
+        return stats
+        
+    except Exception as e:
+        logger.error("[api] error getting auto_process stats: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get statistics: {str(e)}")
+
+
+@router.get("/auto-process/health", response_model=Dict[str, Any])
+async def get_auto_process_health():
+    """Get current health status of auto-processing system."""
+    try:
+        settings = get_settings()
+        use_case = GetAutoProcessStatsUseCase()
+        
+        # Get recent stats (last 24 hours)
+        stats = use_case.execute(days_back=1, include_detailed_metrics=False)
+        
+        # Extract key health metrics
+        processing_stats = stats.get("processing_stats", {})
+        alerts = stats.get("alerts", [])
+        
+        success_rate = processing_stats.get("success_rate", 0.0)
+        error_rate = 1.0 - success_rate if success_rate > 0 else 0.0
+        
+        # Determine overall health status
+        health_status = "healthy"
+        if error_rate > settings.autoproc_error_rate_threshold:
+            health_status = "unhealthy"
+        elif success_rate < settings.autoproc_success_rate_threshold:
+            health_status = "degraded"
+        elif len([a for a in alerts if a.get("severity") == "critical"]) > 0:
+            health_status = "critical"
+        elif len(alerts) > 0:
+            health_status = "warning"
+        
+        health_data = {
+            "status": health_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "metrics": {
+                "success_rate": success_rate,
+                "error_rate": error_rate,
+                "total_processed_24h": processing_stats.get("total_processed", 0),
+                "active_alerts": len(alerts)
+            },
+            "settings": {
+                "parallel_workers": settings.autoproc_parallel_workers,
+                "batch_size": settings.autoproc_batch_size,
+                "max_items": settings.autoproc_max_items
+            },
+            "alerts": alerts[:5],  # Only show first 5 alerts
+            "checks": {
+                "success_rate_ok": success_rate >= settings.autoproc_success_rate_threshold,
+                "error_rate_ok": error_rate <= settings.autoproc_error_rate_threshold,
+                "no_critical_alerts": len([a for a in alerts if a.get("severity") == "critical"]) == 0
+            }
+        }
+        
+        logger.info("[api] auto_process health check: status=%s alerts=%s", health_status, len(alerts))
+        return health_data
+        
+    except Exception as e:
+        logger.error("[api] error getting auto_process health: %s", e)
+        return {
+            "status": "error",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": str(e),
+            "metrics": {},
+            "alerts": [{"type": "health_check_error", "severity": "error", "message": f"Health check failed: {str(e)}"}]
+        }

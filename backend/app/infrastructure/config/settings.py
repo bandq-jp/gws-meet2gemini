@@ -52,6 +52,24 @@ class Settings:
     # Auto-process settings
     candidate_title_regex: str | None = os.getenv("CANDIDATE_TITLE_REGEX") or None
     autoproc_max_items: int = int(os.getenv("AUTOPROC_MAX_ITEMS", "20"))
+    
+    # Auto-process parallel execution settings
+    autoproc_parallel_workers: int = int(os.getenv("AUTOPROC_PARALLEL_WORKERS", "5"))
+    autoproc_batch_size: int = int(os.getenv("AUTOPROC_BATCH_SIZE", "10"))
+    
+    # Auto-process monitoring settings
+    autoproc_success_rate_threshold: float = float(os.getenv("AUTOPROC_SUCCESS_RATE_THRESHOLD", "0.9"))
+    autoproc_queue_alert_threshold: int = int(os.getenv("AUTOPROC_QUEUE_ALERT_THRESHOLD", "50"))
+    autoproc_error_rate_threshold: float = float(os.getenv("AUTOPROC_ERROR_RATE_THRESHOLD", "0.05"))
+    
+    # Auto-process schedule settings
+    autoproc_backlog_schedule: str = os.getenv("AUTOPROC_BACKLOG_SCHEDULE", "0 */2 * * *")
+    autoproc_realtime_schedule: str = os.getenv("AUTOPROC_REALTIME_SCHEDULE", "*/30 10-23 * * *")
+    autoproc_maintenance_schedule: str = os.getenv("AUTOPROC_MAINTENANCE_SCHEDULE", "0 1 * * *")
+    
+    # Auto-process cost optimization
+    autoproc_gemini_model_small_threshold: int = int(os.getenv("AUTOPROC_GEMINI_MODEL_SMALL_THRESHOLD", "5000"))
+    autoproc_gemini_model_large_threshold: int = int(os.getenv("AUTOPROC_GEMINI_MODEL_LARGE_THRESHOLD", "15000"))
 
 
 @lru_cache(maxsize=1)
