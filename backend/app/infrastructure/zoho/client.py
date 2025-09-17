@@ -470,25 +470,51 @@ class ZohoWriteClient:
     def _convert_structured_data_to_zoho(self, structured_data: Dict[str, Any]) -> Dict[str, Any]:
         """構造化出力データをZohoフィールド形式に変換（再実行・上書き対応）"""
         zoho_data = {}
-        
+
+        # フィールド長制限定義（文字数制限のあるテキストフィールド）
+        text_field_limits = {
+            # テキストフィールドの255文字制限
+            "difficult_work": 255,
+            "enjoyed_work": 255,
+            "salary_memo": 255,
+            "remote_time_memo": 255,
+            "transfer_status_memo": 255,
+            "culture_scale_memo": 255,
+            "industry_reason": 255,
+            "position_industry_reason": 255,
+            "max_future_salary": 255,
+            "customer_acquisition": 255,
+            "base_incentive_ratio": 255,
+            "new_existing_ratio": 255,
+            # より長いテキストフィールド（あれば）
+            "transfer_priorities": 1000,
+            "companies_in_selection": 500,
+            "other_company_intention": 500,
+            "job_appeal_points": 500,
+            "job_concerns": 500,
+            "introduced_jobs": 500,
+            "other_offer_salary": 255,
+            "ca_ra_focus": 255,
+        }
+
         for structured_field, value in structured_data.items():
             zoho_field = self.field_mapping.get(structured_field)
             if not zoho_field:
                 continue  # マッピングが見つからない場合はスキップ
-            
+
             # 空値やNoneの場合も明示的にクリアするため送信対象にする
             if value is None or value == "" or (isinstance(value, list) and len(value) == 0):
                 # 空値は空文字列として送信（Zohoで既存値をクリア）
                 zoho_data[zoho_field] = ""
                 continue
-            
+
             # multiselectpicklistフィールドの定義
             multiselect_fields = [
-                "transfer_reasons", "desired_industry", "desired_position", 
+                "transfer_reasons", "desired_industry", "desired_position",
                 "business_vision", "career_vision", "desired_employee_count",
                 "experience_industry", "experience_field_hr"
             ]
-            
+
             # データ型変換
             if structured_field in multiselect_fields:
                 # multiselectpicklistフィールドは常に配列として処理
@@ -511,16 +537,44 @@ class ZohoWriteClient:
             elif isinstance(value, list):
                 # multiselect以外の配列は改行区切りテキストに変換
                 clean_values = [str(v).strip() for v in value if v and str(v).strip()]
-                zoho_data[zoho_field] = "\n".join(clean_values) if clean_values else ""
+                converted_text = "\n".join(clean_values) if clean_values else ""
+
+                # 文字数制限チェック
+                if structured_field in text_field_limits:
+                    max_length = text_field_limits[structured_field]
+                    if len(converted_text) > max_length:
+                        original_length = len(converted_text)
+                        converted_text = converted_text[:max_length].rstrip()  # 切り詰めて末尾空白除去
+                        logger.warning(f"📏 フィールド長制限適用: {structured_field} ({original_length}文字 -> {len(converted_text)}文字)")
+
+                zoho_data[zoho_field] = converted_text
             elif isinstance(value, (int, float)):
                 zoho_data[zoho_field] = value
             elif isinstance(value, str):
-                # 文字列の場合はそのまま送信
-                zoho_data[zoho_field] = value.strip()
+                # 文字列の場合は文字数制限チェック
+                cleaned_value = value.strip()
+
+                if structured_field in text_field_limits:
+                    max_length = text_field_limits[structured_field]
+                    if len(cleaned_value) > max_length:
+                        original_length = len(cleaned_value)
+                        cleaned_value = cleaned_value[:max_length].rstrip()  # 切り詰めて末尾空白除去
+                        logger.warning(f"📏 フィールド長制限適用: {structured_field} ({original_length}文字 -> {len(cleaned_value)}文字)")
+
+                zoho_data[zoho_field] = cleaned_value
             else:
-                # その他の型は文字列に変換
-                zoho_data[zoho_field] = str(value).strip()
-        
+                # その他の型は文字列に変換してから文字数制限チェック
+                converted_value = str(value).strip()
+
+                if structured_field in text_field_limits:
+                    max_length = text_field_limits[structured_field]
+                    if len(converted_value) > max_length:
+                        original_length = len(converted_value)
+                        converted_value = converted_value[:max_length].rstrip()  # 切り詰めて末尾空白除去
+                        logger.warning(f"📏 フィールド長制限適用: {structured_field} ({original_length}文字 -> {len(converted_value)}文字)")
+
+                zoho_data[zoho_field] = converted_value
+
         return zoho_data
     
     def update_jobseeker_record(self, record_id: str, structured_data: Dict[str, Any], skip_validation: bool = False, candidate_name: str = None) -> Dict[str, Any]:
@@ -597,11 +651,54 @@ class ZohoWriteClient:
         try:
             with request.urlopen(req, timeout=30) as resp:
                 response_data = json.loads(resp.read().decode("utf-8"))
-                
-                # 成功時のログを詳細化
+
+                logger.info(f"📜 Zoho応答詳細: {response_data}")
+
+                # レスポンスボディ内でエラーが含まれているかチェック
+                has_errors = False
+                error_messages = []
+
+                if response_data and 'data' in response_data and response_data['data']:
+                    for record in response_data['data']:
+                        # 個別レコードでエラーステータスをチェック
+                        if record.get('status') == 'error':
+                            has_errors = True
+                            error_code = record.get('code', 'UNKNOWN')
+                            error_message = record.get('message', 'Unknown error')
+                            error_details = record.get('details', {})
+
+                            # 詳細なエラーメッセージを構築
+                            detailed_message = f"{error_code}: {error_message}"
+                            if error_details:
+                                if isinstance(error_details, dict):
+                                    detail_parts = []
+                                    for key, value in error_details.items():
+                                        detail_parts.append(f"{key}={value}")
+                                    detailed_message += f" ({', '.join(detail_parts)})"
+                                else:
+                                    detailed_message += f" ({error_details})"
+
+                            error_messages.append(detailed_message)
+                            logger.error(f"❌ Zoho個別レコードエラー: {detailed_message}")
+
+                if has_errors:
+                    # エラーが含まれている場合は失敗として処理
+                    combined_error = "; ".join(error_messages)
+                    logger.error(f"❌ Zoho書き込み失敗（応答エラー）: 求職者「{candidate_name or '不明'}」(record_id={record_id})")
+                    logger.error(f"💥 エラー詳細: {combined_error}")
+
+                    return {
+                        "status": "error",
+                        "status_code": resp.getcode(),
+                        "error": combined_error,
+                        "raw_response": response_data,
+                        "attempted_data": zoho_data
+                    }
+
+                # エラーがない場合は成功として処理
                 logger.info(f"🎉 Zoho書き込み成功: 求職者「{candidate_name or '不明'}」(record_id={record_id})")
                 logger.info(f"📈 HTTP応答: {resp.getcode()}, 更新フィールド数: {len(zoho_data)}")
-                
+
                 # Zohoレスポンスから更新されたレコード情報を取得
                 if response_data and 'data' in response_data and response_data['data']:
                     updated_record = response_data['data'][0] if response_data['data'] else {}
@@ -616,10 +713,9 @@ class ZohoWriteClient:
                                 logger.info(f"📄 Zoho更新詳細: {details}")
                 else:
                     logger.warning(f"⚠️ Zoho応答にデータが含まれていません: {response_data}")
-                
-                logger.info(f"📜 Zoho応答詳細: {response_data}")
+
                 return {
-                    "status": "success", 
+                    "status": "success",
                     "status_code": resp.getcode(),
                     "data": response_data,
                     "updated_fields": list(zoho_data.keys())
