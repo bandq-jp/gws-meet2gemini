@@ -294,7 +294,8 @@ class ApiClient {
     page = 1,
     pageSize = 40,
     accounts?: string[],
-    structured?: boolean
+    structured?: boolean,
+    search?: string
   ): Promise<MeetingListResponse> {
     const params = new URLSearchParams();
     params.set('page', page.toString());
@@ -307,7 +308,11 @@ class ApiClient {
     if (structured !== undefined) {
       params.set('structured', structured.toString());
     }
-    
+
+    if (search && search.trim()) {
+      params.set('search', search.trim());
+    }
+
     return this.request<MeetingListResponse>(`/meetings/?${params.toString()}`);
   }
 

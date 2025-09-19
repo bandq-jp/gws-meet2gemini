@@ -72,11 +72,12 @@ class MeetingRepositoryImpl:
         return []
     
     def list_meetings_paginated(
-        self, 
-        page: int = 1, 
+        self,
+        page: int = 1,
         page_size: int = 40,
         accounts: Optional[List[str]] = None,
-        structured: Optional[bool] = None
+        structured: Optional[bool] = None,
+        search_query: Optional[str] = None
     ) -> Dict[str, Any]:
         """ページネーション付きの軽量な議事録一覧取得"""
         try:
@@ -87,17 +88,29 @@ class MeetingRepositoryImpl:
             # text_contentを除いた軽量なフィールドのみ取得
             select_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,created_at,updated_at"
             
+            # 検索条件の適用関数
+            def apply_filters(query):
+                if accounts:
+                    query = query.in_("organizer_email", accounts)
+                if search_query and search_query.strip():
+                    query_term = f"%{search_query.strip()}%"
+                    # title、organizer_email、organizer_nameで検索
+                    query = query.or_(
+                        f"title.ilike.{query_term},"
+                        f"organizer_email.ilike.{query_term},"
+                        f"organizer_name.ilike.{query_term}"
+                    )
+                return query
+
             # 総件数取得
             count_q = sb.table(self.TABLE).select("id", count="exact")
-            if accounts:
-                count_q = count_q.in_("organizer_email", accounts)
+            count_q = apply_filters(count_q)
             count_res = count_q.execute()
             total = getattr(count_res, "count", None) or len(getattr(count_res, "data", []) or [])
             
             # ページ分のみ取得
             page_q = sb.table(self.TABLE).select(select_fields).order("meeting_datetime", desc=True)
-            if accounts:
-                page_q = page_q.in_("organizer_email", accounts)
+            page_q = apply_filters(page_q)
             page_res = page_q.range(start, end).execute()
             items = getattr(page_res, "data", []) or []
             
@@ -127,8 +140,7 @@ class MeetingRepositoryImpl:
                     extended_end = start + extended_size - 1
                     
                     extended_q = sb.table(self.TABLE).select(select_fields).order("meeting_datetime", desc=True)
-                    if accounts:
-                        extended_q = extended_q.in_("organizer_email", accounts)
+                    extended_q = apply_filters(extended_q)
                     extended_res = extended_q.range(start, extended_end).execute()
                     extended_items = getattr(extended_res, "data", []) or []
                     
