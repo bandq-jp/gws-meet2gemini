@@ -78,12 +78,13 @@ async def list_meetings_paginated(
     page: int = Query(default=1, ge=1, description="ページ番号（1から開始）"),
     page_size: int = Query(default=40, ge=1, le=40, description="1ページあたりのアイテム数（最大40）"),
     accounts: Optional[List[str]] = Query(default=None, description="フィルタ対象のアカウント一覧"),
-    structured: Optional[bool] = Query(default=None, description="構造化済み(true)/未構造化(false)でフィルタ")
+    structured: Optional[bool] = Query(default=None, description="構造化済み(true)/未構造化(false)でフィルタ"),
+    search: Optional[str] = Query(default=None, description="検索クエリ（タイトル、主催者で検索）")
 ):
     """軽量な議事録一覧をページネーション付きで取得（推奨）"""
     use_case = GetMeetingListPaginatedUseCase()
     try:
-        return await use_case.execute(page, page_size, accounts, structured)
+        return await use_case.execute(page, page_size, accounts, structured, search)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

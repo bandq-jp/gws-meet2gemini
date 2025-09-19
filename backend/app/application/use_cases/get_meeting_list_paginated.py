@@ -11,17 +11,19 @@ class GetMeetingListPaginatedUseCase:
         page: int = 1,
         page_size: int = 40,
         accounts: Optional[List[str]] = None,
-        structured: Optional[bool] = None
+        structured: Optional[bool] = None,
+        search_query: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         軽量な議事録一覧をページネーション付きで取得
-        
+
         Args:
             page: ページ番号（1から開始）
             page_size: 1ページあたりのアイテム数（最大40）
             accounts: フィルタ対象のアカウント一覧
             structured: 構造化済みフィルタ（True: 構造化済みのみ, False: 未構造化のみ, None: すべて）
-            
+            search_query: 検索クエリ（title、organizer_email、organizer_nameで検索）
+
         Returns:
             ページネーション情報を含む議事録一覧
         """
@@ -36,5 +38,6 @@ class GetMeetingListPaginatedUseCase:
             page=page,
             page_size=page_size,
             accounts=accounts,
-            structured=structured
+            structured=structured,
+            search_query=search_query
         )

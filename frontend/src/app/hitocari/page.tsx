@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -136,15 +136,16 @@ export default function HitocariListPage() {
   const loadMeetings = async (
     tab: 'all' | 'structured' | 'unstructured' = activeTab,
     page: number = 1,
-    resetPage: boolean = false
+    resetPage: boolean = false,
+    searchQuery: string = ""
   ) => {
     try {
       setLoading(true);
       
       const accounts = showAllAccounts ? undefined : (currentUserEmail ? [currentUserEmail] : undefined);
       const structured = tab === 'all' ? undefined : (tab === 'structured');
-      
-      const data = await apiClient.getMeetings(page, 40, accounts, structured);
+
+      const data = await apiClient.getMeetings(page, 40, accounts, structured, searchQuery || undefined);
       setMeetingsResponse(data);
       
       // ページリセットが必要な場合
@@ -163,21 +164,30 @@ export default function HitocariListPage() {
     }
   };
 
-  // 検索フィルタ済みのミーティング（軽量検索のみ）
-  const filteredMeetings = useMemo(() => {
-    if (!meetingsResponse?.items) return [];
-    
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      return meetingsResponse.items.filter(meeting =>
-        meeting.title?.toLowerCase().includes(query) ||
-        meeting.organizer_email?.toLowerCase().includes(query) ||
-        meeting.invited_emails?.some(email => email.toLowerCase().includes(query))
-      );
-    }
+  // 検索時のページング処理
+  const [currentSearchQuery, setCurrentSearchQuery] = useState("");
 
-    return meetingsResponse.items;
-  }, [meetingsResponse, searchQuery]);
+  // 検索実行処理
+  const handleSearch = useCallback(async (query: string) => {
+    setCurrentSearchQuery(query);
+    await loadMeetings(activeTab, 1, true, query);
+  }, [activeTab]);
+
+  // デバウンス検索
+  const debouncedSearch = useCallback(
+    (() => {
+      let timeoutId: NodeJS.Timeout;
+      return (query: string) => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          if (query !== currentSearchQuery) {
+            handleSearch(query);
+          }
+        }, 500); // 500ms のデバウンス
+      };
+    })(),
+    [handleSearch, currentSearchQuery]
+  );
 
   // 現在のページ番号を取得
   const getCurrentPage = () => {
@@ -201,7 +211,7 @@ export default function HitocariListPage() {
         setAllPage(newPage);
         break;
     }
-    loadMeetings(activeTab, newPage);
+    loadMeetings(activeTab, newPage, false, currentSearchQuery);
   };
 
 
@@ -225,7 +235,7 @@ export default function HitocariListPage() {
   // Load meetings when accounts or filters change
   useEffect(() => {
     if (availableAccounts.length > 0) {
-      loadMeetings(activeTab, getCurrentPage(), true);
+      loadMeetings(activeTab, getCurrentPage(), true, currentSearchQuery);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAllAccounts, currentUserEmail, activeTab, availableAccounts.length]);
@@ -237,8 +247,8 @@ export default function HitocariListPage() {
       const accounts = showAllAccounts ? undefined : (currentUserEmail ? [currentUserEmail] : undefined);
       const result = await apiClient.collectMeetings(accounts, false, false);
       
-      await loadMeetings(activeTab, getCurrentPage(), true);
-      
+      await loadMeetings(activeTab, getCurrentPage(), true, currentSearchQuery);
+
       toast.success(`${result.stored}件の議事録を取得しました`);
     } catch (error: unknown) {
       console.error('Failed to collect meetings:', error);
@@ -426,7 +436,7 @@ export default function HitocariListPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => loadMeetings()}
+              onClick={() => loadMeetings(activeTab, getCurrentPage(), false, currentSearchQuery)}
               disabled={loading}
               className="px-3"
             >
@@ -444,7 +454,16 @@ export default function HitocariListPage() {
                 <Input
                   placeholder="タイトル、主催者で検索..."
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSearchQuery(value);
+                    debouncedSearch(value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearch(searchQuery);
+                    }
+                  }}
                   className="pl-10 text-base sm:text-sm"
                 />
               </div>
@@ -540,17 +559,17 @@ export default function HitocariListPage() {
           </TabsList>
           
           <TabsContent value="all" className="space-y-4">
-            <MeetingsList meetings={filteredMeetings} />
+            <MeetingsList meetings={meetingsResponse?.items || []} />
             <PaginationControls />
           </TabsContent>
-          
+
           <TabsContent value="structured" className="space-y-4">
-            <MeetingsList meetings={filteredMeetings} />
+            <MeetingsList meetings={meetingsResponse?.items || []} />
             <PaginationControls />
           </TabsContent>
-          
+
           <TabsContent value="unstructured" className="space-y-4">
-            <MeetingsList meetings={filteredMeetings} />
+            <MeetingsList meetings={meetingsResponse?.items || []} />
             <PaginationControls />
           </TabsContent>
         </Tabs>
