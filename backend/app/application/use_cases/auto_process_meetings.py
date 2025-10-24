@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.background.job_tracker import JobTracker
 from app.infrastructure.supabase.repositories.meeting_repository_impl import MeetingRepositoryImpl
-from app.infrastructure.supabase.repositories.structured_repository_impl import StructuredRepositoryImpl
 from app.infrastructure.zoho.client import ZohoClient
 from app.domain.services.candidate_title_matcher import CandidateTitleMatcher
 from app.application.use_cases.process_structured_data import ProcessStructuredDataUseCase
@@ -31,6 +30,7 @@ class ProcessingCandidate:
     priority_score: float
     text_length: int
     created_at: str
+    meeting_data: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -112,6 +112,7 @@ class AutoProcessMeetingsUseCase:
         
         # Filter out skipped candidates to get actual processing candidates
         valid_candidates = [c for c in candidates if isinstance(c, ProcessingCandidate)]
+        approx_text_chars = sum(c.text_length for c in valid_candidates)
         logger.info("[auto] valid candidates for processing: %s", len(valid_candidates))
 
         if job_id:
@@ -163,6 +164,7 @@ class AutoProcessMeetingsUseCase:
             "total_tokens_used": total_tokens,
             "processing_rate": round(processed / max(execution_time, 1), 2),  # items per second
             "success_rate": round(processed / max(processed + errors, 1), 3),
+            "approx_text_chars": approx_text_chars,
             "results": [
                 {
                     "meeting_id": r.meeting_id,
@@ -204,7 +206,6 @@ class AutoProcessMeetingsUseCase:
         """候補会議を収集し、優先度スコアを計算する"""
         candidates = []
         zoho = ZohoClient()
-        structured_repo = StructuredRepositoryImpl()
         
         # Page through meetings to collect candidates
         page = 1
@@ -234,14 +235,35 @@ class AutoProcessMeetingsUseCase:
             if not items:
                 break
                 
+
             for item in items:
                 total_seen += 1
                 try:
-                    # Fetch full meeting to check text_content
-                    full = repo.get_meeting(str(item.get("id")))
-                    meeting_id = str(item.get("id"))
-                    title = full.get("title") if full else item.get("title", "")
-                    
+                    meeting_id = str(item.get("id") or "")
+                    if not meeting_id:
+                        continue
+
+                    title = (item.get("title") or "").strip()
+
+                    if not title or not self._has_auto_process_keyword(title):
+                        mock_candidate = type('SkippedCandidate', (), {
+                            'skip_reason': 'not_first',
+                            'meeting_id': meeting_id,
+                            'title': title
+                        })()
+                        candidates.append(mock_candidate)
+                        continue
+
+                    if item.get("is_structured"):
+                        mock_candidate = type('SkippedCandidate', (), {
+                            'skip_reason': 'already_structured',
+                            'meeting_id': meeting_id,
+                            'title': title
+                        })()
+                        candidates.append(mock_candidate)
+                        continue
+
+                    full = repo.get_meeting_core(meeting_id)
                     if not full or not full.get("text_content"):
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'no_text',
@@ -250,18 +272,9 @@ class AutoProcessMeetingsUseCase:
                         })()
                         candidates.append(mock_candidate)
                         continue
-                    
-                    # Only process meetings whose title contains an auto-process keyword
-                    if not self._has_auto_process_keyword(title):
-                        mock_candidate = type('SkippedCandidate', (), {
-                            'skip_reason': 'not_first',
-                            'meeting_id': meeting_id,
-                            'title': title
-                        })()
-                        candidates.append(mock_candidate)
-                        continue
-                        
-                    # Extract candidate name
+
+                    title = full.get("title") or title
+
                     extracted = matcher.extract_from_title(title)
                     if not extracted:
                         mock_candidate = type('SkippedCandidate', (), {
@@ -272,20 +285,6 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    # Check if this meeting already has structured data
-                    existing_structured = structured_repo.get_by_meeting_id(meeting_id)
-                    if existing_structured:
-                        logger.debug("[auto] skipping %s: already has structured data", meeting_id)
-                        # Create a mock candidate with skip reason for statistics
-                        mock_candidate = type('SkippedCandidate', (), {
-                            'skip_reason': 'already_structured',
-                            'meeting_id': meeting_id,
-                            'title': title
-                        })()
-                        candidates.append(mock_candidate)
-                        continue
-
-                    # Search Zoho for exact match
                     matches = zoho.search_app_hc_by_exact_name(extracted, limit=5)
                     if len(matches) != 1:
                         mock_candidate = type('SkippedCandidate', (), {
@@ -297,8 +296,7 @@ class AutoProcessMeetingsUseCase:
                         continue
 
                     match = matches[0]
-                    
-                    # Final defensive check: strict match after normalization
+
                     if not matcher.is_exact_match(extracted, match.get("candidate_name", "")):
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'zoho_not_exact',
@@ -308,28 +306,28 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    # Calculate priority score
                     priority_score = self._calculate_priority_score(full, extracted)
-                    
-                    # Create processing candidate
+                    text_len = len(full.get("text_content", ""))
+
                     candidate = ProcessingCandidate(
-                        meeting_id=str(item.get("id")),
+                        meeting_id=meeting_id,
                         title=title,
                         candidate_name=extracted,
                         zoho_match=match,
                         priority_score=priority_score,
-                        text_length=len(full.get("text_content", "")),
-                        created_at=full.get("created_at", "")
+                        text_length=text_len,
+                        created_at=full.get("created_at", ""),
+                        meeting_data=full
                     )
-                    
+
                     candidates.append(candidate)
-                    logger.debug("[auto] candidate added: id=%s name=%s priority=%.2f", 
-                               candidate.meeting_id, candidate.candidate_name, priority_score)
+                    logger.debug("[auto] candidate added: id=%s name=%s priority=%.2f",
+                                 candidate.meeting_id, candidate.candidate_name, priority_score)
 
                 except Exception as e:
                     logger.warning("[auto] error collecting candidate %s: %s", item.get("id"), e)
                     continue
-                    
+
             if not page_result.get("has_next"):
                 break
             page += 1
@@ -467,6 +465,7 @@ class AutoProcessMeetingsUseCase:
                 zoho_record_id=candidate.zoho_match.get("record_id"),
                 zoho_candidate_name=candidate.candidate_name,
                 zoho_candidate_email=candidate.zoho_match.get("candidate_email"),
+                meeting_data=candidate.meeting_data,
             )
             
             processing_time = time.time() - start_time
