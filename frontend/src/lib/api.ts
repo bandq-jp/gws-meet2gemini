@@ -419,19 +419,6 @@ class ApiClient {
     });
   }
 
-  // AI Cost endpoints
-  async getAiCostSummary(limit = 1000): Promise<AiCostOverview> {
-    const params = new URLSearchParams({ limit: limit.toString() });
-    return this.request<AiCostOverview>(`/ai-costs/summary?${params.toString()}`);
-  }
-
-  async getMeetingCostDetail(meetingId: string): Promise<MeetingCostDetail> {
-    return this.request<MeetingCostDetail>(`/ai-costs/meeting/${encodeURIComponent(meetingId)}`);
-  }
-
-  async getPricingInfo(): Promise<PricingInfo> {
-    return this.request<PricingInfo>('/ai-costs/pricing-info');
-  }
 }
 
 export const apiClient = new ApiClient();
