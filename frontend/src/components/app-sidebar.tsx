@@ -165,14 +165,6 @@ export function AppSidebar() {
             description: "候補者とのやり取り管理",
           },
           {
-            title: "AIコスト",
-            icon: DollarSign,
-            href: "/hitocari/ai-costs",
-            id: "ai-costs",
-            enabled: true,
-            description: "AI使用量とコスト分析",
-          },
-          {
             title: "設定",
             icon: Settings,
             href: "/hitocari/settings",
