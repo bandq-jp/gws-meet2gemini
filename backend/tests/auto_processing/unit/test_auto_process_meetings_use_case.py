@@ -148,6 +148,18 @@ class TestAutoProcessMeetingsUseCase:
         # Should not have base "初回" bonus
         assert score < 10.0
 
+    def test_calculate_priority_score_free_consultation(self, use_case):
+        """無料キャリア相談でも優先度ボーナスが付与されること"""
+        meeting_data = {
+            "title": "無料キャリア相談 - 田中太郎さん",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "text_content": "A" * 8000
+        }
+
+        score = use_case._calculate_priority_score(meeting_data, "田中太郎")
+
+        assert score >= 10.0
+
     def test_calculate_priority_score_old_meeting(self, use_case):
         """Test priority score for old meeting"""
         old_date = datetime.now(timezone.utc).replace(month=1).isoformat()  # Old date
@@ -173,7 +185,7 @@ class TestAutoProcessMeetingsUseCase:
             "items": [{"id": "meeting-123", "title": "初回面談 - 田中太郎"}],
             "has_next": False
         }
-        deps['meeting_repo'].get_meeting.return_value = sample_meeting_data
+        deps['meeting_repo'].get_meeting_core.return_value = sample_meeting_data
         deps['title_matcher'].extract_from_title.return_value = "田中太郎"
         deps['zoho_client'].search_app_hc_by_exact_name.return_value = [sample_zoho_match]
         deps['title_matcher'].is_exact_match.return_value = True
@@ -193,6 +205,35 @@ class TestAutoProcessMeetingsUseCase:
         assert candidates[0].candidate_name == "田中太郎"
         assert candidates[0].title == "初回面談 - 田中太郎さん"
         assert candidates[0].priority_score > 0
+
+    @pytest.mark.asyncio
+    async def test_collect_processing_candidates_accepts_free_career_consultation(self, use_case, mock_dependencies, sample_meeting_data, sample_zoho_match):
+        """Meetings titled with 無料キャリア相談 should also be processed"""
+        deps = mock_dependencies
+
+        free_meeting = {**sample_meeting_data, "id": "meeting-free", "title": "無料キャリア相談 - 田中太郎さん"}
+
+        deps['meeting_repo'].list_meetings_paginated.return_value = {
+            "items": [{"id": "meeting-free", "title": "無料キャリア相談 - 田中太郎さん"}],
+            "has_next": False
+        }
+        deps['meeting_repo'].get_meeting_core.return_value = free_meeting
+        deps['title_matcher'].extract_from_title.return_value = "田中太郎"
+        deps['zoho_client'].search_app_hc_by_exact_name.return_value = [sample_zoho_match]
+        deps['title_matcher'].is_exact_match.return_value = True
+
+        candidates = await use_case._collect_processing_candidates(
+            deps['meeting_repo'],
+            deps['title_matcher'],
+            ["test@example.com"],
+            5,
+            None
+        )
+
+        assert len(candidates) == 1
+        candidate = candidates[0]
+        assert candidate.meeting_id == "meeting-free"
+        assert "無料キャリア相談" in candidate.title
 
     @pytest.mark.asyncio
     async def test_collect_processing_candidates_filtering(self, use_case, mock_dependencies, sample_meeting_data):
@@ -218,7 +259,7 @@ class TestAutoProcessMeetingsUseCase:
                 return meeting_without_first
             return None
         
-        deps['meeting_repo'].get_meeting.side_effect = get_meeting_side_effect
+        deps['meeting_repo'].get_meeting_core.side_effect = get_meeting_side_effect
         deps['title_matcher'].extract_from_title.return_value = "田中太郎"
         deps['zoho_client'].search_app_hc_by_exact_name.return_value = [{"record_id": "zoho-1", "candidate_name": "田中太郎"}]
         deps['title_matcher'].is_exact_match.return_value = True
@@ -232,9 +273,14 @@ class TestAutoProcessMeetingsUseCase:
             None
         )
         
-        # Should only include the meeting with "初回"
-        assert len(candidates) == 1
-        assert candidates[0].meeting_id == "meeting-1"
+        # Should only include the meeting with "初回" as a valid candidate
+        valid_candidates = [c for c in candidates if isinstance(c, ProcessingCandidate)]
+        assert len(valid_candidates) == 1
+        assert valid_candidates[0].meeting_id == "meeting-1"
+
+        skip_candidates = [c for c in candidates if hasattr(c, 'skip_reason')]
+        assert skip_candidates
+        assert all(getattr(c, 'skip_reason', None) == 'not_first' for c in skip_candidates)
 
     @pytest.mark.asyncio
     async def test_process_candidates_parallel(self, use_case, sample_processing_candidates):

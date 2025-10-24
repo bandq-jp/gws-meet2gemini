@@ -104,7 +104,7 @@ class GetAiCostsUseCase:
                 }
             
             # 会議情報を取得
-            meeting = self.meeting_repo.get_meeting(meeting_id)
+            meeting = self.meeting_repo.get_meeting_core(meeting_id)
             meeting_title = meeting.get("title", "タイトル不明") if meeting else "会議情報なし"
             
             # コスト計算
@@ -194,7 +194,7 @@ class GetAiCostsUseCase:
                     break
                     
                 # 会議詳細情報を取得
-                meeting = self.meeting_repo.get_meeting(meeting_id)
+                meeting = self.meeting_repo.get_meeting_core(meeting_id)
                 if not meeting:
                     continue  # 会議が見つからない場合はスキップ
                 

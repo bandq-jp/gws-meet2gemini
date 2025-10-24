@@ -37,7 +37,14 @@ class TestParallelProcessing:
                 },
                 priority_score=15.0 + i,
                 text_length=5000 + i * 500,
-                created_at="2024-01-15T10:00:00Z"
+                created_at="2024-01-15T10:00:00Z",
+                meeting_data={
+                    "id": f"meeting-{i+1}",
+                    "title": f"初回面談 - 候補者{i+1}",
+                    "text_content": "A" * (5000 + i * 500),
+                    "created_at": "2024-01-15T10:00:00Z",
+                    "organizer_name": "テストエージェント"
+                }
             ))
         return candidates
 
@@ -312,7 +319,14 @@ class TestParallelProcessing:
                 zoho_match={"record_id": f"zoho-{i+1}"},
                 priority_score=10.0,
                 text_length=1000,
-                created_at="2024-01-15T10:00:00Z"
+                created_at="2024-01-15T10:00:00Z",
+                meeting_data={
+                    "id": f"meeting-{i+1}",
+                    "title": f"初回面談 - 候補者{i+1}",
+                    "text_content": "A" * 1000,
+                    "created_at": "2024-01-15T10:00:00Z",
+                    "organizer_name": "テストエージェント"
+                }
             ))
         
         processed_count = 0

@@ -5,7 +5,6 @@ from .structured import router as structured_router
 from .zoho import router as zoho_router
 from .settings import router as settings_router
 from .custom_schemas import router as custom_schemas_router
-from .ai_costs import router as ai_costs_router
 
 router = APIRouter()
 router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])

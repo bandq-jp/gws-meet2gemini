@@ -80,7 +80,14 @@ def sample_processing_candidates():
             },
             priority_score=10.0 + i,
             text_length=5000 + i * 1000,
-            created_at="2024-01-15T10:00:00Z"
+            created_at="2024-01-15T10:00:00Z",
+            meeting_data={
+                "id": f"meeting-{i+1}",
+                "title": f"初回面談 - テスト候補者{i+1}",
+                "text_content": "A" * (5000 + i * 1000),
+                "created_at": "2024-01-15T10:00:00Z",
+                "organizer_name": "テストエージェント"
+            }
         ))
     return candidates
 
@@ -98,6 +105,7 @@ def mock_meeting_repository():
     
     # Mock get_meeting
     repo.get_meeting.return_value = None
+    repo.get_meeting_core.return_value = None
     
     return repo
 

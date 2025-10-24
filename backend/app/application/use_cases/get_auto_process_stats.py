@@ -15,11 +15,41 @@ class GetAutoProcessStatsUseCase:
     """自動処理の統計情報を取得するためのユースケース"""
     
     def __init__(self):
-        self.meeting_repo = MeetingRepositoryImpl()
-        self.structured_repo = StructuredRepositoryImpl()
-        self.ai_usage_repo = AiUsageRepositoryImpl()
+        self._meeting_repo = None
+        self._structured_repo = None
+        self._ai_usage_repo = None
         self.settings = get_settings()
     
+    @property
+    def meeting_repo(self) -> MeetingRepositoryImpl:
+        if self._meeting_repo is None:
+            self._meeting_repo = MeetingRepositoryImpl()
+        return self._meeting_repo
+
+    @meeting_repo.setter
+    def meeting_repo(self, value: MeetingRepositoryImpl) -> None:
+        self._meeting_repo = value
+
+    @property
+    def structured_repo(self) -> StructuredRepositoryImpl:
+        if self._structured_repo is None:
+            self._structured_repo = StructuredRepositoryImpl()
+        return self._structured_repo
+
+    @structured_repo.setter
+    def structured_repo(self, value: StructuredRepositoryImpl) -> None:
+        self._structured_repo = value
+
+    @property
+    def ai_usage_repo(self) -> AiUsageRepositoryImpl:
+        if self._ai_usage_repo is None:
+            self._ai_usage_repo = AiUsageRepositoryImpl()
+        return self._ai_usage_repo
+
+    @ai_usage_repo.setter
+    def ai_usage_repo(self, value: AiUsageRepositoryImpl) -> None:
+        self._ai_usage_repo = value
+
     def execute(
         self, 
         days_back: int = 7,
@@ -36,6 +66,10 @@ class GetAutoProcessStatsUseCase:
             統計情報の辞書
         """
         logger.info(f"[stats] collecting auto-process stats for last {days_back} days")
+
+        # Refresh settings to pick up latest configuration
+        self.settings = get_settings()
+        settings = self.settings
         
         # 期間の設定
         end_date = datetime.now(timezone.utc)
@@ -77,12 +111,12 @@ class GetAutoProcessStatsUseCase:
             "error_analysis": error_analysis,
             "alerts": alerts,
             "settings": {
-                "parallel_workers": self.settings.autoproc_parallel_workers,
-                "batch_size": self.settings.autoproc_batch_size,
-                "max_items": self.settings.autoproc_max_items,
-                "success_rate_threshold": self.settings.autoproc_success_rate_threshold,
-                "queue_alert_threshold": self.settings.autoproc_queue_alert_threshold,
-                "error_rate_threshold": self.settings.autoproc_error_rate_threshold
+                "parallel_workers": settings.autoproc_parallel_workers,
+                "batch_size": settings.autoproc_batch_size,
+                "max_items": settings.autoproc_max_items,
+                "success_rate_threshold": settings.autoproc_success_rate_threshold,
+                "queue_alert_threshold": settings.autoproc_queue_alert_threshold,
+                "error_rate_threshold": settings.autoproc_error_rate_threshold
             },
             **detailed_metrics
         }
@@ -151,8 +185,10 @@ class GetAutoProcessStatsUseCase:
             
             return {
                 "total_tokens_used": usage_data.get("total_tokens", 0),
+                "total_tokens": usage_data.get("total_tokens", 0),
                 "total_api_calls": usage_data.get("total_calls", 0),
                 "estimated_cost_usd": usage_data.get("estimated_cost", 0.0),
+                "estimated_cost": usage_data.get("estimated_cost", 0.0),
                 "avg_tokens_per_meeting": usage_data.get("avg_tokens_per_meeting", 0),
                 "cost_per_meeting_usd": usage_data.get("cost_per_meeting", 0.0),
                 "model_usage_breakdown": usage_data.get("model_breakdown", {}),
@@ -160,7 +196,17 @@ class GetAutoProcessStatsUseCase:
             }
         except Exception as e:
             logger.error(f"[stats] error collecting cost metrics: {e}")
-            return {}
+            return {
+                "total_tokens_used": 0,
+                "total_tokens": 0,
+                "total_api_calls": 0,
+                "estimated_cost_usd": 0.0,
+                "estimated_cost": 0.0,
+                "avg_tokens_per_meeting": 0,
+                "cost_per_meeting_usd": 0.0,
+                "model_usage_breakdown": {},
+                "daily_cost_trend": []
+            }
     
     def _collect_error_analysis(self, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """エラー分析を収集"""
@@ -208,8 +254,12 @@ class GetAutoProcessStatsUseCase:
         """AI使用量の要約を取得"""
         try:
             # Get AI usage data from the database
-            usage_logs = self.ai_usage_repo.get_usage_summary()
-            
+            raw_usage = self.ai_usage_repo.get_usage_summary()
+            if isinstance(raw_usage, dict):
+                usage_logs = raw_usage.get("usage_logs", [])
+            else:
+                usage_logs = raw_usage or []
+
             total_tokens = 0
             total_calls = 0
             model_breakdown = {}

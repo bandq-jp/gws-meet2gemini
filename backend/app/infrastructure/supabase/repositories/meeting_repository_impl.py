@@ -176,6 +176,17 @@ class MeetingRepositoryImpl:
             logger.exception("list_meetings_paginated failed: %s", e)
             raise RuntimeError("failed to fetch meetings")  # API層で400へ変換
 
+    def get_meeting_core(self, meeting_id: str) -> Dict[str, Any]:
+        sb = get_supabase()
+        select_fields = ("id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,text_content,created_at,updated_at")
+        res = sb.table(self.TABLE).select(select_fields).eq("id", meeting_id).limit(1).execute()
+        data = getattr(res, "data", None)
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
     def get_meeting(self, meeting_id: str) -> Dict[str, Any]:
         sb = get_supabase()
         # 会議データを取得

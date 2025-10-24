@@ -22,10 +22,11 @@ class ProcessStructuredDataUseCase:
                      zoho_record_id: Optional[str] = None, 
                      zoho_candidate_name: Optional[str] = None, 
                      zoho_candidate_email: Optional[str] = None,
-                     custom_schema_id: Optional[UUID] = None) -> dict:
+                     custom_schema_id: Optional[UUID] = None,
+                     meeting_data: Optional[Dict[str, Any]] = None) -> dict:
         meetings = MeetingRepositoryImpl()
         structured_repo = StructuredRepositoryImpl()
-        meeting = meetings.get_meeting(meeting_id)
+        meeting = meeting_data or meetings.get_meeting(meeting_id)
         if not meeting or not meeting.get("text_content"):
             raise ValueError("Meeting text not found")
         
