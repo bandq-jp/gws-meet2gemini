@@ -12,4 +12,3 @@ router.include_router(structured_router, prefix="/structured", tags=["structured
 router.include_router(zoho_router, prefix="/zoho", tags=["zoho"])
 router.include_router(settings_router, prefix="/settings", tags=["settings"])
 router.include_router(custom_schemas_router)
-router.include_router(ai_costs_router, prefix="/ai-costs", tags=["ai-costs"])
