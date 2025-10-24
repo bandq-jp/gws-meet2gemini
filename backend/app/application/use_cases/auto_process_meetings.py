@@ -18,6 +18,8 @@ from app.application.use_cases.process_structured_data import ProcessStructuredD
 
 logger = logging.getLogger(__name__)
 
+AUTO_PROCESS_KEYWORDS: Tuple[str, ...] = ("初回", "無料キャリア相談")
+
 
 @dataclass
 class ProcessingCandidate:
@@ -249,8 +251,8 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
                     
-                    # Only process meetings whose title contains "初回"
-                    if not title or ("初回" not in title):
+                    # Only process meetings whose title contains an auto-process keyword
+                    if not self._has_auto_process_keyword(title):
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'not_first',
                             'meeting_id': meeting_id,
@@ -352,9 +354,9 @@ class AutoProcessMeetingsUseCase:
         """会議の優先度スコアを計算する"""
         score = 0.0
         
-        # Base score for having "初回" in title
+        # Base score for having any auto-process keyword in title
         title = meeting_data.get("title", "")
-        if "初回" in title:
+        if self._has_auto_process_keyword(title):
             score += 10.0
             
         # Boost score based on how recent the meeting is
@@ -382,6 +384,13 @@ class AutoProcessMeetingsUseCase:
         score += min(2.0, name_occurrences * 0.5)
         
         return round(score, 2)
+
+    @staticmethod
+    def _has_auto_process_keyword(title: Optional[str]) -> bool:
+        """Return True when the meeting title contains an auto-process trigger keyword."""
+        if not title:
+            return False
+        return any(keyword in title for keyword in AUTO_PROCESS_KEYWORDS)
 
     async def _process_candidates_parallel(
         self,

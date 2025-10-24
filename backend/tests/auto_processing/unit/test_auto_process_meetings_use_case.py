@@ -22,11 +22,14 @@ class TestAutoProcessMeetingsUseCase:
     def mock_dependencies(self, mock_settings, mock_meeting_repository, mock_zoho_client, 
                          mock_candidate_title_matcher, mock_process_structured_use_case, mock_job_tracker):
         """Mock all dependencies"""
+        mock_structured_repository = Mock()
+        mock_structured_repository.get_by_meeting_id.return_value = {}
         with patch('app.application.use_cases.auto_process_meetings.get_settings', return_value=mock_settings), \
              patch('app.application.use_cases.auto_process_meetings.MeetingRepositoryImpl', return_value=mock_meeting_repository), \
              patch('app.application.use_cases.auto_process_meetings.ZohoClient', return_value=mock_zoho_client), \
              patch('app.application.use_cases.auto_process_meetings.CandidateTitleMatcher', return_value=mock_candidate_title_matcher), \
              patch('app.application.use_cases.auto_process_meetings.ProcessStructuredDataUseCase', return_value=mock_process_structured_use_case), \
+             patch('app.application.use_cases.auto_process_meetings.StructuredRepositoryImpl', return_value=mock_structured_repository), \
              patch('app.application.use_cases.auto_process_meetings.JobTracker', mock_job_tracker):
             yield {
                 'settings': mock_settings,
@@ -34,7 +37,8 @@ class TestAutoProcessMeetingsUseCase:
                 'zoho_client': mock_zoho_client,
                 'title_matcher': mock_candidate_title_matcher,
                 'process_use_case': mock_process_structured_use_case,
-                'job_tracker': mock_job_tracker
+                'job_tracker': mock_job_tracker,
+                'structured_repo': mock_structured_repository
             }
 
     @pytest.mark.asyncio
@@ -148,6 +152,18 @@ class TestAutoProcessMeetingsUseCase:
         # Should not have base "初回" bonus
         assert score < 10.0
 
+    def test_calculate_priority_score_free_consultation(self, use_case):
+        """無料キャリア相談でも優先度ボーナスが付与されること"""
+        meeting_data = {
+            "title": "無料キャリア相談 - 田中太郎さん",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "text_content": "A" * 8000
+        }
+
+        score = use_case._calculate_priority_score(meeting_data, "田中太郎")
+
+        assert score >= 10.0
+
     def test_calculate_priority_score_old_meeting(self, use_case):
         """Test priority score for old meeting"""
         old_date = datetime.now(timezone.utc).replace(month=1).isoformat()  # Old date
@@ -193,6 +209,35 @@ class TestAutoProcessMeetingsUseCase:
         assert candidates[0].candidate_name == "田中太郎"
         assert candidates[0].title == "初回面談 - 田中太郎さん"
         assert candidates[0].priority_score > 0
+
+    @pytest.mark.asyncio
+    async def test_collect_processing_candidates_accepts_free_career_consultation(self, use_case, mock_dependencies, sample_meeting_data, sample_zoho_match):
+        """Meetings titled with 無料キャリア相談 should also be processed"""
+        deps = mock_dependencies
+
+        free_meeting = {**sample_meeting_data, "id": "meeting-free", "title": "無料キャリア相談 - 田中太郎さん"}
+
+        deps['meeting_repo'].list_meetings_paginated.return_value = {
+            "items": [{"id": "meeting-free", "title": "無料キャリア相談 - 田中太郎さん"}],
+            "has_next": False
+        }
+        deps['meeting_repo'].get_meeting.return_value = free_meeting
+        deps['title_matcher'].extract_from_title.return_value = "田中太郎"
+        deps['zoho_client'].search_app_hc_by_exact_name.return_value = [sample_zoho_match]
+        deps['title_matcher'].is_exact_match.return_value = True
+
+        candidates = await use_case._collect_processing_candidates(
+            deps['meeting_repo'],
+            deps['title_matcher'],
+            ["test@example.com"],
+            5,
+            None
+        )
+
+        assert len(candidates) == 1
+        candidate = candidates[0]
+        assert candidate.meeting_id == "meeting-free"
+        assert "無料キャリア相談" in candidate.title
 
     @pytest.mark.asyncio
     async def test_collect_processing_candidates_filtering(self, use_case, mock_dependencies, sample_meeting_data):
