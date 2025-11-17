@@ -7,6 +7,7 @@ const DEFAULT_BACKEND_URL = "http://localhost:8000/api/v1/marketing/chatkit";
 const BACKEND_URL =
   process.env.MARKETING_CHATKIT_BACKEND_URL || DEFAULT_BACKEND_URL;
 const CLIENT_SECRET_HEADER = "x-marketing-client-secret";
+type DuplexRequestInit = RequestInit & { duplex?: "half" };
 
 function buildForwardHeaders(request: NextRequest) {
   const headers = new Headers();
@@ -47,13 +48,16 @@ export async function POST(request: NextRequest) {
     backendHeaders.set("Authorization", `Bearer ${clientSecret}`);
     backendHeaders.delete(CLIENT_SECRET_HEADER);
 
-    const backendResponse = await fetch(BACKEND_URL, {
+    const backendInit: DuplexRequestInit = {
       method: "POST",
       headers: backendHeaders,
       body: request.body,
       signal: controller.signal,
       cache: "no-store",
-    });
+      duplex: "half",
+    };
+
+    const backendResponse = await fetch(BACKEND_URL, backendInit);
 
     const responseHeaders = new Headers(backendResponse.headers);
     responseHeaders.delete("content-length");
