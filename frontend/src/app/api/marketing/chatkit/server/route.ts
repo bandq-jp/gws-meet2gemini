@@ -40,7 +40,6 @@ export async function POST(request: NextRequest) {
       body: request.body,
       signal: controller.signal,
       cache: "no-store",
-      duplex: "half",
     });
 
     const responseHeaders = new Headers(backendResponse.headers);
