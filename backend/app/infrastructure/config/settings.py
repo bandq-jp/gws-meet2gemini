@@ -7,6 +7,9 @@ import dotenv
 dotenv.load_dotenv()
 
 class Settings:
+    # OpenAI
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+
     # Google Auth
     service_account_json: str = os.getenv("SERVICE_ACCOUNT_JSON", "service_account.json")
     impersonate_subjects: list[str] = [s.strip() for s in os.getenv("GOOGLE_SUBJECT_EMAILS", "").split(",") if s.strip()]
@@ -70,6 +73,24 @@ class Settings:
     # Auto-process cost optimization
     autoproc_gemini_model_small_threshold: int = int(os.getenv("AUTOPROC_GEMINI_MODEL_SMALL_THRESHOLD", "5000"))
     autoproc_gemini_model_large_threshold: int = int(os.getenv("AUTOPROC_GEMINI_MODEL_LARGE_THRESHOLD", "15000"))
+
+    # Marketing chat / ChatKit
+    marketing_agent_model: str = os.getenv("MARKETING_AGENT_MODEL", "gpt-5-mini")
+    marketing_reasoning_effort: str = os.getenv("MARKETING_REASONING_EFFORT", "high")
+    marketing_search_country: str = os.getenv("MARKETING_SEARCH_COUNTRY", "JP")
+    marketing_enable_web_search: bool = os.getenv("MARKETING_ENABLE_WEB_SEARCH", "true").lower() != "false"
+    marketing_enable_code_interpreter: bool = os.getenv("MARKETING_ENABLE_CODE_INTERPRETER", "true").lower() != "false"
+    marketing_workflow_id: str = os.getenv("MARKETING_WORKFLOW_ID", "wf_690a1d2e1ce881908e92b6826428f3af060621f24cf1b2bb")
+    marketing_chatkit_token_secret: str = os.getenv("MARKETING_CHATKIT_TOKEN_SECRET", "")
+    marketing_chatkit_token_ttl: int = int(os.getenv("MARKETING_CHATKIT_TOKEN_TTL", "900"))
+    marketing_chatkit_api_base: str = os.getenv("MARKETING_CHATKIT_API_BASE", "/api/v1/marketing/chatkit")
+
+    ga4_mcp_server_url: str = os.getenv("GA4_MCP_SERVER_URL", "")
+    ga4_mcp_authorization: str = os.getenv("GA4_MCP_AUTHORIZATION", "")
+    ahrefs_mcp_server_url: str = os.getenv("AHREFS_MCP_SERVER_URL", "")
+    ahrefs_mcp_authorization: str = os.getenv("AHREFS_MCP_AUTHORIZATION", "")
+    gsc_mcp_server_url: str = os.getenv("GSC_MCP_SERVER_URL", "")
+    gsc_mcp_api_key: str = os.getenv("GSC_MCP_API_KEY", "")
 
 
 @lru_cache(maxsize=1)

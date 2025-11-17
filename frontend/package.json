@@ -25,6 +25,7 @@
     "@radix-ui/react-tooltip": "latest",
     "class-variance-authority": "latest",
     "clsx": "latest",
+    "@openai/chatkit-react": "^1.2.0",
     "cmdk": "^1.1.1",
     "date-fns": "latest",
     "google-auth-library": "^9.15.0",

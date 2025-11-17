@@ -3,15 +3,16 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Users, 
-  Building2, 
-  Briefcase, 
+import {
+  Users,
+  Building2,
+  Briefcase,
   ArrowRight,
   FileText,
   Search,
   TrendingUp,
-  Clock
+  Clock,
+  PieChart,
 } from "lucide-react";
 import Link from "next/link";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -65,6 +66,44 @@ export default function Dashboard() {
               <Button asChild className="w-full mt-4">
                 <Link href="/hitocari" className="flex items-center gap-2">
                   開始する
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* マーケティング AI Card */}
+          <Card className="relative overflow-hidden border border-primary/20 bg-white shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <PieChart className="w-6 h-6" />
+                </div>
+                <Badge>
+                  New
+                </Badge>
+              </div>
+              <CardTitle className="text-xl">マーケティング AI</CardTitle>
+              <CardDescription>
+                Ahrefs / GSC / GA4 / Web検索を束ねたChatKitチャット
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <TrendingUp className="w-4 h-4" />
+                <span>SEOリサーチ自動化</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileText className="w-4 h-4" />
+                <span>ProgressUpdateEventで推論可視化</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Search className="w-4 h-4" />
+                <span>Supabaseに会話ログ保存</span>
+              </div>
+              <Button asChild className="w-full mt-4" variant="secondary">
+                <Link href="/marketing" className="flex items-center gap-2">
+                  チャットを開く
                   <ArrowRight className="w-4 h-4" />
                 </Link>
               </Button>
