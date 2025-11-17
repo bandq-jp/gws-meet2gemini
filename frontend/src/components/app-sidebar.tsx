@@ -60,6 +60,13 @@ export function AppSidebar() {
       icon: Users,
     },
     {
+      name: "マーケティング",
+      href: "/marketing",
+      id: "marketing",
+      enabled: true,
+      icon: PieChart,
+    },
+    {
       name: "モノテック",
       href: "/monotech", 
       id: "monotech",
@@ -171,6 +178,17 @@ export function AppSidebar() {
             id: "settings",
             enabled: true,
             description: "ひとキャリシステムの設定",
+          },
+        ];
+      case 'marketing':
+        return [
+          {
+            title: "SEOチャット",
+            icon: PieChart,
+            href: "/marketing",
+            id: "marketing-chat",
+            enabled: true,
+            description: "Ahrefs/GSC/GA4を束ねたマーケティング分析チャット",
           },
         ];
       case 'monotech':

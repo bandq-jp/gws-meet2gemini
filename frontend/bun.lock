@@ -6,6 +6,7 @@
       "dependencies": {
         "@clerk/localizations": "latest",
         "@clerk/nextjs": "latest",
+        "@openai/chatkit-react": "^1.2.0",
         "@radix-ui/react-avatar": "latest",
         "@radix-ui/react-dialog": "^1.1.15",
         "@radix-ui/react-dropdown-menu": "latest",
@@ -183,6 +184,10 @@
     "@nodelib/fs.walk": ["@nodelib/fs.walk@1.2.8", "", { "dependencies": { "@nodelib/fs.scandir": "2.1.5", "fastq": "^1.6.0" } }, "sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg=="],
 
     "@nolyfill/is-core-module": ["@nolyfill/is-core-module@1.0.39", "", {}, "sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA=="],
+
+    "@openai/chatkit": ["@openai/chatkit@1.0.1", "", {}, "sha512-zU86yKX2wW/L0M6Tva30VKod4Djhq24BXEyDXr7aH1G/bJrgpNUjdinQ8VK41eJjwEdwDZlxJyq7o0JUTWgSOg=="],
+
+    "@openai/chatkit-react": ["@openai/chatkit-react@1.2.0", "", { "dependencies": { "@openai/chatkit": "1.0.1" }, "peerDependencies": { "react": ">=18", "react-dom": ">=18" } }, "sha512-qk466KfPuCh7gCU0Qqc6PygekV5eMitn4JE8P2XcS8U7aFMNYrS74zYXmJ2xBhugAiuYMycBC0kFiCaxtmVwXQ=="],
 
     "@radix-ui/number": ["@radix-ui/number@1.1.1", "", {}, "sha512-MkKCwxlXTgz6CFoJx3pCwn07GKp36+aZyu/u2Ln2VrA5DcdyCZkASEDBTd8x5whTQQL5CiYf4prXKLcgQdv29g=="],
 
