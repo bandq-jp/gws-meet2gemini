@@ -64,7 +64,7 @@ function MarketingChatCanvas({ promptPresets }: MarketingChatCanvasProps) {
         const secret = await ensureClientSecret();
         const originalRequest = new Request(input, init);
         const headers = new Headers(originalRequest.headers);
-        headers.set("Authorization", `Bearer ${secret}`);
+        headers.set("x-marketing-client-secret", secret);
         setTokenError(null);
         return fetch(new Request(originalRequest, { headers }));
       } catch (error) {

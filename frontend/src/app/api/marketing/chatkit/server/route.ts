@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 const DEFAULT_BACKEND_URL = "http://localhost:8000/api/v1/marketing/chatkit";
 const BACKEND_URL =
   process.env.MARKETING_CHATKIT_BACKEND_URL || DEFAULT_BACKEND_URL;
+const CLIENT_SECRET_HEADER = "x-marketing-client-secret";
 
 function buildForwardHeaders(request: NextRequest) {
   const headers = new Headers();
@@ -34,9 +35,21 @@ export async function POST(request: NextRequest) {
   request.signal.addEventListener("abort", abort);
 
   try {
+    const clientSecret = request.headers.get(CLIENT_SECRET_HEADER);
+    if (!clientSecret) {
+      return NextResponse.json(
+        { error: "Missing marketing client secret" },
+        { status: 401 }
+      );
+    }
+
+    const backendHeaders = buildForwardHeaders(request);
+    backendHeaders.set("Authorization", `Bearer ${clientSecret}`);
+    backendHeaders.delete(CLIENT_SECRET_HEADER);
+
     const backendResponse = await fetch(BACKEND_URL, {
       method: "POST",
-      headers: buildForwardHeaders(request),
+      headers: backendHeaders,
       body: request.body,
       signal: controller.signal,
       cache: "no-store",
