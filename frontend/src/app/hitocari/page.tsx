@@ -68,7 +68,7 @@ export default function HitocariListPage() {
   const [selectedAccount, setSelectedAccount] = useState<string>("");
 
   // Load available accounts function
-  const loadAvailableAccounts = async () => {
+  const loadAvailableAccounts = useCallback(async () => {
     try {
       const response = await apiClient.getAvailableAccounts();
       setAvailableAccounts(response.accounts);
@@ -104,7 +104,7 @@ export default function HitocariListPage() {
       console.error('Failed to load available accounts:', error);
       setAvailableAccounts([]);
     }
-  };
+  }, []);
 
   // アカウントオプションの作成
   const accountOptions = [
@@ -133,7 +133,7 @@ export default function HitocariListPage() {
   };
 
   // Define loadMeetings function for paginated data
-  const loadMeetings = async (
+  const loadMeetings = useCallback(async (
     tab: 'all' | 'structured' | 'unstructured' = activeTab,
     page: number = 1,
     resetPage: boolean = false,
@@ -141,7 +141,7 @@ export default function HitocariListPage() {
   ) => {
     try {
       setLoading(true);
-      
+
       const accounts = showAllAccounts ? undefined : (currentUserEmail ? [currentUserEmail] : undefined);
       const structured = tab === 'all' ? undefined : (tab === 'structured');
 
@@ -162,7 +162,7 @@ export default function HitocariListPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, showAllAccounts, currentUserEmail]);
 
   // 検索時のページング処理
   const [currentSearchQuery, setCurrentSearchQuery] = useState("");
@@ -171,7 +171,7 @@ export default function HitocariListPage() {
   const handleSearch = useCallback(async (query: string) => {
     setCurrentSearchQuery(query);
     await loadMeetings(activeTab, 1, true, query);
-  }, [activeTab]);
+  }, [activeTab, loadMeetings]);
 
   // デバウンス検索
   const debouncedSearch = useCallback(
@@ -218,8 +218,7 @@ export default function HitocariListPage() {
   // Load meetings and accounts on component mount
   useEffect(() => {
     loadAvailableAccounts();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadAvailableAccounts]);
   
   // selectedAccountの状態をショートカットで更新するためのuseEffect
   useEffect(() => {
@@ -237,8 +236,7 @@ export default function HitocariListPage() {
     if (availableAccounts.length > 0) {
       loadMeetings(activeTab, getCurrentPage(), true, currentSearchQuery);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAllAccounts, currentUserEmail, activeTab, availableAccounts.length]);
+  }, [availableAccounts.length, activeTab, currentSearchQuery, loadMeetings]);
 
 
   const handleCollectMeetings = async () => {

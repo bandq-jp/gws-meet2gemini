@@ -59,7 +59,14 @@ async function getIdToken(): Promise<string> {
     );
   }
   const auth = await googleAuthPromise;
-  return auth.fetchIdToken(BACKEND_AUDIENCE);
+  const client = await auth.getIdTokenClient(BACKEND_AUDIENCE);
+  const headers = await client.getRequestHeaders();
+  const authorization =
+    headers["Authorization"] || headers["authorization"] || "";
+  if (!authorization.startsWith("Bearer ")) {
+    throw new Error("Failed to mint authorization header for Cloud Run");
+  }
+  return authorization.split(" ", 2)[1];
 }
 
 export async function POST(request: NextRequest) {
