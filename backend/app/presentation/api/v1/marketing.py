@@ -27,13 +27,22 @@ def _token_service() -> MarketingTokenService:
 
 async def require_marketing_context(
     authorization: Annotated[str | None, Header(convert_underscores=False)] = None,
+    marketing_client_secret: Annotated[
+        str | None, Header(alias="x-marketing-client-secret", convert_underscores=False)
+    ] = None,
 ) -> MarketingRequestContext:
-    if not authorization or not authorization.startswith("Bearer "):
+    token: str | None = None
+
+    if marketing_client_secret:
+        token = marketing_client_secret.strip()
+    elif authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing marketing client token",
         )
-    token = authorization.split(" ", 1)[1].strip()
     try:
         claims = _token_service().verify(token)
     except MarketingTokenError as exc:

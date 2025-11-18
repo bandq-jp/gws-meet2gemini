@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { GoogleAuth } from "google-auth-library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -6,8 +7,30 @@ export const dynamic = "force-dynamic";
 const DEFAULT_BACKEND_URL = "http://localhost:8000/api/v1/marketing/chatkit";
 const BACKEND_URL =
   process.env.MARKETING_CHATKIT_BACKEND_URL || DEFAULT_BACKEND_URL;
+const BACKEND_ORIGIN = safeOrigin(BACKEND_URL);
+const BACKEND_AUDIENCE =
+  process.env.MARKETING_CHATKIT_BACKEND_AUDIENCE || BACKEND_ORIGIN;
 const CLIENT_SECRET_HEADER = "x-marketing-client-secret";
+const SERVICE_ACCOUNT_JSON =
+  process.env.MARKETING_CHATKIT_GCP_SA_JSON || process.env.GCP_SA_JSON || "";
+const REQUIRE_ID_TOKEN_ENV = process.env.MARKETING_CHATKIT_REQUIRE_ID_TOKEN;
+const IS_LOCAL_BACKEND = BACKEND_URL.startsWith("http://localhost");
+const SHOULD_USE_ID_TOKEN =
+  REQUIRE_ID_TOKEN_ENV === "true" ||
+  (REQUIRE_ID_TOKEN_ENV !== "false" && !IS_LOCAL_BACKEND);
+let googleAuthPromise: Promise<GoogleAuth> | null = null;
 type DuplexRequestInit = RequestInit & { duplex?: "half" };
+
+function safeOrigin(url: string | undefined | null) {
+  if (!url) {
+    return "";
+  }
+  try {
+    return new URL(url).origin;
+  } catch {
+    return "";
+  }
+}
 
 function buildForwardHeaders(request: NextRequest) {
   const headers = new Headers();
@@ -21,6 +44,22 @@ function buildForwardHeaders(request: NextRequest) {
     headers.set("accept", "text/event-stream, application/json");
   }
   return headers;
+}
+
+async function getIdToken(): Promise<string> {
+  if (!SERVICE_ACCOUNT_JSON) {
+    throw new Error("GCP_SA_JSON (or MARKETING_CHATKIT_GCP_SA_JSON) is not configured");
+  }
+  if (!BACKEND_AUDIENCE) {
+    throw new Error("MARKETING_CHATKIT_BACKEND_URL must be a valid absolute URL");
+  }
+  if (!googleAuthPromise) {
+    googleAuthPromise = Promise.resolve(
+      new GoogleAuth({ credentials: JSON.parse(SERVICE_ACCOUNT_JSON) })
+    );
+  }
+  const auth = await googleAuthPromise;
+  return auth.fetchIdToken(BACKEND_AUDIENCE);
 }
 
 export async function POST(request: NextRequest) {
@@ -45,8 +84,24 @@ export async function POST(request: NextRequest) {
     }
 
     const backendHeaders = buildForwardHeaders(request);
-    backendHeaders.set("Authorization", `Bearer ${clientSecret}`);
     backendHeaders.delete(CLIENT_SECRET_HEADER);
+    backendHeaders.delete("authorization");
+    backendHeaders.set(CLIENT_SECRET_HEADER, clientSecret);
+
+    if (SHOULD_USE_ID_TOKEN) {
+      try {
+        const idToken = await getIdToken();
+        backendHeaders.set("Authorization", `Bearer ${idToken}`);
+      } catch (error) {
+        console.error("Failed to mint Cloud Run ID token", error);
+        return NextResponse.json(
+          { error: "Failed to mint Cloud Run ID token" },
+          { status: 500 }
+        );
+      }
+    } else {
+      backendHeaders.set("Authorization", `Bearer ${clientSecret}`);
+    }
 
     const backendInit: DuplexRequestInit = {
       method: "POST",
