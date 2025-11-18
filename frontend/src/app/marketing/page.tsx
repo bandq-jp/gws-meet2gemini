@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { ChatKit, useChatKit } from "@openai/chatkit-react";
-import { Badge } from "@/components/ui/badge";
 
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
@@ -149,15 +148,6 @@ export default function MarketingPage() {
   );
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-6 py-4">
-        <Badge className="mb-2" variant="secondary">
-          BETA
-        </Badge>
-        <h1 className="text-3xl font-bold">マーケティング AI コックピット</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          SEOや集客の問いを入力すると、内部ワークフローがAhrefs/GSC/GA4/検索ツールを自動で連携させます。
-        </p>
-      </div>
       <div className="flex-1 min-h-0">
         <MarketingChatCanvas promptPresets={marketingPrompts} />
       </div>
