@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
 import {
   Command,
   CommandEmpty,
@@ -174,29 +173,29 @@ export default function HitocariListPage() {
   }, [activeTab, loadMeetings]);
 
   // デバウンス検索
-  const debouncedSearch = useCallback(
-    (() => {
-      let timeoutId: NodeJS.Timeout;
-      return (query: string) => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-          if (query !== currentSearchQuery) {
-            handleSearch(query);
-          }
-        }, 500); // 500ms のデバウンス
-      };
-    })(),
-    [handleSearch, currentSearchQuery]
-  );
+  const debouncedSearch = useMemo(() => {
+    let timeoutId: NodeJS.Timeout;
+    return (query: string) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (query !== currentSearchQuery) {
+          handleSearch(query);
+        }
+      }, 500); // 500ms のデバウンス
+    };
+  }, [handleSearch, currentSearchQuery]);
 
   // 現在のページ番号を取得
-  const getCurrentPage = () => {
+  const getCurrentPage = useCallback(() => {
     switch (activeTab) {
-      case 'structured': return structuredPage;
-      case 'unstructured': return unstructuredPage;
-      default: return allPage;
+      case 'structured':
+        return structuredPage;
+      case 'unstructured':
+        return unstructuredPage;
+      default:
+        return allPage;
     }
-  };
+  }, [activeTab, allPage, structuredPage, unstructuredPage]);
 
   // ページ変更ハンドラ
   const handlePageChange = (newPage: number) => {
@@ -236,7 +235,7 @@ export default function HitocariListPage() {
     if (availableAccounts.length > 0) {
       loadMeetings(activeTab, getCurrentPage(), true, currentSearchQuery);
     }
-  }, [availableAccounts.length, activeTab, currentSearchQuery, loadMeetings]);
+  }, [availableAccounts.length, activeTab, currentSearchQuery, getCurrentPage, loadMeetings]);
 
 
   const handleCollectMeetings = async () => {

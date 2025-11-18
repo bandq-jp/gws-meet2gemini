@@ -189,6 +189,14 @@ export function AppSidebar() {
             enabled: true,
             description: "Ahrefs/GSC/GA4を束ねたマーケティング分析チャット",
           },
+          {
+            title: "分析ダッシュボード（仮）",
+            icon: BarChart3,
+            href: "/marketing/dashboard",
+            id: "marketing-dashboard",
+            enabled: true,
+            description: "Ahrefs・GSC・GA4・社内CRMの主要指標を俯瞰",
+          },
         ];
       case 'monotech':
         return [
