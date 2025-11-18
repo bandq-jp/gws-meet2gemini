@@ -60,6 +60,7 @@ export default function RootLayout({
           <Script
             src="https://cdn.platform.openai.com/deployments/chatkit/chatkit.js"
             strategy="beforeInteractive"
+            data-domain-key={process.env.NEXT_PUBLIC_MARKETING_CHATKIT_DOMAIN_KEY}
           />
         </head>
         <body

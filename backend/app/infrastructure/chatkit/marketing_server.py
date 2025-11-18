@@ -19,6 +19,10 @@ from chatkit.types import (
 )
 
 from app.infrastructure.chatkit.context import MarketingRequestContext
+from app.infrastructure.chatkit.tool_events import (
+    ToolUsageTracker,
+    instrument_run_result,
+)
 from app.infrastructure.chatkit.seo_agent_factory import (
     MARKETING_WORKFLOW_ID,
     MarketingAgentFactory,
@@ -70,10 +74,12 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             request_context=context,
         )
 
+        tracker = ToolUsageTracker(context_wrapper)
         result = Runner.run_streamed(agent, agent_input, run_config=run_config)
+        monitored = instrument_run_result(result, tracker)
 
         try:
-            async for event in stream_agent_response(context_wrapper, result):
+            async for event in stream_agent_response(context_wrapper, monitored):
                 yield event
         except APIError as exc:
             logger.exception("Marketing agent streaming failed")
@@ -93,6 +99,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             yield ProgressUpdateEvent(
                 text="⚠️ 内部エラーにより応答を完了できませんでした。時間をおいて再実行してください。"
             )
+        finally:
+            await tracker.close()
 
     @staticmethod
     def _infer_mcp_source(message: str | None) -> str | None:
