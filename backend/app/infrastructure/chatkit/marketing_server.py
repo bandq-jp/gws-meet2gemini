@@ -62,7 +62,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             }
         )
 
-        yield ProgressUpdateEvent(text="📊 Ahrefs/GA4/GSCのデータを集計しています…")
+        yield ProgressUpdateEvent(text="📊 考え中…")
 
         context_wrapper = AgentContext(
             thread=thread,
