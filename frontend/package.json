@@ -23,6 +23,7 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "latest",
     "@radix-ui/react-tooltip": "latest",
+    "@openai/chatkit": "^1.0.3",
     "class-variance-authority": "latest",
     "clsx": "latest",
     "@openai/chatkit-react": "^1.2.0",

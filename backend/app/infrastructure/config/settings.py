@@ -75,7 +75,7 @@ class Settings:
     autoproc_gemini_model_large_threshold: int = int(os.getenv("AUTOPROC_GEMINI_MODEL_LARGE_THRESHOLD", "15000"))
 
     # Marketing chat / ChatKit
-    marketing_agent_model: str = os.getenv("MARKETING_AGENT_MODEL", "gpt-5-mini")
+    marketing_agent_model: str = os.getenv("MARKETING_AGENT_MODEL", "gpt-5.1")
     marketing_reasoning_effort: str = os.getenv("MARKETING_REASONING_EFFORT", "high")
     marketing_search_country: str = os.getenv("MARKETING_SEARCH_COUNTRY", "JP")
     marketing_enable_web_search: bool = os.getenv("MARKETING_ENABLE_WEB_SEARCH", "true").lower() != "false"

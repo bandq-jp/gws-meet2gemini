@@ -6,6 +6,7 @@
       "dependencies": {
         "@clerk/localizations": "latest",
         "@clerk/nextjs": "latest",
+        "@openai/chatkit": "^1.0.3",
         "@openai/chatkit-react": "^1.2.0",
         "@radix-ui/react-avatar": "latest",
         "@radix-ui/react-dialog": "^1.1.15",
@@ -185,7 +186,7 @@
 
     "@nolyfill/is-core-module": ["@nolyfill/is-core-module@1.0.39", "", {}, "sha512-nn5ozdjYQpUCZlWGuxcJY/KpxkWQs4DcbMCmKojjyrYDEAGy4Ce19NN4v5MduafTwJlbKc99UA8YhSVqq9yPZA=="],
 
-    "@openai/chatkit": ["@openai/chatkit@1.0.1", "", {}, "sha512-zU86yKX2wW/L0M6Tva30VKod4Djhq24BXEyDXr7aH1G/bJrgpNUjdinQ8VK41eJjwEdwDZlxJyq7o0JUTWgSOg=="],
+    "@openai/chatkit": ["@openai/chatkit@1.0.3", "", {}, "sha512-kUmtWfvp/hP1FAYRs4fnry5o4sJf61ZEj0mqlOW/EiSWc151DXhruovaQARAT2IeYXYS1LvaexQtKieM9Dpgiw=="],
 
     "@openai/chatkit-react": ["@openai/chatkit-react@1.2.0", "", { "dependencies": { "@openai/chatkit": "1.0.1" }, "peerDependencies": { "react": ">=18", "react-dom": ">=18" } }, "sha512-qk466KfPuCh7gCU0Qqc6PygekV5eMitn4JE8P2XcS8U7aFMNYrS74zYXmJ2xBhugAiuYMycBC0kFiCaxtmVwXQ=="],
 
@@ -1020,6 +1021,8 @@
     "@eslint-community/eslint-utils/eslint-visitor-keys": ["eslint-visitor-keys@3.4.3", "", {}, "sha512-wpc+LXeiyiisxPlEkUzU6svyS1frIO3Mgxj1fdy7Pm8Ygzguax2N3Fa/D/ag1WqbOprdI+uY6wMUl8/a2G+iag=="],
 
     "@humanfs/node/@humanwhocodes/retry": ["@humanwhocodes/retry@0.3.1", "", {}, "sha512-JBxkERygn7Bv/GbN5Rv8Ul6LVknS+5Bp6RgDC/O8gEBU/yeH5Ui5C/OlWrTb6qct7LjjfT6Re2NxB0ln0yYybA=="],
+
+    "@openai/chatkit-react/@openai/chatkit": ["@openai/chatkit@1.0.1", "", {}, "sha512-zU86yKX2wW/L0M6Tva30VKod4Djhq24BXEyDXr7aH1G/bJrgpNUjdinQ8VK41eJjwEdwDZlxJyq7o0JUTWgSOg=="],
 
     "@radix-ui/react-dropdown-menu/@radix-ui/primitive": ["@radix-ui/primitive@1.1.2", "", {}, "sha512-XnbHrrprsNqZKQhStrSwgRUQzoCI1glLzdw79xiZPoofhGICeZRSQ3dIxAKH1gb3OHfNf4d6f+vAv3kil2eggA=="],
 

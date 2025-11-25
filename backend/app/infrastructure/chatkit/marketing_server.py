@@ -75,7 +75,13 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         )
 
         tracker = ToolUsageTracker(context_wrapper)
-        result = Runner.run_streamed(agent, agent_input, run_config=run_config)
+        # Pass AgentContext into the run so function tools can access thread/store/user info
+        result = Runner.run_streamed(
+            agent,
+            agent_input,
+            context=context_wrapper,
+            run_config=run_config,
+        )
         monitored = instrument_run_result(result, tracker)
 
         try:
