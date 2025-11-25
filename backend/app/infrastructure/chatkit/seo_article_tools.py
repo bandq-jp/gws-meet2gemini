@@ -16,7 +16,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
 
-from agents import RunContextWrapper, function_tool
+from agents import RunContextWrapper, apply_diff, function_tool
 from chatkit.agents import AgentContext, ClientToolCall
 from openai import AsyncOpenAI
 
@@ -278,7 +278,8 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
                 "role": "user",
                 "content": [
                     {
-                        "type": "text",
+                        # Responses API (v2024-12) requires `input_text` instead of the legacy `text`.
+                        "type": "input_text",
                         "text": (
                             "Edit the article in markdown. Respond by calling apply_patch with an "
                             "update_file operation containing new_content.\n\n"
@@ -305,6 +306,19 @@ def _extract_patched_body(response: Any, fallback: str) -> str:
 
     for item in output_items:
         item_type = getattr(item, "type", None) or (item.get("type") if isinstance(item, dict) else None)
+
+        # Newer Responses output: apply_patch_call items
+        if item_type == "apply_patch_call":
+            op = (
+                getattr(item, "operation", None)
+                or (item.get("operation") if isinstance(item, dict) else None)
+                or {}
+            )
+            patched = _patched_from_apply_patch_call(op, fallback)
+            if patched:
+                return patched
+
+        # Legacy tool_call output
         if item_type == "tool_call":
             tool_call = getattr(item, "tool_call", None) or (item.get("tool_call") if isinstance(item, dict) else None)
             if not tool_call:
@@ -317,6 +331,7 @@ def _extract_patched_body(response: Any, fallback: str) -> str:
             if patched:
                 return patched
 
+        # Textual fallbacks
         content = getattr(item, "content", None) or (item.get("content") if isinstance(item, dict) else None)
         if content:
             texts: list[str] = []
@@ -358,5 +373,29 @@ def _patched_from_operations(arguments: Dict[str, Any], fallback: str) -> Option
             new_content = op.get("new_content") or op.get("content") or op.get("text")
             if new_content:
                 return new_content
+
+    return None
+
+
+def _patched_from_apply_patch_call(operation: Dict[str, Any], fallback: str) -> Optional[str]:
+    if not operation:
+        return None
+
+    op_type = operation.get("type")
+    path = operation.get("path") or DEFAULT_FILE_NAME
+    target_ok = (path == DEFAULT_FILE_NAME) or (path is None)
+
+    # Preferred: direct new_content
+    new_content = operation.get("new_content") or operation.get("content")
+    if new_content and target_ok:
+        return new_content
+
+    # If diff is provided, try applying it
+    diff = operation.get("diff") or operation.get("patch")
+    if diff and target_ok:
+        try:
+            return apply_diff(fallback, diff, create=(op_type == "create_file"))
+        except Exception:
+            return None
 
     return None

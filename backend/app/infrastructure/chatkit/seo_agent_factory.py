@@ -211,9 +211,7 @@ class MarketingAgentFactory:
                     "seo_open_canvas",
                     "seo_update_canvas",
                     "create_seo_article",
-                    "get_seo_article",
                     "save_seo_article",
-                    "apply_patch_to_article",
                 ]
             ),
         )
