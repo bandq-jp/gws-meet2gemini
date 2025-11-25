@@ -9,6 +9,7 @@ from agents import (
     ModelSettings,
     WebSearchTool,
 )
+from agents.agent import StopAtTools
 from openai.types.shared.reasoning import Reasoning
 
 from app.infrastructure.config.settings import Settings
@@ -203,6 +204,16 @@ class MarketingAgentFactory:
                     effort=self._settings.marketing_reasoning_effort,
                     summary="detailed",
                 ),
+            ),
+            tool_use_behavior=StopAtTools(
+                stop_at_tool_names=[
+                    "seo_open_canvas",
+                    "seo_update_canvas",
+                    "create_seo_article",
+                    "get_seo_article",
+                    "save_seo_article",
+                    "apply_patch_to_article",
+                ]
             ),
         )
         return agent
