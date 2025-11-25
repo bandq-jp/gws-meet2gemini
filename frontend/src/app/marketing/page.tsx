@@ -2,6 +2,7 @@
 
 import Script from "next/script";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -363,12 +364,48 @@ function SeoCanvas({ state, isResponding, onApply }: {
   );
 }
 
-export default function MarketingPage() {
+export type MarketingPageProps = {
+  initialThreadId?: string | null;
+};
+
+function loadStoredCanvas(threadId: string | null | undefined): CanvasState | null {
+  if (typeof window === "undefined" || !threadId) return null;
+  try {
+    const raw = localStorage.getItem(`seo-canvas:${threadId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return { visible: true, ...parsed };
+    }
+  } catch {
+    // ignore malformed storage
+  }
+  return null;
+}
+
+function persistCanvas(threadId: string | null, state: CanvasState) {
+  if (typeof window === "undefined" || !threadId) return;
+  try {
+    localStorage.setItem(
+      `seo-canvas:${threadId}`,
+      JSON.stringify({ ...state, visible: true })
+    );
+  } catch {
+    // storage quota/full – best-effort
+  }
+}
+
+export default function MarketingPage({ initialThreadId = null }: MarketingPageProps) {
+  const router = useRouter();
   const tokenRef = useRef<TokenState>({ secret: null, expiresAt: 0 });
   const chatkitRef = useRef<ChatKitElement | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
-  const [canvas, setCanvas] = useState<CanvasState>({ visible: false, version: 0 });
+  const [canvas, setCanvas] = useState<CanvasState>(() => {
+    const stored = loadStoredCanvas(initialThreadId);
+    return stored ?? { visible: false, version: 0 };
+  });
   const [isResponding, setIsResponding] = useState(false);
+  const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
 
   const marketingPrompts = useMemo(
     () => [
@@ -445,6 +482,7 @@ export default function MarketingPage() {
            title: { enabled: true, text: "マーケティング分析アシスタント" },
       },
       history: { enabled: true, showDelete: false, showRename: true },
+      initialThread: initialThreadId ?? null,
       startScreen: {
         greeting: "SEOや集客課題を入力すると分析フローが自動で走ります。記事生成指示で右ペインが開きます。",
         prompts: marketingPrompts.map((p) => ({ label: p, prompt: p })),
@@ -465,27 +503,35 @@ export default function MarketingPage() {
         params: Record<string, unknown>;
       }) => {
         if (name === "seo_open_canvas") {
-          setCanvas((prev) => ({
-            ...prev,
-            visible: true,
-            articleId: params.articleId ?? prev.articleId,
-            topic: params.topic ?? prev.topic,
-            primaryKeyword: params.primaryKeyword ?? prev.primaryKeyword,
-            outline: params.outline ?? prev.outline,
-          }));
+          setCanvas((prev) => {
+            const next = {
+              ...prev,
+              visible: true,
+              articleId: params.articleId ?? prev.articleId,
+              topic: params.topic ?? prev.topic,
+              primaryKeyword: params.primaryKeyword ?? prev.primaryKeyword,
+              outline: params.outline ?? prev.outline,
+            };
+            persistCanvas(currentThreadIdRef.current, next);
+            return next;
+          });
           return { opened: true };
         }
         if (name === "seo_update_canvas") {
-          setCanvas((prev) => ({
-            ...prev,
-            visible: true,
-            articleId: params.articleId ?? prev.articleId,
-            title: params.title ?? prev.title,
-            outline: params.outline ?? prev.outline,
-            body: params.body ?? prev.body,
-            version: params.version ?? (prev.version ?? 0) + 1,
-            status: params.status ?? prev.status,
-          }));
+          setCanvas((prev) => {
+            const next = {
+              ...prev,
+              visible: true,
+              articleId: params.articleId ?? prev.articleId,
+              title: params.title ?? prev.title,
+              outline: params.outline ?? prev.outline,
+              body: params.body ?? prev.body,
+              version: params.version ?? (prev.version ?? 0) + 1,
+              status: params.status ?? prev.status,
+            };
+            persistCanvas(currentThreadIdRef.current, next);
+            return next;
+          });
           return { ok: true };
         }
         return { ok: true };
@@ -502,7 +548,7 @@ export default function MarketingPage() {
       }
     };
     setup();
-  }, [customFetch, marketingPrompts]);
+  }, [customFetch, marketingPrompts, initialThreadId]);
 
   // Listen for response start/end to toggle spinner (from ChatKit custom events)
   useEffect(() => {
@@ -510,13 +556,36 @@ export default function MarketingPage() {
     if (!el) return;
     const onStart = () => setIsResponding(true);
     const onEnd = () => setIsResponding(false);
+    const handleThread = (threadId: string | null) => {
+      currentThreadIdRef.current = threadId;
+      const stored = loadStoredCanvas(threadId);
+      setCanvas(stored ?? { visible: false, version: 0 });
+      // Update URL without remounting the page (avoid interrupting in-flight sends)
+      const target = threadId ? `/marketing/${threadId}` : "/marketing";
+      if (typeof window !== "undefined" && window.location.pathname !== target) {
+        window.history.replaceState({}, "", target);
+      }
+    };
+    const onThreadChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId: string | null }>).detail;
+      handleThread(detail?.threadId ?? null);
+    };
+    const onThreadLoadEnd = (event: Event) => {
+      const detail = (event as CustomEvent<{ threadId: string }>)?.detail;
+      handleThread(detail?.threadId ?? null);
+    };
+
     el.addEventListener("chatkit.response.start", onStart);
     el.addEventListener("chatkit.response.end", onEnd);
+    el.addEventListener("chatkit.thread.change", onThreadChange);
+    el.addEventListener("chatkit.thread.load.end", onThreadLoadEnd);
     return () => {
       el.removeEventListener("chatkit.response.start", onStart);
       el.removeEventListener("chatkit.response.end", onEnd);
+      el.removeEventListener("chatkit.thread.change", onThreadChange);
+      el.removeEventListener("chatkit.thread.load.end", onThreadLoadEnd);
     };
-  }, []);
+  }, [router]);
 
   const handleApplyLocal = useCallback(
     (body: string) => {

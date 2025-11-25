@@ -296,48 +296,43 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
 
 
 def _extract_patched_body(response: Any, fallback: str) -> str:
-    output_items = getattr(response, "output", None) or getattr(response, "data", None)
-    if not output_items and hasattr(response, "model_dump"):
-        dumped = response.model_dump(exclude_none=True)
-        output_items = dumped.get("output")
-
+    output_items = _to_list(
+        getattr(response, "output", None)
+        or getattr(response, "data", None)
+        or _maybe_dump(response).get("output")
+    )
     if not output_items:
         return fallback
 
     for item in output_items:
-        item_type = getattr(item, "type", None) or (item.get("type") if isinstance(item, dict) else None)
+        item_dict = _maybe_dump(item)
+        item_type = item_dict.get("type")
 
         # Newer Responses output: apply_patch_call items
         if item_type == "apply_patch_call":
-            op = (
-                getattr(item, "operation", None)
-                or (item.get("operation") if isinstance(item, dict) else None)
-                or {}
-            )
+            op = item_dict.get("operation") or {}
             patched = _patched_from_apply_patch_call(op, fallback)
             if patched:
                 return patched
 
         # Legacy tool_call output
         if item_type == "tool_call":
-            tool_call = getattr(item, "tool_call", None) or (item.get("tool_call") if isinstance(item, dict) else None)
-            if not tool_call:
+            tool_call = item_dict.get("tool_call") or {}
+            if (tool_call.get("type") or tool_call.get("tool", {}).get("type")) != "apply_patch":
                 continue
-            tool_type = getattr(tool_call, "type", None) or (tool_call.get("type") if isinstance(tool_call, dict) else None)
-            if tool_type != "apply_patch":
-                continue
-            arguments = getattr(tool_call, "arguments", None) or (tool_call.get("arguments") if isinstance(tool_call, dict) else None) or {}
+            arguments = tool_call.get("arguments") or {}
             patched = _patched_from_operations(arguments, fallback)
             if patched:
                 return patched
 
         # Textual fallbacks
-        content = getattr(item, "content", None) or (item.get("content") if isinstance(item, dict) else None)
+        content = item_dict.get("content")
         if content:
             texts: list[str] = []
             if isinstance(content, list):
                 for seg in content:
-                    text = getattr(seg, "text", None) or (seg.get("text") if isinstance(seg, dict) else None)
+                    seg_dict = _maybe_dump(seg)
+                    text = seg_dict.get("text")
                     if text:
                         texts.append(text)
             elif isinstance(content, str):
@@ -351,26 +346,26 @@ def _extract_patched_body(response: Any, fallback: str) -> str:
 
 
 def _patched_from_operations(arguments: Dict[str, Any], fallback: str) -> Optional[str]:
-    operations = (
-        arguments.get("operations")
-        or arguments.get("patches")
+    args_dict = _maybe_dump(arguments)
+    operations = _to_list(
+        args_dict.get("operations")
+        or args_dict.get("patches")
         or []
     )
 
     target_names = {
-        arguments.get("file"),
-        arguments.get("path"),
-        arguments.get("file_path"),
+        args_dict.get("file"),
+        args_dict.get("path"),
+        args_dict.get("file_path"),
         DEFAULT_FILE_NAME,
     }
 
     for op in operations:
-        if not isinstance(op, dict):
-            continue
-        op_type = op.get("type") or op.get("operation") or op.get("op")
-        path = op.get("path") or op.get("file") or op.get("file_path") or DEFAULT_FILE_NAME
+        op_dict = _maybe_dump(op)
+        op_type = op_dict.get("type") or op_dict.get("operation") or op_dict.get("op")
+        path = op_dict.get("path") or op_dict.get("file") or op_dict.get("file_path") or DEFAULT_FILE_NAME
         if op_type in {"update_file", "create_file", "replace"} and (path in target_names):
-            new_content = op.get("new_content") or op.get("content") or op.get("text")
+            new_content = op_dict.get("new_content") or op_dict.get("content") or op_dict.get("text")
             if new_content:
                 return new_content
 
@@ -381,17 +376,18 @@ def _patched_from_apply_patch_call(operation: Dict[str, Any], fallback: str) -> 
     if not operation:
         return None
 
-    op_type = operation.get("type")
-    path = operation.get("path") or DEFAULT_FILE_NAME
+    op_dict = _maybe_dump(operation)
+    op_type = op_dict.get("type")
+    path = op_dict.get("path") or DEFAULT_FILE_NAME
     target_ok = (path == DEFAULT_FILE_NAME) or (path is None)
 
     # Preferred: direct new_content
-    new_content = operation.get("new_content") or operation.get("content")
+    new_content = op_dict.get("new_content") or op_dict.get("content")
     if new_content and target_ok:
         return new_content
 
     # If diff is provided, try applying it
-    diff = operation.get("diff") or operation.get("patch")
+    diff = op_dict.get("diff") or op_dict.get("patch")
     if diff and target_ok:
         try:
             return apply_diff(fallback, diff, create=(op_type == "create_file"))
@@ -399,3 +395,27 @@ def _patched_from_apply_patch_call(operation: Dict[str, Any], fallback: str) -> 
             return None
 
     return None
+
+
+def _maybe_dump(obj: Any) -> Dict[str, Any]:
+    """Coerce pydantic/BaseModel/typed objects or dicts into plain dicts."""
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "model_dump"):
+        try:
+            return obj.model_dump(exclude_none=True)
+        except Exception:
+            pass
+    if hasattr(obj, "__dict__"):
+        return {k: v for k, v in vars(obj).items() if not k.startswith("_")}
+    return {}
+
+
+def _to_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
