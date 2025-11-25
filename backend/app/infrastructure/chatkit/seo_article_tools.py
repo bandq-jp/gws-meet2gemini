@@ -255,148 +255,126 @@ async def apply_patch_to_article(
 
 
 async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
-    """Call Responses API with the built-in apply_patch tool and return patched body.
+    """apply_patch を公式フローで実行し、差分を apply_diff で適用して返す。
 
-    The model is guided to emit a single update_file operation containing a V4A `diff` for
-    article.md (HTML). If parsing/apply fails, the original body is returned to avoid data loss.
+    1) responses.create で apply_patch_call を受け取る
+    2) operation.diff を apply_diff で適用（記事本文はメモリ上で管理）
+    3) それぞれの結果を apply_patch_call_output として返し、モデルに再応答させる
+    4) apply_patch_call がなくなるか 3 ラウンド繰り返したら終了
+    失敗時は原文を返し、モデルには失敗メッセージを渡す。
     """
 
     client = AsyncOpenAI()
-    response = await client.responses.create(
-        model="gpt-5.1",
-        tools=[{"type": "apply_patch"}],
-        input=[
-            {
-                "role": "system",
-                "content": (
+    body = current_body
+    pending_input: list[dict[str, Any]] = [
+        {
+            "role": "system",
+            "content": (
                 "You are an editor for a Japanese SEO article written in HTML. Use the "
-                "apply_patch tool and emit exactly one update_file operation for article.md, "
-                "supplying a V4A diff in operation.diff (no new_content). Keep existing sections "
-                "unless指示で削除される場合のみ消す。差分は最小限かつ有効なパッチにすること。"
+                "apply_patch tool and emit update_file operations for article.md only. Provide "
+                "V4A diffs in operation.diff (no new_content). Keep existing sections unless 指示 で削除する場合のみ。"
             ),
         },
         {
             "role": "user",
             "content": [
-                    {
-                        # Responses API (v2024-12) requires `input_text` instead of the legacy `text`.
-                        "type": "input_text",
-                        "text": (
-                            "Edit the article (HTML). Respond by calling apply_patch with a single "
-                            "update_file operation for article.md. Provide the changes as a V4A "
-                            "diff in operation.diff; do NOT include new_content.\n\n"
-                            f"Current article (path {DEFAULT_FILE_NAME}):\n" + current_body
-                            + "\n\nEdit request:\n" + user_instruction
-                        ),
-                    }
-                ],
-            },
-        ],
-    )
+                {
+                    "type": "input_text",
+                    "text": (
+                        "Edit the article (HTML). Respond by calling apply_patch with update_file "
+                        "for article.md. Provide the changes as a V4A diff in operation.diff; do "
+                        "NOT include new_content.\n\n"
+                        f"Current article (path {DEFAULT_FILE_NAME}):\n" + current_body
+                        + "\n\nEdit request:\n" + user_instruction
+                    ),
+                }
+            ],
+        },
+    ]
 
-    return _extract_patched_body(response, current_body)
+    prev_response_id: Optional[str] = None
+
+    for _ in range(3):  # 防御的に最大3ラウンド
+        resp = await client.responses.create(
+            model="gpt-5.1",
+            tools=[{"type": "apply_patch"}],
+            input=pending_input,
+            previous_response_id=prev_response_id,
+        )
+
+        output_items = _to_list(
+            getattr(resp, "output", None)
+            or getattr(resp, "data", None)
+            or _maybe_dump(resp).get("output")
+        )
+
+        apply_calls = [
+            _maybe_dump(item) for item in output_items if _maybe_dump(item).get("type") == "apply_patch_call"
+        ]
+
+        # apply_patch_call が無ければテキスト回答を拾って終了
+        if not apply_calls:
+            maybe_text = _extract_text_content(output_items)
+            if maybe_text:
+                body = maybe_text
+            break
+
+        # diff を適用して結果を model に返す
+        call_outputs = []
+        for call in apply_calls:
+            op = _maybe_dump(call.get("operation"))
+            call_id = call.get("call_id") or call.get("id")
+            status = "failed"
+            message = ""
+
+            path = op.get("path") or DEFAULT_FILE_NAME
+            if path != DEFAULT_FILE_NAME:
+                message = f"Unexpected path {path}; expected {DEFAULT_FILE_NAME}"
+            else:
+                diff = op.get("diff") or op.get("patch")
+                if not diff:
+                    message = "Missing diff for update_file"
+                else:
+                    try:
+                        body = apply_diff(body, diff, create=(op.get("type") == "create_file"))
+                        status = "completed"
+                        message = "patched article.md"
+                    except Exception as exc:  # noqa: BLE001
+                        message = f"apply_diff error: {exc}"
+
+            call_outputs.append(
+                {
+                    "type": "apply_patch_call_output",
+                    "call_id": call_id,
+                    "status": status,
+                    "output": message,
+                }
+            )
+
+        # 次ラウンドの入力を apply_patch_call_output に差し替え
+        pending_input = call_outputs
+        prev_response_id = resp.id
+
+    return body
 
 
-def _extract_patched_body(response: Any, fallback: str) -> str:
-    output_items = _to_list(
-        getattr(response, "output", None)
-        or getattr(response, "data", None)
-        or _maybe_dump(response).get("output")
-    )
-    if not output_items:
-        return fallback
+def _extract_text_content(output_items: list[Any]) -> Optional[str]:
+    """apply_patch_call が無い場合のテキスト回答抽出用"""
 
+    texts: list[str] = []
     for item in output_items:
         item_dict = _maybe_dump(item)
-        item_type = item_dict.get("type")
-
-        # Newer Responses output: apply_patch_call items
-        if item_type == "apply_patch_call":
-            op = item_dict.get("operation") or {}
-            patched = _patched_from_apply_patch_call(op, fallback)
-            if patched:
-                return patched
-
-        # Legacy tool_call output
-        if item_type == "tool_call":
-            tool_call = item_dict.get("tool_call") or {}
-            if (tool_call.get("type") or tool_call.get("tool", {}).get("type")) != "apply_patch":
-                continue
-            arguments = tool_call.get("arguments") or {}
-            patched = _patched_from_operations(arguments, fallback)
-            if patched:
-                return patched
-
-        # Textual fallbacks
         content = item_dict.get("content")
-        if content:
-            texts: list[str] = []
-            if isinstance(content, list):
-                for seg in content:
-                    seg_dict = _maybe_dump(seg)
-                    text = seg_dict.get("text")
-                    if text:
-                        texts.append(text)
-            elif isinstance(content, str):
-                texts.append(content)
-            if texts:
-                joined = "\n".join(texts).strip()
-                if joined:
-                    return joined
-
-    return fallback
-
-
-def _patched_from_operations(arguments: Dict[str, Any], fallback: str) -> Optional[str]:
-    args_dict = _maybe_dump(arguments)
-    operations = _to_list(
-        args_dict.get("operations")
-        or args_dict.get("patches")
-        or []
-    )
-
-    target_names = {
-        args_dict.get("file"),
-        args_dict.get("path"),
-        args_dict.get("file_path"),
-        DEFAULT_FILE_NAME,
-    }
-
-    for op in operations:
-        op_dict = _maybe_dump(op)
-        op_type = op_dict.get("type") or op_dict.get("operation") or op_dict.get("op")
-        path = op_dict.get("path") or op_dict.get("file") or op_dict.get("file_path") or DEFAULT_FILE_NAME
-        if op_type in {"update_file", "create_file", "replace"} and (path in target_names):
-            new_content = op_dict.get("new_content") or op_dict.get("content") or op_dict.get("text")
-            if new_content:
-                return new_content
-
-    return None
-
-
-def _patched_from_apply_patch_call(operation: Dict[str, Any], fallback: str) -> Optional[str]:
-    if not operation:
-        return None
-
-    op_dict = _maybe_dump(operation)
-    op_type = op_dict.get("type")
-    path = op_dict.get("path") or DEFAULT_FILE_NAME
-    target_ok = (path == DEFAULT_FILE_NAME) or (path is None)
-
-    # Preferred: apply diff (V4A) provided by apply_patch tool
-    diff = op_dict.get("diff") or op_dict.get("patch")
-    if diff and target_ok:
-        try:
-            return apply_diff(fallback, diff, create=(op_type == "create_file"))
-        except Exception:
-            return None
-
-    # Fallback: accept new_content/content if present
-    new_content = op_dict.get("new_content") or op_dict.get("content")
-    if new_content and target_ok:
-        return new_content
-
-    return None
+        if isinstance(content, str):
+            texts.append(content)
+        elif isinstance(content, list):
+            for seg in content:
+                seg_dict = _maybe_dump(seg)
+                text = seg_dict.get("text")
+                if text:
+                    texts.append(text)
+    joined = "\n".join(t.strip() for t in texts if t)
+    return joined or None
 
 
 def _maybe_dump(obj: Any) -> Dict[str, Any]:
