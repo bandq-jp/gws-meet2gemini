@@ -257,8 +257,8 @@ async def apply_patch_to_article(
 async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
     """Call Responses API with the built-in apply_patch tool and return patched body.
 
-    The model is guided to emit an update_file operation with `new_content` so that parsing
-    is straightforward. If parsing fails, the original body is returned to avoid data loss.
+    The model is guided to emit a single update_file operation containing a V4A `diff` for
+    article.md (HTML). If parsing/apply fails, the original body is returned to avoid data loss.
     """
 
     client = AsyncOpenAI()
@@ -269,21 +269,23 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
             {
                 "role": "system",
                 "content": (
-                    "You are an editor for a Japanese SEO article. Use the apply_patch tool and "
-                    "emit an update_file operation whose new_content is the full, updated markdown "
-                    "for the article. Do not drop existing sections unless explicitly requested."
-                ),
-            },
-            {
-                "role": "user",
-                "content": [
+                "You are an editor for a Japanese SEO article written in HTML. Use the "
+                "apply_patch tool and emit exactly one update_file operation for article.md, "
+                "supplying a V4A diff in operation.diff (no new_content). Keep existing sections "
+                "unless指示で削除される場合のみ消す。差分は最小限かつ有効なパッチにすること。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": [
                     {
                         # Responses API (v2024-12) requires `input_text` instead of the legacy `text`.
                         "type": "input_text",
                         "text": (
-                            "Edit the article in markdown. Respond by calling apply_patch with an "
-                            "update_file operation containing new_content.\n\n"
-                            f"Current article (in {DEFAULT_FILE_NAME}):\n" + current_body
+                            "Edit the article (HTML). Respond by calling apply_patch with a single "
+                            "update_file operation for article.md. Provide the changes as a V4A "
+                            "diff in operation.diff; do NOT include new_content.\n\n"
+                            f"Current article (path {DEFAULT_FILE_NAME}):\n" + current_body
                             + "\n\nEdit request:\n" + user_instruction
                         ),
                     }
@@ -381,18 +383,18 @@ def _patched_from_apply_patch_call(operation: Dict[str, Any], fallback: str) -> 
     path = op_dict.get("path") or DEFAULT_FILE_NAME
     target_ok = (path == DEFAULT_FILE_NAME) or (path is None)
 
-    # Preferred: direct new_content
-    new_content = op_dict.get("new_content") or op_dict.get("content")
-    if new_content and target_ok:
-        return new_content
-
-    # If diff is provided, try applying it
+    # Preferred: apply diff (V4A) provided by apply_patch tool
     diff = op_dict.get("diff") or op_dict.get("patch")
     if diff and target_ok:
         try:
             return apply_diff(fallback, diff, create=(op_type == "create_file"))
         except Exception:
             return None
+
+    # Fallback: accept new_content/content if present
+    new_content = op_dict.get("new_content") or op_dict.get("content")
+    if new_content and target_ok:
+        return new_content
 
     return None
 

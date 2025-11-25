@@ -1,0 +1,22 @@
+Metadata-Version: 2.4
+Name: gws-meet2gemini
+Version: 0.1.0
+Summary: Add your description here
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: google-api-python-client>=2.177.0
+Requires-Dist: google-auth>=2.40.3
+Requires-Dist: google-auth-httplib2>=0.2.0
+Requires-Dist: google-auth-oauthlib>=1.2.2
+Requires-Dist: google-cloud-firestore>=2.16.1
+Requires-Dist: google-cloud-storage>=2.18.2
+Requires-Dist: fastapi>=0.112.2
+Requires-Dist: uvicorn[standard]>=0.30.6
+Requires-Dist: supabase>=2.9.0
+Requires-Dist: google-genai>=1.28.0
+Requires-Dist: python-dotenv>=1.1.1
+Requires-Dist: zohocrmsdk8-0>=3.0.0
+Requires-Dist: google-cloud-tasks>=2.19.3
+Requires-Dist: openai>=1.61.0
+Requires-Dist: openai-agents>=0.5.1
+Requires-Dist: openai-chatkit>=1.2.0
