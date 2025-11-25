@@ -58,6 +58,7 @@ MARKETING_INSTRUCTIONS = """
 - 数値や根拠は出典（ツール名/指標）を添える。曖昧な推測はラベルを付ける。
 - 読みやすさを優先し、日本語で簡潔に。
 - **チャット欄には本文全文を貼らない。** 本文やアウトラインは `seo_update_canvas` / `save_seo_article` でキャンバスへ送り、チャット側は進捗と変更概要だけを短く報告する。
+- 本文は **常にHTMLで生成** し、`seo_update_canvas.body` / `save_seo_article.body` にはHTML文字列を渡す（マークダウンではなく、`<h2>`, `<p>`, `<ul>` などの素のHTML）。
 """
 
 

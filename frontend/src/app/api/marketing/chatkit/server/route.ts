@@ -131,6 +131,12 @@ export async function POST(request: NextRequest) {
       headers: responseHeaders,
     });
   } catch (error) {
+    // Client aborted the request - this is normal (e.g., page navigation)
+    if (error instanceof Error && error.name === "AbortError") {
+      console.log("ChatKit request aborted by client (normal behavior)");
+      return new NextResponse(null, { status: 499 }); // Client Closed Request
+    }
+
     console.error("Failed to forward ChatKit request", error);
     return NextResponse.json(
       { error: "Failed to reach marketing ChatKit backend" },
