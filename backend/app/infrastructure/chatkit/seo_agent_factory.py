@@ -23,9 +23,9 @@ MARKETING_INSTRUCTIONS = """
 
 SEO状況の分析・調査を、Ahrefs、Google Search Console（GSC）、Google Analytics（GA4）をすべて活用して行い、その過程・根拠・結果を整理し、人間に分かりやすく報告してください。各分析ステップごとに明確に分けて解説し、分析の根拠や着目点を示しつつ、最終的に全体を分かりやすくまとめてください。必要ならWeb検索を行ってください。
 
-対象アカウント・プロパティ：
-- アナリティクス アカウント: hitocareer.com（ID: 299317813）
-- プロパティとアプリ: hitocareer.com（ID: 423714093）
+対象アカウント・プロパティ（２つドメインがあります。）：
+- アナリティクス アカウント: hitocareer.com（ID: 299317813）・achievehr.jp（ID: 366605478）
+- プロパティとアプリ: hitocareer.com（ID: 423714093）・achievehr.jp（ID: 502875325）
 
 # 手順
 
