@@ -488,10 +488,10 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
         {
             "role": "system",
             "content": (
-                "You are an editor for a Japanese SEO article written in HTML. Use the "
-                f"apply_patch tool and emit update_file operations for {DEFAULT_FILE_NAME} only. Prefer "
-                "V4A diffs in operation.diff, but if you cannot produce a diff you may provide "
-                "operation.new_content as the full updated file. Keep existing sections unless 指示 で削除する場合のみ。"
+                "You are a precise HTML editor. You MUST call the apply_patch tool with a single "
+                f"update_file operation targeting {DEFAULT_FILE_NAME}. Prefer V4A diffs in operation.diff; "
+                "if producing a diff is difficult, you may set operation.new_content to the full updated HTML. "
+                "Do not return free-form text responses."
             ),
         },
         {
@@ -500,11 +500,11 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
                 {
                     "type": "input_text",
                     "text": (
-                        "Edit the article (HTML). Respond by calling apply_patch with update_file "
-                        f"for {DEFAULT_FILE_NAME}. Provide the changes as a V4A diff in operation.diff; do "
-                        "NOT include new_content.\n\n"
-                        f"Current article (path {DEFAULT_FILE_NAME}):\n" + current_body
-                        + "\n\nEdit request:\n" + user_instruction
+                        "Edit the article (HTML). Respond ONLY by calling apply_patch with update_file "
+                        f"for {DEFAULT_FILE_NAME}. Prefer operation.diff (V4A). If diff is hard, use "
+                        "operation.new_content. Do NOT send plain text.\n\n"
+                        f"Current article (path {DEFAULT_FILE_NAME}):\n{current_body}\n\n"
+                        f"Edit request:\n{user_instruction}"
                     ),
                 }
             ],
@@ -513,10 +513,12 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
 
     prev_response_id: Optional[str] = None
 
-    for _ in range(3):  # 防御的に最大3ラウンド
+    for attempt in range(4):  # 防御的に最大4ラウンド
         resp = await client.responses.create(
             model="gpt-5.1",
             tools=[{"type": "apply_patch"}],
+            temperature=0,
+            max_output_tokens=1200,
             input=pending_input,
             previous_response_id=prev_response_id,
         )
@@ -549,9 +551,11 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
             else:
                 diff = op.get("diff") or op.get("patch")
                 new_content = op.get("new_content")
+                op_type = (op.get("type") or op.get("operation") or "").lower()
+                base_body = "" if op_type == "create_file" else body
                 if diff:
                     try:
-                        body = apply_diff(body, diff, create=(op.get("type") == "create_file"))
+                        body = apply_diff(base_body, diff)
                         status = "completed"
                         message = f"patched {path}"
                         applied = True
