@@ -13,19 +13,24 @@ context として渡す必要がある。marketing_server.py で Runner.run_stre
 from __future__ import annotations
 
 import uuid
+import logging
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Optional
 
 from agents import RunContextWrapper, apply_diff, function_tool
 from chatkit.agents import AgentContext, ClientToolCall
 from openai import AsyncOpenAI
+from app.infrastructure.supabase.client import get_supabase
 
 DEFAULT_FILE_NAME = "article.md"
+MARKETING_ARTICLES_TABLE = "marketing_articles"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ArticleState:
     article_id: str
+    conversation_id: str = ""
     title: str = ""
     outline: str = ""
     body: str = ""
@@ -46,6 +51,7 @@ def _load_state(agent_ctx: AgentContext) -> ArticleState:
     raw = meta.get("seo_article") or {}
     return ArticleState(
         article_id=raw.get("article_id") or agent_ctx.thread.id,
+        conversation_id=raw.get("conversation_id") or agent_ctx.thread.id,
         title=raw.get("title") or "",
         outline=raw.get("outline") or "",
         body=raw.get("body") or "",
@@ -60,6 +66,76 @@ async def _save_state(agent_ctx: AgentContext, state: ArticleState) -> None:
     meta["seo_article"] = asdict(state)
     agent_ctx.thread.metadata = meta
     await agent_ctx.store.save_thread(agent_ctx.thread, agent_ctx.request_context)
+
+
+def _sb():
+    try:
+        return get_supabase()
+    except Exception:
+        logger.exception("Failed to initialize Supabase client")
+        raise
+
+
+def _refresh_state_from_db(agent_ctx: AgentContext, state: ArticleState) -> ArticleState:
+    """最新の記事を Supabase から取得し、見つかれば state を更新して返す。"""
+    sb = _sb()
+    article_id = state.article_id or agent_ctx.thread.id
+    conversation_id = state.conversation_id or agent_ctx.thread.id
+
+    res = (
+        sb.table(MARKETING_ARTICLES_TABLE)
+        .select("*")
+        .eq("id", article_id)
+        .limit(1)
+        .execute()
+    )
+    rows = res.data or []
+
+    # article_id で見つからなければ conversation 単位の最新記事を拾う
+    if not rows:
+        res = (
+            sb.table(MARKETING_ARTICLES_TABLE)
+            .select("*")
+            .eq("conversation_id", conversation_id)
+            .order("updated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+
+    if not rows:
+        state.conversation_id = conversation_id
+        return state
+
+    row = rows[0]
+    state.article_id = row.get("id") or state.article_id
+    state.conversation_id = row.get("conversation_id") or conversation_id
+    state.title = row.get("title") or state.title
+    state.outline = row.get("outline") or state.outline
+    state.body = row.get("body_html") or state.body
+    state.language = row.get("language") or state.language
+    state.version = int(row.get("version") or state.version or 0)
+    state.status = row.get("status") or state.status
+    return state
+
+
+def _upsert_article(agent_ctx: AgentContext, state: ArticleState) -> None:
+    """Supabase に記事を永続化する。"""
+    sb = _sb()
+    conversation_id = state.conversation_id or agent_ctx.thread.id
+    payload = {
+        "id": state.article_id,
+        "conversation_id": conversation_id,
+        "title": state.title or None,
+        "outline": state.outline or None,
+        "body_html": state.body or "",
+        "language": state.language or "ja",
+        "version": state.version or 1,
+        "status": state.status or "draft",
+        "metadata": {},
+    }
+    sb.table(MARKETING_ARTICLES_TABLE).upsert(payload).execute()
+    state.conversation_id = conversation_id
 
 
 def _emit_client_tool(agent_ctx: AgentContext, name: str, arguments: Dict[str, Any]) -> None:
@@ -78,6 +154,8 @@ async def seo_open_canvas(
     state = _load_state(agent_ctx)
     if article_id:
         state.article_id = article_id
+    state = _refresh_state_from_db(agent_ctx, state)
+    await _save_state(agent_ctx, state)
     _emit_client_tool(
         agent_ctx,
         "seo_open_canvas",
@@ -88,34 +166,44 @@ async def seo_open_canvas(
             "primaryKeyword": primary_keyword,
         },
     )
-    await _save_state(agent_ctx, state)
     return {"opened": True, "article_id": state.article_id, "mode": mode}
 
 
-@function_tool(name_override="seo_update_canvas", description_override="Push the latest SEO article content to the canvas.")
+@function_tool(
+    name_override="seo_update_canvas",
+    description_override="Push the latest SEO article metadata to the canvas (bodyは内部状態のみ反映、引数では変更しない)。",
+)
 async def seo_update_canvas(
     ctx: RunContextWrapper[AgentContext],
     article_id: Optional[str] = None,
     title: Optional[str] = None,
     outline: Optional[str] = None,
-    body: Optional[str] = None,
-    version: Optional[int] = None,
     status: Optional[str] = None,
 ) -> Dict[str, Any]:
     agent_ctx = _require_agent_ctx(ctx)
     state = _load_state(agent_ctx)
-    if article_id:
+    state.conversation_id = state.conversation_id or agent_ctx.thread.id
+    state = _refresh_state_from_db(agent_ctx, state)
+
+    changed = False
+    if article_id and article_id != state.article_id:
         state.article_id = article_id
+        changed = True
     if title is not None:
         state.title = title
+        changed = True
     if outline is not None:
         state.outline = outline
-    if body is not None:
-        state.body = body
+        changed = True
     if status is not None:
         state.status = status
-    if version is not None:
-        state.version = version
+        changed = True
+
+    if changed:
+        state.version = (state.version or 0) + 1
+        _upsert_article(agent_ctx, state)
+    # body 引数は受け付けない（apply_patch でのみ変更）
+    await _save_state(agent_ctx, state)
     _emit_client_tool(
         agent_ctx,
         "seo_update_canvas",
@@ -142,6 +230,7 @@ async def create_seo_article(
     agent_ctx = _require_agent_ctx(ctx)
     state = ArticleState(
         article_id=str(uuid.uuid4()),
+        conversation_id=agent_ctx.thread.id,
         title=topic or "",
         outline="",
         body="",
@@ -149,7 +238,8 @@ async def create_seo_article(
         version=1,
         status="draft",
     )
-    await _save_state(agent_ctx, state)
+    await _save_state(agent_ctx, state)  # 会話行を先に作成
+    _upsert_article(agent_ctx, state)
     _emit_client_tool(
         agent_ctx,
         "seo_open_canvas",
@@ -167,31 +257,36 @@ async def create_seo_article(
 async def get_seo_article(ctx: RunContextWrapper[AgentContext]) -> Dict[str, Any]:
     agent_ctx = _require_agent_ctx(ctx)
     state = _load_state(agent_ctx)
+    state = _refresh_state_from_db(agent_ctx, state)
+    await _save_state(agent_ctx, state)
     return asdict(state)
 
 
-@function_tool(name_override="save_seo_article", description_override="Persist the SEO article (title/outline/body) and push canvas update.")
+@function_tool(name_override="save_seo_article", description_override="Persist the SEO article (title/outline/status) and push canvas update. Body は apply_patch 専用。")
 async def save_seo_article(
     ctx: RunContextWrapper[AgentContext],
     article_id: Optional[str] = None,
     title: Optional[str] = None,
     outline: Optional[str] = None,
-    body: Optional[str] = None,
     status: Optional[str] = None,
-    ) -> Dict[str, Any]:
+) -> Dict[str, Any]:
     agent_ctx = _require_agent_ctx(ctx)
     state = _load_state(agent_ctx)
+    state.conversation_id = state.conversation_id or agent_ctx.thread.id
+    state = _refresh_state_from_db(agent_ctx, state)
+
     if article_id:
         state.article_id = article_id
     if title is not None:
         state.title = title
     if outline is not None:
         state.outline = outline
-    if body is not None:
-        state.body = body
     if status is not None:
         state.status = status
-    state.version += 1
+
+    state.version = (state.version or 0) + 1
+    _upsert_article(agent_ctx, state)
+    await _save_state(agent_ctx, state)
     _emit_client_tool(
         agent_ctx,
         "seo_update_canvas",
@@ -204,7 +299,6 @@ async def save_seo_article(
             "status": state.status,
         },
     )
-    await _save_state(agent_ctx, state)
     return {
         "article_id": state.article_id,
         "version": state.version,
@@ -222,9 +316,31 @@ async def apply_patch_to_article(
     state = _load_state(agent_ctx)
     if article_id:
         state.article_id = article_id
+    state.conversation_id = state.conversation_id or agent_ctx.thread.id
+    state = _refresh_state_from_db(agent_ctx, state)
 
-    patched_body = await _run_apply_patch(state.body, user_instruction)
+    try:
+        patched_body, applied = await _run_apply_patch(state.body, user_instruction)
+    except Exception as exc:  # noqa: BLE001
+        # 失敗時は状態を一切変えずに通知だけ返す
+        return {
+            "article_id": state.article_id,
+            "version": state.version,
+            "body": state.body,
+            "notice": f"apply_patch failed: {exc}",
+        }
+
+    if not applied:
+        await _save_state(agent_ctx, state)
+        return {
+            "article_id": state.article_id,
+            "version": state.version,
+            "body": state.body,
+            "notice": "No apply_patch_call produced; article unchanged",
+        }
+
     if patched_body.strip() == state.body.strip():
+        await _save_state(agent_ctx, state)
         return {
             "article_id": state.article_id,
             "version": state.version,
@@ -233,7 +349,8 @@ async def apply_patch_to_article(
         }
 
     state.body = patched_body
-    state.version += 1
+    state.version = (state.version or 0) + 1
+    _upsert_article(agent_ctx, state)
     await _save_state(agent_ctx, state)
     _emit_client_tool(
         agent_ctx,
@@ -254,25 +371,29 @@ async def apply_patch_to_article(
     }
 
 
-async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
+async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[str, bool]:
     """apply_patch を公式フローで実行し、差分を apply_diff で適用して返す。
 
     1) responses.create で apply_patch_call を受け取る
     2) operation.diff を apply_diff で適用（記事本文はメモリ上で管理）
     3) それぞれの結果を apply_patch_call_output として返し、モデルに再応答させる
     4) apply_patch_call がなくなるか 3 ラウンド繰り返したら終了
-    失敗時は原文を返し、モデルには失敗メッセージを渡す。
+    成功時: (適用後本文, True) を返す
+    apply_patch_call が一度も無い/適用できない場合: (元本文, False) を返す
+    失敗時は例外を投げる
     """
 
     client = AsyncOpenAI()
     body = current_body
+    applied = False
     pending_input: list[dict[str, Any]] = [
         {
             "role": "system",
             "content": (
                 "You are an editor for a Japanese SEO article written in HTML. Use the "
-                "apply_patch tool and emit update_file operations for article.md only. Provide "
-                "V4A diffs in operation.diff (no new_content). Keep existing sections unless 指示 で削除する場合のみ。"
+                "apply_patch tool and emit update_file operations for article.md only. Prefer "
+                "V4A diffs in operation.diff, but if you cannot produce a diff you may provide "
+                "operation.new_content as the full updated file. Keep existing sections unless 指示 で削除する場合のみ。"
             ),
         },
         {
@@ -312,11 +433,8 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
             _maybe_dump(item) for item in output_items if _maybe_dump(item).get("type") == "apply_patch_call"
         ]
 
-        # apply_patch_call が無ければテキスト回答を拾って終了
+        # apply_patch_call が無ければ終了（本文は変更しない）
         if not apply_calls:
-            maybe_text = _extract_text_content(output_items)
-            if maybe_text:
-                body = maybe_text
             break
 
         # diff を適用して結果を model に返す
@@ -332,15 +450,23 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
                 message = f"Unexpected path {path}; expected {DEFAULT_FILE_NAME}"
             else:
                 diff = op.get("diff") or op.get("patch")
-                if not diff:
-                    message = "Missing diff for update_file"
-                else:
+                new_content = op.get("new_content")
+                if diff:
                     try:
                         body = apply_diff(body, diff, create=(op.get("type") == "create_file"))
                         status = "completed"
                         message = "patched article.md"
+                        applied = True
                     except Exception as exc:  # noqa: BLE001
                         message = f"apply_diff error: {exc}"
+                elif new_content:
+                    # モデルが new_content を返した場合はそのまま置き換え
+                    body = new_content
+                    status = "completed"
+                    message = "replaced article.md with new_content"
+                    applied = True
+                else:
+                    message = "Missing diff or new_content for update_file"
 
             call_outputs.append(
                 {
@@ -355,7 +481,7 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> str:
         pending_input = call_outputs
         prev_response_id = resp.id
 
-    return body
+    return body, applied
 
 
 def _extract_text_content(output_items: list[Any]) -> Optional[str]:
