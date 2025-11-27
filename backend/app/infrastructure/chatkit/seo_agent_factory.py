@@ -18,6 +18,7 @@ from app.infrastructure.chatkit.seo_article_tools import (
     create_seo_article,
     get_seo_article,
     save_seo_article,
+    save_seo_article_body,
     seo_open_canvas,
     seo_update_canvas,
 )
@@ -36,9 +37,10 @@ MARKETING_INSTRUCTIONS = """
 
 ## ツールの使い方
 - 新規作成: `create_seo_article` → 直後に `seo_open_canvas` で右ペインを開く。
-- 途中経過/完了時: `save_seo_article` または `seo_update_canvas` でアウトライン/ステータスを同期する（本文を自前で生成して渡さない）。
+- アウトライン/タイトル: `seo_update_canvas` または `save_seo_article` で同期する（body は渡さない）。
+- 本文初稿: `save_seo_article_body` で全文HTMLを保存し Canvas へ反映（apply_patch は使わない）。
 - 現状取得: `get_seo_article`。
-- 差分編集: 本文編集は **必ず `apply_patch_to_article` 1本**。戻り値 body だけが正とし、`seo_update_canvas` / `save_seo_article` に自前で生成した body を渡さない（同ツールが自動で Canvas へ反映する）。
+- 既存本文の編集: **`apply_patch_to_article` を1回だけ** 呼び、差分で修正する（戻り値 body が正）。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
 - SERP/計測が必要なときだけ Web Search / GA4 / GSC / Ahrefs MCP を呼ぶ。
 
 ## 執筆フロー（推奨）
@@ -46,8 +48,9 @@ MARKETING_INSTRUCTIONS = """
 2) `create_seo_article` で記事IDを確保しキャンバスを開く。
 3) 競合・補足調査が必要なら Web Search/MCP を最小限で実行。
 4) H2/H3 のアウトラインを提示し、`seo_update_canvas` で「アウトライン＋ステータス」だけ右ペインへ送る（本文は送らない）。
-5) 本文はセクション単位で `apply_patch_to_article` を呼んで差分更新。キャンバスへの反映はツール返り値に任せ、チャット側は変更概要のみ報告。
-6) 完了後 `save_seo_article` でステータスだけ確定し、次の編集希望を尋ねる（本文は送らない）。
+5) 本文の初稿を HTML で生成し、`save_seo_article_body` で DB/Cnavas に保存する（apply_patch は使わない）。
+6) 追記・修正が必要になったら `get_seo_article` で最新本文を取得し、`apply_patch_to_article` を1回だけ呼んで差分更新。キャンバスへの反映はツール返り値に任せ、チャット側は変更概要のみ報告。
+7) 完了後 `save_seo_article` でステータスだけ確定し、次の編集希望を尋ねる（本文は送らない）。
 
 ## 編集フロー（差分重視）
 - ユーザーの編集指示を短く要約 → `get_seo_article` で最新本文 → `apply_patch_to_article` を **1回だけ** 呼んで最小差分で修正。
@@ -190,6 +193,7 @@ class MarketingAgentFactory:
                 create_seo_article,
                 get_seo_article,
                 save_seo_article,
+                save_seo_article_body,
                 seo_open_canvas,
                 seo_update_canvas,
                 apply_patch_to_article,

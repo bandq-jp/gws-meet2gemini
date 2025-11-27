@@ -22,7 +22,15 @@ from chatkit.agents import AgentContext, ClientToolCall
 from openai import AsyncOpenAI
 from app.infrastructure.supabase.client import get_supabase
 
-DEFAULT_FILE_NAME = "article.md"
+DEFAULT_FILE_NAME = "article.html"
+ALLOWED_FILE_NAMES = {DEFAULT_FILE_NAME, "article.md", "article_body.html"}
+ALLOWED_STATUSES = {"draft", "in_progress", "published", "archived"}
+STATUS_ALIASES = {
+    "outline_created": "in_progress",
+    "outline_ready": "in_progress",
+    "ready_for_review": "in_progress",
+    "ready": "in_progress",
+}
 MARKETING_ARTICLES_TABLE = "marketing_articles"
 logger = logging.getLogger(__name__)
 
@@ -140,6 +148,18 @@ def _upsert_article(agent_ctx: AgentContext, state: ArticleState) -> None:
 
 def _emit_client_tool(agent_ctx: AgentContext, name: str, arguments: Dict[str, Any]) -> None:
     agent_ctx.client_tool_call = ClientToolCall(name=name, arguments=arguments)
+
+
+def _normalize_status(status: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Validate/normalize status. Returns (normalized_status, warning_or_none)."""
+    if status is None:
+        return None, None
+    if status in ALLOWED_STATUSES:
+        return status, None
+    if status in STATUS_ALIASES:
+        normalized = STATUS_ALIASES[status]
+        return normalized, f"Status '{status}' is not allowed; coerced to '{normalized}'."
+    return None, f"Invalid status '{status}'. Allowed: {sorted(ALLOWED_STATUSES)}"
 
 
 @function_tool(name_override="seo_open_canvas", description_override="Open the SEO article canvas on the client UI.")
@@ -282,7 +302,16 @@ async def save_seo_article(
     if outline is not None:
         state.outline = outline
     if status is not None:
-        state.status = status
+        normalized, warn = _normalize_status(status)
+        if normalized is None:
+            await _save_state(agent_ctx, state)
+            return {
+                "article_id": state.article_id,
+                "version": state.version,
+                "status": state.status,
+                "notice": warn,
+            }
+        state.status = normalized
 
     state.version = (state.version or 0) + 1
     _upsert_article(agent_ctx, state)
@@ -303,6 +332,75 @@ async def save_seo_article(
         "article_id": state.article_id,
         "version": state.version,
         "status": state.status,
+        **({"notice": warn} if status is not None and warn else {}),
+    }
+
+
+@function_tool(
+    name_override="save_seo_article_body",
+    description_override="Save full HTML body of the SEO article without apply_patch. 初稿や上書き専用。本文が既にある場合は overwrite=true で上書き、通常は apply_patch_to_article を使う。",
+)
+async def save_seo_article_body(
+    ctx: RunContextWrapper[AgentContext],
+    body: str,
+    article_id: Optional[str] = None,
+    status: Optional[str] = None,
+    overwrite: bool = False,
+) -> Dict[str, Any]:
+    """初回の本文保存や全文差し替えを apply_patch なしで実行する。
+
+    overwrite=False かつ既存本文がある場合は何もしないで notice を返す。
+    """
+    agent_ctx = _require_agent_ctx(ctx)
+    state = _load_state(agent_ctx)
+    state.conversation_id = state.conversation_id or agent_ctx.thread.id
+    if article_id:
+        state.article_id = article_id
+    state = _refresh_state_from_db(agent_ctx, state)
+
+    if state.body and not overwrite:
+        await _save_state(agent_ctx, state)
+        return {
+            "article_id": state.article_id,
+            "version": state.version,
+            "status": state.status,
+            "notice": "Body already exists; use apply_patch_to_article or set overwrite=true.",
+        }
+
+    state.body = body
+    warn_status: Optional[str] = None
+    if status is not None:
+        normalized, warn = _normalize_status(status)
+        if normalized is None:
+            await _save_state(agent_ctx, state)
+            return {
+                "article_id": state.article_id,
+                "version": state.version,
+                "status": state.status,
+                "notice": warn,
+            }
+        state.status = normalized
+        warn_status = warn
+    state.version = (state.version or 0) + 1
+    _upsert_article(agent_ctx, state)
+    await _save_state(agent_ctx, state)
+    _emit_client_tool(
+        agent_ctx,
+        "seo_update_canvas",
+        {
+            "articleId": state.article_id,
+            "title": state.title,
+            "outline": state.outline,
+            "body": state.body,
+            "version": state.version,
+            "status": state.status,
+        },
+    )
+    return {
+        "article_id": state.article_id,
+        "version": state.version,
+        "status": state.status,
+        **({"notice": warn_status} if warn_status else {}),
     }
 
 
@@ -336,7 +434,7 @@ async def apply_patch_to_article(
             "article_id": state.article_id,
             "version": state.version,
             "body": state.body,
-            "notice": "No apply_patch_call produced; article unchanged",
+            "notice": "No apply_patch operations applied (tool call missing or failed); article unchanged",
         }
 
     if patched_body.strip() == state.body.strip():
@@ -391,7 +489,7 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
             "role": "system",
             "content": (
                 "You are an editor for a Japanese SEO article written in HTML. Use the "
-                "apply_patch tool and emit update_file operations for article.md only. Prefer "
+                f"apply_patch tool and emit update_file operations for {DEFAULT_FILE_NAME} only. Prefer "
                 "V4A diffs in operation.diff, but if you cannot produce a diff you may provide "
                 "operation.new_content as the full updated file. Keep existing sections unless 指示 で削除する場合のみ。"
             ),
@@ -403,7 +501,7 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
                     "type": "input_text",
                     "text": (
                         "Edit the article (HTML). Respond by calling apply_patch with update_file "
-                        "for article.md. Provide the changes as a V4A diff in operation.diff; do "
+                        f"for {DEFAULT_FILE_NAME}. Provide the changes as a V4A diff in operation.diff; do "
                         "NOT include new_content.\n\n"
                         f"Current article (path {DEFAULT_FILE_NAME}):\n" + current_body
                         + "\n\nEdit request:\n" + user_instruction
@@ -446,8 +544,8 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
             message = ""
 
             path = op.get("path") or DEFAULT_FILE_NAME
-            if path != DEFAULT_FILE_NAME:
-                message = f"Unexpected path {path}; expected {DEFAULT_FILE_NAME}"
+            if path not in ALLOWED_FILE_NAMES:
+                message = f"Unexpected path {path}; expected one of {sorted(ALLOWED_FILE_NAMES)}"
             else:
                 diff = op.get("diff") or op.get("patch")
                 new_content = op.get("new_content")
@@ -455,7 +553,7 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
                     try:
                         body = apply_diff(body, diff, create=(op.get("type") == "create_file"))
                         status = "completed"
-                        message = "patched article.md"
+                        message = f"patched {path}"
                         applied = True
                     except Exception as exc:  # noqa: BLE001
                         message = f"apply_diff error: {exc}"
@@ -463,7 +561,7 @@ async def _run_apply_patch(current_body: str, user_instruction: str) -> tuple[st
                     # モデルが new_content を返した場合はそのまま置き換え
                     body = new_content
                     status = "completed"
-                    message = "replaced article.md with new_content"
+                    message = f"replaced {path} with new_content"
                     applied = True
                 else:
                     message = "Missing diff or new_content for update_file"
