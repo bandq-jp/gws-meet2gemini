@@ -43,6 +43,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { ModelAssetSelector } from "@/components/marketing/ModelAssetSelector";
+import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
+import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
@@ -220,7 +223,7 @@ type ChatKitElement = HTMLElement & {
   addEventListener: typeof window.addEventListener;
 };
 
-type ModelAsset = {
+export type ModelAsset = {
   id: string;
   name: string;
   description?: string;
@@ -234,116 +237,6 @@ type ModelAsset = {
   enable_wordpress?: boolean;
   system_prompt_addition?: string | null;
 };
-
-function AssetForm({
-  onSubmit,
-  loading,
-}: {
-  onSubmit: (form: Partial<ModelAsset>) => void;
-  loading: boolean;
-}) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [reasoning, setReasoning] = useState<ModelAsset["reasoning_effort"]>("high");
-  const [verbosity, setVerbosity] = useState<ModelAsset["verbosity"]>("medium");
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [toolFlags, setToolFlags] = useState({
-    enable_web_search: true,
-    enable_code_interpreter: true,
-    enable_ga4: true,
-    enable_gsc: true,
-    enable_ahrefs: true,
-    enable_wordpress: true,
-  });
-
-  const toggleFlag = (key: keyof typeof toolFlags) => {
-    setToolFlags((prev) => ({ ...prev, [key]: !prev[key] }));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSubmit({
-      name,
-      description,
-      reasoning_effort: reasoning,
-      verbosity,
-      system_prompt_addition: systemPrompt || null,
-      ...toolFlags,
-    });
-  };
-
-  return (
-    <form className="space-y-4" onSubmit={handleSubmit}>
-      <div className="space-y-2">
-        <Label className="text-sm">名前</Label>
-        <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="例: 女性転職分析プリセット"
-          required
-        />
-      </div>
-      <div className="space-y-2">
-        <Label className="text-sm">説明（任意）</Label>
-        <Input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="このプリセットの用途"
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-2">
-          <Label className="text-sm">Reasoning Effort</Label>
-          <select
-            className="w-full border rounded px-2 py-1 text-sm"
-            value={reasoning}
-            onChange={(e) => setReasoning(e.target.value as ModelAsset["reasoning_effort"])}
-          >
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-          </select>
-        </div>
-        <div className="space-y-2">
-          <Label className="text-sm">Verbosity</Label>
-          <select
-            className="w-full border rounded px-2 py-1 text-sm"
-            value={verbosity}
-            onChange={(e) => setVerbosity(e.target.value as ModelAsset["verbosity"])}
-          >
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-          </select>
-        </div>
-      </div>
-      <div className="space-y-3">
-        <Label className="text-sm">ツール / MCP</Label>
-        {Object.entries(toolFlags).map(([key, value]) => (
-          <div key={key} className="flex items-center justify-between rounded border px-3 py-2">
-            <span className="text-sm">{key}</span>
-            <Switch checked={value} onCheckedChange={() => toggleFlag(key as keyof typeof toolFlags)} />
-          </div>
-        ))}
-      </div>
-      <div className="space-y-2">
-        <Label className="text-sm">追加システムプロンプト（MARKETING_INSTRUCTIONS の前に挿入）</Label>
-        <textarea
-          className="w-full border rounded px-3 py-2 text-sm min-h-[120px]"
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={4}
-          placeholder="例: 女性向けの記事ではインクルーシブな表現を優先し、統計は最新の厚労省資料を参照すること。"
-        />
-      </div>
-      <DialogFooter>
-        <Button type="submit" disabled={loading}>
-          {loading ? "保存中..." : "保存して選択"}
-        </Button>
-      </DialogFooter>
-    </form>
-  );
-}
 
 function SeoCanvas({ state, isResponding, onApply }: {
   state: CanvasState;
@@ -557,6 +450,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     return "standard";
   });
   const [showAssetDialog, setShowAssetDialog] = useState(false);
+  const [showManageDialog, setShowManageDialog] = useState(false);
   const [savingAsset, setSavingAsset] = useState(false);
   const [canvas, setCanvas] = useState<CanvasState>(() => {
     const stored = loadStoredCanvas(initialThreadId);
@@ -817,12 +711,17 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
   }, [ensureClientSecret, handleSelectAsset]);
 
   const handleSaveAsset = useCallback(
-    async (form: Partial<ModelAsset>) => {
+    async (form: Partial<ModelAsset>, assetId?: string) => {
       setSavingAsset(true);
       try {
         const secret = await ensureClientSecret();
-        const res = await fetch("/api/marketing/model-assets", {
-          method: "POST",
+        const url = assetId
+          ? `/api/marketing/model-assets/${assetId}`
+          : "/api/marketing/model-assets";
+        const method = assetId ? "PUT" : "POST";
+
+        const res = await fetch(url, {
+          method,
           headers: {
             "Content-Type": "application/json",
             "x-marketing-client-secret": secret,
@@ -839,7 +738,9 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
           const filtered = prev.filter((a) => a.id !== saved.id);
           return [saved, ...filtered];
         });
-        handleSelectAsset(saved.id);
+        if (!assetId) {
+          handleSelectAsset(saved.id);
+        }
         setShowAssetDialog(false);
       } catch (err) {
         console.error(err);
@@ -851,6 +752,35 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     [ensureClientSecret, handleSelectAsset]
   );
 
+  const handleDeleteAsset = useCallback(
+    async (assetId: string) => {
+      try {
+        const secret = await ensureClientSecret();
+        const res = await fetch(`/api/marketing/model-assets/${assetId}`, {
+          method: "DELETE",
+          headers: {
+            "x-marketing-client-secret": secret,
+          },
+        });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail?.error || "モデルアセットの削除に失敗しました");
+        }
+        setAssets((prev) => prev.filter((a) => a.id !== assetId));
+        if (selectedAssetId === assetId) {
+          const standardAsset = assets.find((a) => a.id === "standard");
+          if (standardAsset) {
+            handleSelectAsset(standardAsset.id);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+        throw err;
+      }
+    },
+    [ensureClientSecret, selectedAssetId, assets, handleSelectAsset]
+  );
+
   return (
     <>
       <Script
@@ -860,38 +790,45 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       />
       <div className="h-full w-full overflow-hidden bg-background relative">
         {/* モデルアセットセレクター */}
-        <div className="absolute top-2 left-2 z-40 flex items-center gap-2 bg-white/90 backdrop-blur border rounded-lg px-3 py-2 shadow-sm">
-          <span className="text-xs font-semibold text-slate-600">モデルアセット</span>
-          <select
-            className="text-sm border rounded px-2 py-1 bg-white"
-            value={selectedAssetId}
-            onChange={(e) => handleSelectAsset(e.target.value)}
-          >
-            {assets.map((asset) => (
-              <option key={asset.id} value={asset.id}>
-                {asset.name}
-              </option>
-            ))}
-            {!assets.length && <option value="standard">standard</option>}
-          </select>
-          <Dialog open={showAssetDialog} onOpenChange={setShowAssetDialog}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1">
-                <PlusCircle className="h-4 w-4" />
-                新規作成
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-xl">
-              <DialogHeader>
-                <DialogTitle>モデルアセットを作成</DialogTitle>
-              </DialogHeader>
-              <AssetForm onSubmit={handleSaveAsset} loading={savingAsset} />
-            </DialogContent>
-          </Dialog>
+        <div className="absolute top-4 left-4 z-40 flex items-center gap-3">
+          <ModelAssetSelector
+            assets={assets}
+            selectedId={selectedAssetId}
+            onSelect={handleSelectAsset}
+            onManageClick={() => setShowManageDialog(true)}
+            onCreateClick={() => setShowAssetDialog(true)}
+          />
         </div>
 
+        {/* 管理画面Dialog */}
+        <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>
+          <DialogContent className="max-w-6xl max-h-[90vh] p-6">
+            <DialogHeader className="mb-4">
+              <DialogTitle className="text-2xl font-bold">モデルアセット管理</DialogTitle>
+              <p className="text-sm text-muted-foreground mt-2">
+                カスタムプリセットの作成・編集・削除
+              </p>
+            </DialogHeader>
+            <ModelAssetTable
+              assets={assets}
+              onSave={handleSaveAsset}
+              onDelete={handleDeleteAsset}
+            />
+          </DialogContent>
+        </Dialog>
+
+        {/* 新規作成ダイアログ */}
+        <Dialog open={showAssetDialog} onOpenChange={setShowAssetDialog}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>モデルアセットを作成</DialogTitle>
+            </DialogHeader>
+            <ModelAssetForm onSubmit={handleSaveAsset} loading={savingAsset} submitLabel="作成" />
+          </DialogContent>
+        </Dialog>
+
         {tokenError && (
-          <div className="absolute top-2 left-2 right-2 z-50 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-sm">
+          <div className="absolute top-20 left-4 right-4 z-50 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-sm">
             ⚠️ {tokenError}
           </div>
         )}

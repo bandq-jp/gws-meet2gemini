@@ -45,6 +45,18 @@ def upsert_model_asset(payload: Dict[str, Any]) -> Dict[str, Any]:
     return rows[0]
 
 
+def delete_model_asset(asset_id: str) -> bool:
+    """Delete a model asset by id. Returns True if deleted successfully."""
+    if not asset_id:
+        return False
+    # Prevent deletion of standard preset
+    if asset_id == "standard":
+        return False
+    sb = get_supabase()
+    res = sb.table(TABLE).delete().eq("id", asset_id).execute()
+    return bool(res.data)
+
+
 def set_thread_model_asset(thread_id: str, asset_id: str | None) -> None:
     """Persist selected model asset on conversation metadata."""
     if not thread_id or not asset_id:

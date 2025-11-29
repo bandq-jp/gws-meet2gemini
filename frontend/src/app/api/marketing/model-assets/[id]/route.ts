@@ -16,12 +16,13 @@ const BACKEND_BASE =
   derivedBaseFromPublic ||
   DEFAULT_BASE;
 
-const BACKEND_URL = `${BACKEND_BASE.replace(/\/$/, "")}/api/v1/marketing/model-assets`;
 const CLIENT_SECRET_HEADER = "x-marketing-client-secret";
 type DuplexRequestInit = RequestInit & { duplex?: "half" };
 
-async function forward(request: NextRequest) {
-  if (!BACKEND_URL) {
+async function forward(request: NextRequest, id: string) {
+  const backendUrl = `${BACKEND_BASE.replace(/\/$/, "")}/api/v1/marketing/model-assets/${id}`;
+
+  if (!backendUrl) {
     return NextResponse.json(
       { error: "MARKETING_CHATKIT_BACKEND_URL is not configured" },
       { status: 500 }
@@ -40,35 +41,42 @@ async function forward(request: NextRequest) {
   const init: DuplexRequestInit = {
     method: request.method,
     headers,
-    body: request.method === "GET" ? undefined : request.body,
+    body: request.method === "GET" || request.method === "DELETE" ? undefined : request.body,
     cache: "no-store",
   };
   if (init.body) {
     init.duplex = "half";
   }
 
-  const res = await fetch(BACKEND_URL, init);
+  const res = await fetch(backendUrl, init);
 
   const text = await res.text();
   const nextHeaders = new Headers(res.headers);
   nextHeaders.set("Cache-Control", "no-store");
-  // avoid mismatched content-length when streaming
   nextHeaders.delete("content-length");
   return new NextResponse(text, { status: res.status, headers: nextHeaders });
 }
 
-export async function GET(request: NextRequest) {
-  return forward(request);
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  return forward(request, id);
 }
 
-export async function POST(request: NextRequest) {
-  return forward(request);
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  return forward(request, id);
 }
 
-export async function PUT(request: NextRequest) {
-  return forward(request);
-}
-
-export async function DELETE(request: NextRequest) {
-  return forward(request);
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  return forward(request, id);
 }

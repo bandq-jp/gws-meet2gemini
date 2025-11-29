@@ -12,6 +12,8 @@ from app.infrastructure.chatkit.context import MarketingRequestContext
 from app.infrastructure.chatkit.model_assets import (
     list_model_assets,
     upsert_model_asset,
+    get_model_asset,
+    delete_model_asset,
 )
 from app.infrastructure.chatkit.marketing_server import get_marketing_chat_server
 from app.infrastructure.config.settings import get_settings
@@ -144,3 +146,83 @@ async def create_or_update_model_asset(
 
     result = upsert_model_asset(data)
     return {"data": result}
+
+
+@router.get("/model-assets/{asset_id}")
+async def get_model_asset_by_id(
+    asset_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    asset = get_model_asset(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+    return {"data": asset}
+
+
+@router.put("/model-assets/{asset_id}")
+async def update_model_asset(
+    asset_id: str,
+    payload: dict,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    # Verify asset exists
+    existing = get_model_asset(asset_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+
+    # Prevent updating standard preset
+    if asset_id == "standard":
+        raise HTTPException(status_code=400, detail="Cannot update standard preset")
+
+    allowed_keys = {
+        "name",
+        "description",
+        "base_model",
+        "reasoning_effort",
+        "verbosity",
+        "enable_web_search",
+        "enable_code_interpreter",
+        "enable_ga4",
+        "enable_gsc",
+        "enable_ahrefs",
+        "enable_wordpress",
+        "system_prompt_addition",
+        "metadata",
+    }
+    data = {k: v for k, v in payload.items() if k in allowed_keys}
+    data["id"] = asset_id  # Ensure ID is preserved
+
+    if "name" in data and not data["name"]:
+        raise HTTPException(status_code=400, detail="name cannot be empty")
+
+    # normalize verbosity to accepted values (low/medium/high)
+    verbosity = data.get("verbosity")
+    if verbosity == "short":
+        data["verbosity"] = "low"
+    elif verbosity == "long":
+        data["verbosity"] = "high"
+    elif verbosity and verbosity not in ("low", "medium", "high"):
+        raise HTTPException(status_code=400, detail="verbosity must be low|medium|high")
+
+    reasoning = data.get("reasoning_effort")
+    if reasoning and reasoning not in ("low", "medium", "high"):
+        raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
+
+    result = upsert_model_asset(data)
+    return {"data": result}
+
+
+@router.delete("/model-assets/{asset_id}")
+async def delete_model_asset_by_id(
+    asset_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    # Prevent deletion of standard preset
+    if asset_id == "standard":
+        raise HTTPException(status_code=400, detail="Cannot delete standard preset")
+
+    success = delete_model_asset(asset_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+
+    return {"message": "Model asset deleted successfully"}
