@@ -42,6 +42,7 @@ MARKETING_INSTRUCTIONS = """
 - 最新状態の取得が必要なら: `get_seo_article`。
 - 既存本文の差分編集が必要なら: `apply_patch_to_article` を1回だけ呼ぶ（戻り値 body を正とする）。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
 - SERP/計測が必要なときだけ Web Search / GA4 / GSC / Ahrefs MCP を呼ぶ。
+- 自社サイトの投稿・公開情報が必要なときだけ WordPress MCP を呼ぶ（閲覧系アビリティのみ）。
 - ステータス更新が必要な場合のみ `save_seo_article` を呼ぶ。`status` は `draft` / `in_progress` / `published` / `archived` のいずれかを使い、その他の値は使わない（公式の許可リスト）。
 
 ## 執筆フロー（推奨。必要に応じてスキップ可）
@@ -66,12 +67,13 @@ MARKETING_INSTRUCTIONS = """
 - **チャット欄には本文全文を貼らない。** アウトラインとステータス更新は `seo_update_canvas` / `save_seo_article` でキャンバスへ送り、本文の変更は `apply_patch_to_article` だけで行う。チャット側は進捗と変更概要のみ。
 - 本文は **常にHTMLで生成** し、差分適用は `apply_patch_to_article` の V4A diff で行う。`seo_update_canvas` / `save_seo_article` に本文を渡さない。
 
-## SEO計測・調査タスク（Ahrefs / GSC / GA4 を使う場合）
+## SEO計測・調査タスク（Ahrefs / GSC / GA4 / WordPress を使う場合）
 以下の追加指示は、ユーザーが計測・調査を求めたときだけ実行すること。回答は日本語で。
 1. Ahrefs を使って現状のSEO指標を初期分析し、着目ポイントを理由付きで示す。
 2. 追加で深掘りすべき項目を明示し、理由を説明する。
 3. GSC / GA4 でどのデータを確認するかを示し、それで何が分かるかを説明し、得られた結果をまとめる。
 4. 全体を総括し、課題と次アクションを分かりやすく提示する（専門用語には簡単な補足を）。
+5. 必要に応じて WordPress MCP で記事やメタ情報の現状を確認し、改善案の根拠にする（公開/下書きなど状態確認のみ行う）。
 出力形式: 見出し付きステップ（例: 1. Ahrefsを用いた初期分析）、箇条書き・表を活用し、根拠データを具体的に引用する。
 対象アカウント/プロパティ（必要時のみ参照）:
 - GA4: hitocareer.com (ID: 423714093) / achievehr.jp (ID: 502875325)
@@ -166,6 +168,12 @@ GSC_ALLOWED_TOOLS = [
     "delete_sitemap",
     "manage_sitemaps",
     "get_creator_info",
+]
+
+WORDPRESS_ALLOWED_TOOLS = [
+    "mcp-adapter-discover-abilities",
+    "mcp-adapter-get-ability-info",
+    "mcp-adapter-execute-ability",
 ]
 
 
@@ -285,6 +293,24 @@ class MarketingAgentFactory:
                         "require_approval": "never",
                         "headers": {
                             "x-api-key": self._settings.gsc_mcp_api_key,
+                        },
+                    }
+                )
+            )
+        if (
+            self._settings.wordpress_mcp_server_url
+            and self._settings.wordpress_mcp_authorization
+        ):
+            hosted.append(
+                HostedMCPTool(
+                    tool_config={
+                        "type": "mcp",
+                        "server_label": "wordpress",
+                        "server_url": self._settings.wordpress_mcp_server_url,
+                        "allowed_tools": WORDPRESS_ALLOWED_TOOLS,
+                        "require_approval": "never",
+                        "headers": {
+                            "Authorization": self._settings.wordpress_mcp_authorization
                         },
                     }
                 )
