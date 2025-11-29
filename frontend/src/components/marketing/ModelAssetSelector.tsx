@@ -16,7 +16,6 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Check,
   ChevronsUpDown,
@@ -125,10 +124,10 @@ export function ModelAssetSelector({
       <PopoverContent className="w-[400px] p-0" align="start">
         <Command>
           <CommandInput placeholder="モデルを検索..." className="h-9" />
-          <CommandList>
+          <CommandList className="max-h-[450px] overflow-y-auto">
             <CommandEmpty>モデルが見つかりません</CommandEmpty>
             <CommandGroup>
-              <ScrollArea className="max-h-[300px]">
+              <div className="max-h-[280px] overflow-y-auto">
                 {assets.map((asset) => {
                   const enabledTools = getEnabledTools(asset);
                   const isStandard = asset.id === "standard";
@@ -203,7 +202,7 @@ export function ModelAssetSelector({
                     </CommandItem>
                   );
                 })}
-              </ScrollArea>
+              </div>
             </CommandGroup>
             <CommandSeparator />
             <CommandGroup>
