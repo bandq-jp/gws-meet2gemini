@@ -3,14 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Card } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +50,10 @@ export type ModelAsset = {
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
   system_prompt_addition?: string | null;
+   visibility?: "public" | "private";
+   created_by?: string | null;
+   created_by_email?: string | null;
+   created_by_name?: string | null;
 };
 
 type Props = {
@@ -86,7 +83,8 @@ export function ModelAssetTable({ assets, onSave, onDelete }: Props) {
     return (
       asset.name.toLowerCase().includes(query) ||
       asset.description?.toLowerCase().includes(query) ||
-      asset.id.toLowerCase().includes(query)
+      asset.id.toLowerCase().includes(query) ||
+      asset.created_by_email?.toLowerCase().includes(query || "")
     );
   });
 
@@ -142,138 +140,127 @@ export function ModelAssetTable({ assets, onSave, onDelete }: Props) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* ヘッダー */}
       <div className="flex items-center justify-between gap-4">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="名前、説明、IDで検索..."
+            placeholder="名前、説明、ID、作成者で検索"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
           />
         </div>
-        <Button onClick={() => setShowCreateDialog(true)} size="default">
-          <Plus className="h-4 w-4 mr-2" />
+        <Button onClick={() => setShowCreateDialog(true)} size="default" className="gap-2">
+          <Plus className="h-4 w-4" />
           新規作成
         </Button>
       </div>
 
-      {/* テーブル */}
-      <div className="rounded-md border">
-        <ScrollArea className="h-[500px]">
-          <Table>
-            <TableHeader className="sticky top-0 bg-muted/50 backdrop-blur">
-              <TableRow>
-                <TableHead className="w-[250px]">モデル名</TableHead>
-                <TableHead className="w-[150px]">設定</TableHead>
-                <TableHead>有効なツール</TableHead>
-                <TableHead className="text-right w-[100px]">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredAssets.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="h-24 text-center">
-                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                      <Search className="h-8 w-8 opacity-40" />
-                      <p className="text-sm">
-                        {searchQuery
-                          ? "検索結果が見つかりませんでした"
-                          : "モデルアセットがありません"}
-                      </p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredAssets.map((asset) => {
-                  const enabledTools = getEnabledTools(asset);
-                  const isStandard = asset.id === "standard";
+      {/* List */}
+      <ScrollArea className="h-[520px] pr-1">
+        <div className="space-y-3">
+          {filteredAssets.length === 0 && (
+            <Card className="p-6 text-center text-muted-foreground">
+              <div className="flex flex-col items-center gap-2">
+                <Search className="h-8 w-8 opacity-40" />
+                <p className="text-sm">
+                  {searchQuery ? "検索結果が見つかりませんでした" : "モデルアセットがありません"}
+                </p>
+              </div>
+            </Card>
+          )}
 
-                  return (
-                    <TableRow key={asset.id} className="group">
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            {isStandard && (
-                              <Sparkles className="h-4 w-4 text-primary shrink-0" />
-                            )}
-                            <span className="font-medium">{asset.name}</span>
-                          </div>
-                          {asset.description && (
-                            <p className="text-xs text-muted-foreground line-clamp-2">
-                              {asset.description}
-                            </p>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1.5">
-                          <Badge variant="outline" className="w-fit text-xs font-mono">
-                            推論: {asset.reasoning_effort || "high"}
-                          </Badge>
-                          <Badge variant="outline" className="w-fit text-xs font-mono">
-                            詳細: {asset.verbosity || "medium"}
-                          </Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {enabledTools.length > 0 ? (
-                            enabledTools.slice(0, 4).map((tool) => {
-                              const config = TOOL_ICONS[tool];
-                              return (
-                                <Badge
-                                  key={tool}
-                                  variant="secondary"
-                                  className="text-xs h-6 px-2 flex items-center gap-1"
-                                >
-                                  {config.icon}
-                                  <span>{config.label}</span>
-                                </Badge>
-                              );
-                            })
-                          ) : (
-                            <span className="text-xs text-muted-foreground">なし</span>
-                          )}
-                          {enabledTools.length > 4 && (
-                            <Badge variant="secondary" className="text-xs h-6 px-2">
-                              +{enabledTools.length - 4}
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleEdit(asset)}
-                            className="h-8 w-8 p-0"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          {!isStandard && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setDeletingAssetId(asset.id)}
-                              className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+          {filteredAssets.map((asset) => {
+            const enabledTools = getEnabledTools(asset);
+            const isStandard = asset.id === "standard";
+
+            return (
+              <Card key={asset.id} className="p-4 shadow-sm hover:shadow-md transition border-slate-200">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="flex-1 min-w-[220px] space-y-1">
+                    <div className="flex items-center gap-2 text-lg font-semibold">
+                      {isStandard && <Sparkles className="h-4 w-4 text-primary" />}
+                      <span className="truncate">{asset.name}</span>
+                    </div>
+                    {asset.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2">{asset.description}</p>
+                    )}
+                  </div>
+
+                  <div className="flex flex-col gap-1 text-xs font-mono text-slate-700">
+                    <Badge variant="outline" className="w-fit">推論: {asset.reasoning_effort || "high"}</Badge>
+                    <Badge variant="outline" className="w-fit">詳細: {asset.verbosity || "medium"}</Badge>
+                  </div>
+
+                  <div className="flex flex-col gap-1 min-w-[160px]">
+                    <Badge
+                      variant={asset.visibility === "private" ? "outline" : "secondary"}
+                      className="w-fit text-xs"
+                    >
+                      {asset.visibility === "private" ? "Private" : "Public"}
+                    </Badge>
+                    {asset.created_by_email && (
+                      <p className="text-[11px] text-muted-foreground">
+                        作成: {asset.created_by_name || asset.created_by_email}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-[200px]">
+                    <div className="flex flex-wrap gap-1">
+                      {enabledTools.length > 0 ? (
+                        enabledTools.slice(0, 6).map((tool) => {
+                          const config = TOOL_ICONS[tool];
+                          return (
+                            <Badge
+                              key={tool}
+                              variant="secondary"
+                              className="text-xs h-6 px-2 flex items-center gap-1"
                             >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </div>
+                              {config.icon}
+                              <span>{config.label}</span>
+                            </Badge>
+                          );
+                        })
+                      ) : (
+                        <span className="text-xs text-muted-foreground">ツールなし</span>
+                      )}
+                      {enabledTools.length > 6 && (
+                        <Badge variant="secondary" className="text-xs h-6 px-2">
+                          +{enabledTools.length - 6}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 ml-auto">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleEdit(asset)}
+                      className="h-9 w-9"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    {!isStandard && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setDeletingAssetId(asset.id)}
+                        className="h-9 w-9 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      </ScrollArea>
 
       <div className="text-xs text-muted-foreground">
         {filteredAssets.length} 件のモデルアセット

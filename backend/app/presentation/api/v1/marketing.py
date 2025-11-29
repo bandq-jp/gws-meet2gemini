@@ -102,7 +102,7 @@ async def get_model_assets(
     context: MarketingRequestContext = Depends(require_marketing_context),
 ):
     # context is validated; assets are shared globally
-    assets = list_model_assets()
+    assets = list_model_assets(context)
     for asset in assets:
         asset["verbosity"] = _normalize_verbosity_to_client(asset.get("verbosity"))
     return {"data": assets}
@@ -128,6 +128,7 @@ async def create_or_update_model_asset(
         "enable_wordpress",
         "system_prompt_addition",
         "metadata",
+        "visibility",
     }
     data = {k: v for k, v in payload.items() if k in allowed_keys}
     if "name" not in data or not data["name"]:
@@ -135,11 +136,16 @@ async def create_or_update_model_asset(
 
     data["verbosity"] = _normalize_verbosity_to_db(data.get("verbosity"))
 
+    visibility = data.get("visibility") or "public"
+    if visibility not in ("public", "private"):
+        raise HTTPException(status_code=400, detail="visibility must be public|private")
+    data["visibility"] = visibility
+
     reasoning = data.get("reasoning_effort")
     if reasoning and reasoning not in ("low", "medium", "high"):
         raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
 
-    result = upsert_model_asset(data)
+    result = upsert_model_asset(data, context=context)
     result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
     return {"data": result}
 
@@ -149,7 +155,7 @@ async def get_model_asset_by_id(
     asset_id: str,
     context: MarketingRequestContext = Depends(require_marketing_context),
 ):
-    asset = get_model_asset(asset_id)
+    asset = get_model_asset(asset_id, context=context)
     if not asset:
         raise HTTPException(status_code=404, detail="Model asset not found")
     asset["verbosity"] = _normalize_verbosity_to_client(asset.get("verbosity"))
@@ -163,7 +169,7 @@ async def update_model_asset(
     context: MarketingRequestContext = Depends(require_marketing_context),
 ):
     # Verify asset exists
-    existing = get_model_asset(asset_id)
+    existing = get_model_asset(asset_id, context=context)
     if not existing:
         raise HTTPException(status_code=404, detail="Model asset not found")
 
@@ -185,6 +191,7 @@ async def update_model_asset(
         "enable_wordpress",
         "system_prompt_addition",
         "metadata",
+        "visibility",
     }
     data = {k: v for k, v in payload.items() if k in allowed_keys}
     data["id"] = asset_id  # Ensure ID is preserved
@@ -194,11 +201,16 @@ async def update_model_asset(
 
     data["verbosity"] = _normalize_verbosity_to_db(data.get("verbosity"))
 
+    visibility = data.get("visibility") or existing.get("visibility") or "public"
+    if visibility not in ("public", "private"):
+        raise HTTPException(status_code=400, detail="visibility must be public|private")
+    data["visibility"] = visibility
+
     reasoning = data.get("reasoning_effort")
     if reasoning and reasoning not in ("low", "medium", "high"):
         raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
 
-    result = upsert_model_asset(data)
+    result = upsert_model_asset(data, context=context)
     result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
     return {"data": result}
 
@@ -212,6 +224,10 @@ async def delete_model_asset_by_id(
     if asset_id == "standard":
         raise HTTPException(status_code=400, detail="Cannot delete standard preset")
 
+    asset = get_model_asset(asset_id, context=context)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+
     success = delete_model_asset(asset_id)
     if not success:
         raise HTTPException(status_code=404, detail="Model asset not found")
@@ -220,12 +236,13 @@ async def delete_model_asset_by_id(
 def _normalize_verbosity_to_db(value: str | None) -> str | None:
     if value is None:
         return None
-    if value == "low":
-        return "short"
-    if value == "high":
-        return "long"
-    if value in ("medium", "short", "long"):
+    if value in ("low", "medium", "high"):
         return value
+    # backward compatibility with older stored values
+    if value == "short":
+        return "low"
+    if value == "long":
+        return "high"
     raise HTTPException(status_code=400, detail="verbosity must be low|medium|high")
 
 

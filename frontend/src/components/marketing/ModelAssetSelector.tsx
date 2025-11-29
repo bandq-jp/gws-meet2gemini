@@ -16,7 +16,6 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Check,
@@ -32,6 +31,7 @@ import {
   FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 
 export type ModelAsset = {
   id: string;
@@ -46,6 +46,10 @@ export type ModelAsset = {
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
   system_prompt_addition?: string | null;
+  visibility?: "public" | "private";
+  created_by?: string | null;
+  created_by_email?: string | null;
+  created_by_name?: string | null;
 };
 
 type Props = {
@@ -165,6 +169,17 @@ export function ModelAssetSelector({
                           {asset.description}
                         </p>
                       )}
+
+                      <div className="flex items-center gap-2 ml-6 text-[11px] text-muted-foreground">
+                        <Badge variant={asset.visibility === "private" ? "outline" : "secondary"} className="h-5 px-2">
+                          {asset.visibility === "private" ? "Private" : "Public"}
+                        </Badge>
+                        {asset.created_by_email && (
+                          <span className="truncate" title={asset.created_by_email}>
+                            作成: {asset.created_by_name || asset.created_by_email}
+                          </span>
+                        )}
+                      </div>
 
                       {enabledTools.length > 0 && (
                         <div className="flex flex-wrap gap-1 ml-6">

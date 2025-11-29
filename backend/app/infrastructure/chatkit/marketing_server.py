@@ -69,7 +69,10 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                 metadata["model_asset_id"] = context.model_asset_id
             except Exception:
                 logger.exception("Failed to persist model_asset_id on thread %s", thread.id)
-        asset = get_model_asset(asset_id)
+        asset = get_model_asset(asset_id, context=context)
+        if not asset:
+            logger.warning("model asset %s not found; falling back to standard", asset_id)
+            asset = get_model_asset("standard", context=context)
         agent = self._agent_factory.build_agent(asset=asset)
         run_config = RunConfig(
             trace_metadata={

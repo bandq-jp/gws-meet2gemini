@@ -24,25 +24,24 @@ type ResolvedUser = {
 };
 
 async function resolveUser(): Promise<ResolvedUser | null> {
+  // 1) Try real Clerk session first (even in dev) so actual logged-in users win
+  const { userId } = await auth();
+  if (userId) {
+    const user = await currentUser();
+    const email =
+      user?.primaryEmailAddress?.emailAddress ||
+      user?.emailAddresses?.[0]?.emailAddress;
+    if (email) {
+      return { userId, email, name: user?.fullName };
+    }
+  }
+
+  // 2) Fall back to dev impersonation only when explicitly enabled
   if (DEV_AUTH_ENABLED && DEV_EMAIL) {
     return { userId: DEV_USER_ID, email: DEV_EMAIL, name: DEV_NAME };
   }
 
-  const { userId } = await auth();
-  if (!userId) {
-    return null;
-  }
-
-  const user = await currentUser();
-  const email =
-    user?.primaryEmailAddress?.emailAddress ||
-    user?.emailAddresses?.[0]?.emailAddress;
-
-  if (!email) {
-    return null;
-  }
-
-  return { userId, email, name: user?.fullName };
+  return null;
 }
 
 export async function POST() {

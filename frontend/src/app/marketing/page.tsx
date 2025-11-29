@@ -236,6 +236,10 @@ export type ModelAsset = {
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
   system_prompt_addition?: string | null;
+  visibility?: "public" | "private";
+  created_by?: string | null;
+  created_by_email?: string | null;
+  created_by_name?: string | null;
 };
 
 function SeoCanvas({ state, isResponding, onApply }: {
@@ -698,7 +702,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         const withDefault =
           list.length && list.find((a) => a.id === "standard")
             ? list
-            : [{ id: "standard", name: "スタンダード" } as ModelAsset, ...list];
+            : [{ id: "standard", name: "スタンダード", visibility: "public" } as ModelAsset, ...list];
         setAssets(withDefault);
         if (withDefault.length && !withDefault.find((a) => a.id === currentAssetIdRef.current)) {
           handleSelectAsset(withDefault[0].id);

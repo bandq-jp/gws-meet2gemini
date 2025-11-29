@@ -30,6 +30,10 @@ export type ModelAsset = {
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
   system_prompt_addition?: string | null;
+  visibility?: "public" | "private";
+  created_by?: string | null;
+  created_by_email?: string | null;
+  created_by_name?: string | null;
 };
 
 type Props = {
@@ -95,6 +99,9 @@ export function ModelAssetForm({
   const [systemPrompt, setSystemPrompt] = useState(
     initialValues?.system_prompt_addition || ""
   );
+  const [visibility, setVisibility] = useState<ModelAsset["visibility"]>(
+    initialValues?.visibility || "public"
+  );
   const [toolFlags, setToolFlags] = useState({
     enable_web_search: initialValues?.enable_web_search ?? true,
     enable_code_interpreter: initialValues?.enable_code_interpreter ?? true,
@@ -116,6 +123,7 @@ export function ModelAssetForm({
       reasoning_effort: reasoning,
       verbosity,
       system_prompt_addition: systemPrompt || null,
+      visibility,
       ...toolFlags,
     });
   };
@@ -192,6 +200,34 @@ export function ModelAssetForm({
               </SelectContent>
             </Select>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* 公開設定 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">公開範囲</CardTitle>
+          <CardDescription className="text-xs">
+            社内全体に共有するか、あなた専用にするかを選択
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-3">
+          <Button
+            type="button"
+            variant={visibility === "public" ? "default" : "outline"}
+            className="justify-start"
+            onClick={() => setVisibility("public")}
+          >
+            🌐 社内共有 (Public)
+          </Button>
+          <Button
+            type="button"
+            variant={visibility === "private" ? "default" : "outline"}
+            className="justify-start"
+            onClick={() => setVisibility("private")}
+          >
+            🔒 自分のみ (Private)
+          </Button>
         </CardContent>
       </Card>
 

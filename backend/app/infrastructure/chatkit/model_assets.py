@@ -4,40 +4,62 @@ from typing import Any, Dict, Optional, List
 from uuid import uuid4
 
 from app.infrastructure.supabase.client import get_supabase
+from app.infrastructure.chatkit.context import MarketingRequestContext
 
 
 TABLE = "marketing_model_assets"
 
 
-def get_model_asset(asset_id: str | None) -> Optional[Dict[str, Any]]:
-    """Fetch a model asset preset by id. Returns None if not found."""
+def get_model_asset(asset_id: str | None, context: Optional["MarketingRequestContext"] = None) -> Optional[Dict[str, Any]]:
+    """Fetch a model asset preset by id, honoring visibility when context is provided."""
     if not asset_id:
         return None
     sb = get_supabase()
-    res = (
-        sb.table(TABLE)
-        .select("*")
-        .eq("id", asset_id)
-        .limit(1)
-        .execute()
-    )
+
+    query = sb.table(TABLE).select("*").eq("id", asset_id)
+    if context:
+        # Allow access if public/legacy (null) or owner
+        or_filter = "visibility.eq.public,visibility.is.null,created_by.eq." + context.user_id
+        query = query.or_(or_filter)
+
+    res = query.limit(1).execute()
     rows = res.data or []
     if not rows:
         return None
-    return rows[0]
+    asset = rows[0]
+    if context and asset.get("visibility") == "private" and asset.get("created_by") != context.user_id:
+        return None
+    return asset
 
 
-def list_model_assets() -> List[Dict[str, Any]]:
+def list_model_assets(context: Optional["MarketingRequestContext"] = None) -> List[Dict[str, Any]]:
     sb = get_supabase()
-    res = sb.table(TABLE).select("*").order("created_at", desc=True).execute()
+    if context:
+        or_filter = "visibility.eq.public,visibility.is.null,created_by.eq." + context.user_id
+        res = (
+            sb.table(TABLE)
+            .select("*")
+            .or_(or_filter)
+            .order("created_at", desc=True)
+            .execute()
+        )
+    else:
+        res = sb.table(TABLE).select("*").order("created_at", desc=True).execute()
     return res.data or []
 
 
-def upsert_model_asset(payload: Dict[str, Any]) -> Dict[str, Any]:
+def upsert_model_asset(payload: Dict[str, Any], context: Optional["MarketingRequestContext"] = None) -> Dict[str, Any]:
     sb = get_supabase()
     data = payload.copy()
     if not data.get("id"):
         data["id"] = str(uuid4())
+
+    data.setdefault("visibility", "public")
+    if context:
+        data.setdefault("created_by", context.user_id)
+        data.setdefault("created_by_email", context.user_email)
+        data.setdefault("created_by_name", context.user_name)
+
     res = sb.table(TABLE).upsert(data, returning="representation").execute()
     rows = res.data or []
     if not rows:
