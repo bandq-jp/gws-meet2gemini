@@ -470,7 +470,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて",
       "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して",
       "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて",
-      "BtoB SaaS 導入メリットに関するSEO記事を3000文字で下書きから書いて",
+      "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて",
     ],
     []
   );
@@ -546,7 +546,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         prompts: marketingPrompts.map((p) => ({ label: p, prompt: p })),
       },
       composer: {
-        placeholder: "例: BtoB SaaS導入メリットについてSEO記事を書いて",
+        placeholder: "例: WordPressの過去記事を参考に『エンジニア 転職 失敗』記事を書いて",
         attachments: { enabled: false },
       },
       disclaimer: {

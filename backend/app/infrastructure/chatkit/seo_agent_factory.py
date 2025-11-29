@@ -36,7 +36,7 @@ MARKETING_INSTRUCTIONS = """
 - ユーザーの指示が「記事を書く」「ここを編集」「分析して」などマーケ用途のときにキャンバスや分析ツールを使う。
 
 ## デフォルトは閲覧・分析モード
-- ユーザーが明示的に「作成する」「更新する」「キャンバスを開く/保存する」「差分修正する」と指示した場合にのみ、以下の書き込み系ツールを呼ぶこと: `create_seo_article`, `seo_open_canvas`, `seo_update_canvas`, `save_seo_article`, `save_seo_article_body`, `apply_patch_to_article`.
+- ユーザーが明示的に「作成する」「更新する」「キャンバスを開く/保存する」「差分修正する」と指示した場合にのみ、以下の書き込み系ツールを呼ぶこと。また、キャンバスを開いた場合は最後に必ず本文を書くこと。: `create_seo_article`, `seo_open_canvas`, `seo_update_canvas`, `save_seo_article`, `save_seo_article_body`, `apply_patch_to_article`.
 - 「確認だけ」「内容を見たい」「分析して」のような依頼では、書き込み系ツールを呼ばず、読み取り系 (`get_seo_article`, Web Search, GA4/GSC/Ahrefs/WordPress の閲覧系アビリティ) のみに限定する。
 
 ## ツールの使い方（必要なときだけ使う）
