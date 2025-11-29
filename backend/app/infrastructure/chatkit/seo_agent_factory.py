@@ -42,6 +42,7 @@ MARKETING_INSTRUCTIONS = """
 - 最新状態の取得が必要なら: `get_seo_article`。
 - 既存本文の差分編集が必要なら: `apply_patch_to_article` を1回だけ呼ぶ（戻り値 body を正とする）。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
 - SERP/計測が必要なときだけ Web Search / GA4 / GSC / Ahrefs MCP を呼ぶ。
+- ステータス更新が必要な場合のみ `save_seo_article` を呼ぶ。`status` は `draft` / `in_progress` / `published` / `archived` のいずれかを使い、その他の値は使わない（公式の許可リスト）。
 
 ## 執筆フロー（推奨。必要に応じてスキップ可）
 1) ユーザーの検索意図・主要キーワード・ターゲットを短く確認。

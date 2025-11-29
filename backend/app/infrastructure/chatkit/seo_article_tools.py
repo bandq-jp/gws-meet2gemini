@@ -30,6 +30,7 @@ STATUS_ALIASES = {
     "outline_ready": "in_progress",
     "ready_for_review": "in_progress",
     "ready": "in_progress",
+    "drafting": "draft",
 }
 MARKETING_ARTICLES_TABLE = "marketing_articles"
 logger = logging.getLogger(__name__)
