@@ -23,6 +23,10 @@ from app.infrastructure.chatkit.tool_events import (
     ToolUsageTracker,
     instrument_run_result,
 )
+from app.infrastructure.chatkit.model_assets import (
+    get_model_asset,
+    set_thread_model_asset,
+)
 from app.infrastructure.chatkit.seo_agent_factory import (
     MARKETING_WORKFLOW_ID,
     MarketingAgentFactory,
@@ -57,12 +61,22 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             history_items.append(input_user_message)
 
         agent_input = await simple_to_agent_input(history_items)
-        agent = self._agent_factory.build_agent()
+        metadata = thread.metadata or {}
+        asset_id = context.model_asset_id or metadata.get("model_asset_id") or "standard"
+        if context.model_asset_id and context.model_asset_id != metadata.get("model_asset_id"):
+            try:
+                set_thread_model_asset(thread.id, context.model_asset_id)
+                metadata["model_asset_id"] = context.model_asset_id
+            except Exception:
+                logger.exception("Failed to persist model_asset_id on thread %s", thread.id)
+        asset = get_model_asset(asset_id)
+        agent = self._agent_factory.build_agent(asset=asset)
         run_config = RunConfig(
             trace_metadata={
                 "__trace_source__": "marketing-chatkit",
                 "workflow_id": self._workflow_id,
                 "user": context.user_email,
+                "workflow_asset": asset_id,
             }
         )
 

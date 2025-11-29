@@ -112,11 +112,15 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         self, thread: ThreadMetadata, context: MarketingRequestContext
     ) -> None:
         sb = self._client()
+        metadata = thread.metadata or {}
+        # Inject model asset id from context if provided and not already set
+        if context.model_asset_id and not metadata.get("model_asset_id"):
+            metadata = {**metadata, "model_asset_id": context.model_asset_id}
         payload = {
             "id": thread.id,
             "title": thread.title or f"{context.user_name or 'マーケティング'}のチャット",
             "status": getattr(thread.status, "type", "active"),
-            "metadata": thread.metadata,
+            "metadata": metadata,
             "owner_email": context.user_email,
             "owner_clerk_id": context.user_id,
             "last_message_at": thread.metadata.get("last_message_at")

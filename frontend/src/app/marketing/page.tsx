@@ -1,7 +1,14 @@
 "use client";
 
 import Script from "next/script";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { DetailedHTMLProps, HTMLAttributes } from "react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -18,7 +25,24 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FileText, Code2, Sparkles, RefreshCw } from "lucide-react";
+import {
+  FileText,
+  Code2,
+  Sparkles,
+  RefreshCw,
+  PlusCircle,
+} from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
@@ -195,6 +219,131 @@ type ChatKitElement = HTMLElement & {
   setOptions: (opts: Record<string, unknown>) => void;
   addEventListener: typeof window.addEventListener;
 };
+
+type ModelAsset = {
+  id: string;
+  name: string;
+  description?: string;
+  reasoning_effort?: "low" | "medium" | "high";
+  verbosity?: "low" | "medium" | "high";
+  enable_web_search?: boolean;
+  enable_code_interpreter?: boolean;
+  enable_ga4?: boolean;
+  enable_gsc?: boolean;
+  enable_ahrefs?: boolean;
+  enable_wordpress?: boolean;
+  system_prompt_addition?: string | null;
+};
+
+function AssetForm({
+  onSubmit,
+  loading,
+}: {
+  onSubmit: (form: Partial<ModelAsset>) => void;
+  loading: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [reasoning, setReasoning] = useState<ModelAsset["reasoning_effort"]>("high");
+  const [verbosity, setVerbosity] = useState<ModelAsset["verbosity"]>("medium");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [toolFlags, setToolFlags] = useState({
+    enable_web_search: true,
+    enable_code_interpreter: true,
+    enable_ga4: true,
+    enable_gsc: true,
+    enable_ahrefs: true,
+    enable_wordpress: true,
+  });
+
+  const toggleFlag = (key: keyof typeof toolFlags) => {
+    setToolFlags((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onSubmit({
+      name,
+      description,
+      reasoning_effort: reasoning,
+      verbosity,
+      system_prompt_addition: systemPrompt || null,
+      ...toolFlags,
+    });
+  };
+
+  return (
+    <form className="space-y-4" onSubmit={handleSubmit}>
+      <div className="space-y-2">
+        <Label className="text-sm">名前</Label>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="例: 女性転職分析プリセット"
+          required
+        />
+      </div>
+      <div className="space-y-2">
+        <Label className="text-sm">説明（任意）</Label>
+        <Input
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="このプリセットの用途"
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-2">
+          <Label className="text-sm">Reasoning Effort</Label>
+          <select
+            className="w-full border rounded px-2 py-1 text-sm"
+            value={reasoning}
+            onChange={(e) => setReasoning(e.target.value as ModelAsset["reasoning_effort"])}
+          >
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-sm">Verbosity</Label>
+          <select
+            className="w-full border rounded px-2 py-1 text-sm"
+            value={verbosity}
+            onChange={(e) => setVerbosity(e.target.value as ModelAsset["verbosity"])}
+          >
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </div>
+      </div>
+      <div className="space-y-3">
+        <Label className="text-sm">ツール / MCP</Label>
+        {Object.entries(toolFlags).map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between rounded border px-3 py-2">
+            <span className="text-sm">{key}</span>
+            <Switch checked={value} onCheckedChange={() => toggleFlag(key as keyof typeof toolFlags)} />
+          </div>
+        ))}
+      </div>
+      <div className="space-y-2">
+        <Label className="text-sm">追加システムプロンプト（MARKETING_INSTRUCTIONS の前に挿入）</Label>
+        <textarea
+          className="w-full border rounded px-3 py-2 text-sm min-h-[120px]"
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          rows={4}
+          placeholder="例: 女性向けの記事ではインクルーシブな表現を優先し、統計は最新の厚労省資料を参照すること。"
+        />
+      </div>
+      <DialogFooter>
+        <Button type="submit" disabled={loading}>
+          {loading ? "保存中..." : "保存して選択"}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
 
 function SeoCanvas({ state, isResponding, onApply }: {
   state: CanvasState;
@@ -400,12 +549,22 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
   const tokenRef = useRef<TokenState>({ secret: null, expiresAt: 0 });
   const chatkitRef = useRef<ChatKitElement | null>(null);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [assets, setAssets] = useState<ModelAsset[]>([]);
+  const [selectedAssetId, setSelectedAssetId] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("marketing:model_asset_id") || "standard";
+    }
+    return "standard";
+  });
+  const [showAssetDialog, setShowAssetDialog] = useState(false);
+  const [savingAsset, setSavingAsset] = useState(false);
   const [canvas, setCanvas] = useState<CanvasState>(() => {
     const stored = loadStoredCanvas(initialThreadId);
     return stored ?? { visible: false, version: 0 };
   });
   const [isResponding, setIsResponding] = useState(false);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
+  const currentAssetIdRef = useRef<string>(selectedAssetId);
 
   const marketingPrompts = useMemo(
     () => [
@@ -453,6 +612,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         const original = new Request(input, init);
         const headers = new Headers(original.headers);
         headers.set("x-marketing-client-secret", secret);
+        headers.set("x-model-asset-id", currentAssetIdRef.current);
         setTokenError(null);
         return fetch(new Request(original, { headers }));
       } catch (error) {
@@ -504,13 +664,23 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       }) => {
         if (name === "seo_open_canvas") {
           setCanvas((prev) => {
-            const next = {
+            const next: CanvasState = {
               ...prev,
               visible: true,
-              articleId: params.articleId ?? prev.articleId,
-              topic: params.topic ?? prev.topic,
-              primaryKeyword: params.primaryKeyword ?? prev.primaryKeyword,
-              outline: params.outline ?? prev.outline,
+              articleId:
+                typeof params.articleId === "string"
+                  ? params.articleId
+                  : prev.articleId,
+              topic:
+                typeof params.topic === "string" ? params.topic : prev.topic,
+              primaryKeyword:
+                typeof params.primaryKeyword === "string"
+                  ? params.primaryKeyword
+                  : prev.primaryKeyword,
+              outline:
+                typeof params.outline === "string"
+                  ? params.outline
+                  : prev.outline,
             };
             persistCanvas(currentThreadIdRef.current, next);
             return next;
@@ -519,15 +689,26 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         }
         if (name === "seo_update_canvas") {
           setCanvas((prev) => {
-            const next = {
+            const next: CanvasState = {
               ...prev,
               visible: true,
-              articleId: params.articleId ?? prev.articleId,
-              title: params.title ?? prev.title,
-              outline: params.outline ?? prev.outline,
-              body: params.body ?? prev.body,
-              version: params.version ?? (prev.version ?? 0) + 1,
-              status: params.status ?? prev.status,
+              articleId:
+                typeof params.articleId === "string"
+                  ? params.articleId
+                  : prev.articleId,
+              title:
+                typeof params.title === "string" ? params.title : prev.title,
+              outline:
+                typeof params.outline === "string"
+                  ? params.outline
+                  : prev.outline,
+              body: typeof params.body === "string" ? params.body : prev.body,
+              version:
+                typeof params.version === "number"
+                  ? params.version
+                  : (prev.version ?? 0) + 1,
+              status:
+                typeof params.status === "string" ? params.status : prev.status,
             };
             persistCanvas(currentThreadIdRef.current, next);
             return next;
@@ -600,6 +781,76 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     [canvas.articleId]
   );
 
+  const handleSelectAsset = useCallback((id: string) => {
+    setSelectedAssetId(id);
+    currentAssetIdRef.current = id;
+    if (typeof window !== "undefined") {
+      localStorage.setItem("marketing:model_asset_id", id);
+    }
+  }, []);
+
+  // Load model assets once token is available
+  useEffect(() => {
+    const loadAssets = async () => {
+      try {
+        const secret = await ensureClientSecret();
+        const res = await fetch("/api/marketing/model-assets", {
+          headers: { "x-marketing-client-secret": secret },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error("モデルアセット取得に失敗しました");
+        const data = await res.json();
+        const list: ModelAsset[] = data?.data ?? [];
+        const withDefault =
+          list.length && list.find((a) => a.id === "standard")
+            ? list
+            : [{ id: "standard", name: "スタンダード" } as ModelAsset, ...list];
+        setAssets(withDefault);
+        if (withDefault.length && !withDefault.find((a) => a.id === currentAssetIdRef.current)) {
+          handleSelectAsset(withDefault[0].id);
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    loadAssets();
+  }, [ensureClientSecret, handleSelectAsset]);
+
+  const handleSaveAsset = useCallback(
+    async (form: Partial<ModelAsset>) => {
+      setSavingAsset(true);
+      try {
+        const secret = await ensureClientSecret();
+        const res = await fetch("/api/marketing/model-assets", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-marketing-client-secret": secret,
+          },
+          body: JSON.stringify(form),
+        });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail?.error || "モデルアセットの保存に失敗しました");
+        }
+        const data = await res.json();
+        const saved: ModelAsset = data?.data;
+        setAssets((prev) => {
+          const filtered = prev.filter((a) => a.id !== saved.id);
+          return [saved, ...filtered];
+        });
+        handleSelectAsset(saved.id);
+        setShowAssetDialog(false);
+      } catch (err) {
+        console.error(err);
+        alert(err instanceof Error ? err.message : "モデルアセットの保存に失敗しました");
+      } finally {
+        setSavingAsset(false);
+      }
+    },
+    [ensureClientSecret, handleSelectAsset]
+  );
+
   return (
     <>
       <Script
@@ -608,6 +859,37 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         crossOrigin="anonymous"
       />
       <div className="h-full w-full overflow-hidden bg-background relative">
+        {/* モデルアセットセレクター */}
+        <div className="absolute top-2 left-2 z-40 flex items-center gap-2 bg-white/90 backdrop-blur border rounded-lg px-3 py-2 shadow-sm">
+          <span className="text-xs font-semibold text-slate-600">モデルアセット</span>
+          <select
+            className="text-sm border rounded px-2 py-1 bg-white"
+            value={selectedAssetId}
+            onChange={(e) => handleSelectAsset(e.target.value)}
+          >
+            {assets.map((asset) => (
+              <option key={asset.id} value={asset.id}>
+                {asset.name}
+              </option>
+            ))}
+            {!assets.length && <option value="standard">standard</option>}
+          </select>
+          <Dialog open={showAssetDialog} onOpenChange={setShowAssetDialog}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1">
+                <PlusCircle className="h-4 w-4" />
+                新規作成
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-xl">
+              <DialogHeader>
+                <DialogTitle>モデルアセットを作成</DialogTitle>
+              </DialogHeader>
+              <AssetForm onSubmit={handleSaveAsset} loading={savingAsset} />
+            </DialogContent>
+          </Dialog>
+        </div>
+
         {tokenError && (
           <div className="absolute top-2 left-2 right-2 z-50 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-sm">
             ⚠️ {tokenError}

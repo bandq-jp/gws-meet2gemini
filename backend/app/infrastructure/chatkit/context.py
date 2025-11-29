@@ -12,3 +12,4 @@ class MarketingRequestContext:
     user_email: str
     user_name: str | None = None
     scope: Dict[str, Any] | None = None
+    model_asset_id: str | None = None

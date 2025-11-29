@@ -190,9 +190,17 @@ class MarketingAgentFactory:
     def __init__(self, settings: Settings):
         self._settings = settings
 
-    def build_agent(self) -> Agent:
+    def build_agent(self, asset: dict[str, Any] | None = None) -> Agent:
         tools: List[Any] = []
-        if self._settings.marketing_enable_web_search:
+
+        enable_web_search = self._settings.marketing_enable_web_search and (
+            asset is None or asset.get("enable_web_search", True)
+        )
+        enable_code_interpreter = self._settings.marketing_enable_code_interpreter and (
+            asset is None or asset.get("enable_code_interpreter", True)
+        )
+
+        if enable_web_search:
             tools.append(
                 WebSearchTool(
                     search_context_size="medium",
@@ -202,7 +210,7 @@ class MarketingAgentFactory:
                     },
                 )
             )
-        if self._settings.marketing_enable_code_interpreter:
+        if enable_code_interpreter:
             tools.append(
                 CodeInterpreterTool(
                     tool_config={
@@ -215,7 +223,7 @@ class MarketingAgentFactory:
                 )
             )
 
-        tools.extend(self._hosted_tools())
+        tools.extend(self._hosted_tools(asset))
 
         tools.extend(
             [
@@ -229,17 +237,31 @@ class MarketingAgentFactory:
             ]
         )
 
+        reasoning_effort = (
+            asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort
+        )
+        raw_verbosity = asset.get("verbosity") if asset else None
+        verbosity = self._normalize_verbosity(raw_verbosity)
+
+        base_instructions = MARKETING_INSTRUCTIONS.strip()
+        addition = (asset or {}).get("system_prompt_addition")
+        if addition:
+            final_instructions = f"{addition.strip()}\n\n{base_instructions}"
+        else:
+            final_instructions = base_instructions
+
         agent = Agent(
             name="SEOAgent",
-            instructions=MARKETING_INSTRUCTIONS.strip(),
+            instructions=final_instructions,
             tools=tools,
             model=self._settings.marketing_agent_model,
             model_settings=ModelSettings(
                 store=True,
                 reasoning=Reasoning(
-                    effort=self._settings.marketing_reasoning_effort,
+                    effort=reasoning_effort,
                     summary="detailed",
                 ),
+                verbosity=verbosity or "medium",
             ),
             tool_use_behavior=StopAtTools(
                 stop_at_tool_names=[
@@ -252,11 +274,31 @@ class MarketingAgentFactory:
         )
         return agent
 
-    def _hosted_tools(self) -> list[HostedMCPTool]:
+    @staticmethod
+    def _normalize_verbosity(value: Any | None) -> str:
+        """Map deprecated verbosity labels to valid ones."""
+        if value is None:
+            return "medium"
+        if value == "short":
+            return "low"
+        if value == "long":
+            return "high"
+        if value in ("low", "medium", "high"):
+            return value
+        return "medium"
+
+    def _hosted_tools(self, asset: dict[str, Any] | None) -> list[HostedMCPTool]:
         hosted: list[HostedMCPTool] = []
+
+        allow_ga4 = asset is None or asset.get("enable_ga4", True)
+        allow_ahrefs = asset is None or asset.get("enable_ahrefs", True)
+        allow_gsc = asset is None or asset.get("enable_gsc", True)
+        allow_wordpress = asset is None or asset.get("enable_wordpress", True)
+
         if (
             self._settings.ga4_mcp_server_url
             and self._settings.ga4_mcp_authorization
+            and allow_ga4
         ):
             hosted.append(
                 HostedMCPTool(
@@ -275,6 +317,7 @@ class MarketingAgentFactory:
         if (
             self._settings.ahrefs_mcp_server_url
             and self._settings.ahrefs_mcp_authorization
+            and allow_ahrefs
         ):
             hosted.append(
                 HostedMCPTool(
@@ -291,6 +334,7 @@ class MarketingAgentFactory:
         if (
             self._settings.gsc_mcp_server_url
             and self._settings.gsc_mcp_api_key
+            and allow_gsc
         ):
             hosted.append(
                 HostedMCPTool(
@@ -309,6 +353,7 @@ class MarketingAgentFactory:
         if (
             self._settings.wordpress_mcp_server_url
             and self._settings.wordpress_mcp_authorization
+            and allow_wordpress
         ):
             hosted.append(
                 HostedMCPTool(
