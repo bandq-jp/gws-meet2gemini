@@ -103,6 +103,8 @@ async def get_model_assets(
 ):
     # context is validated; assets are shared globally
     assets = list_model_assets()
+    for asset in assets:
+        asset["verbosity"] = _normalize_verbosity_to_client(asset.get("verbosity"))
     return {"data": assets}
 
 
@@ -131,20 +133,14 @@ async def create_or_update_model_asset(
     if "name" not in data or not data["name"]:
         raise HTTPException(status_code=400, detail="name is required")
 
-    # normalize verbosity to accepted values (low/medium/high)
-    verbosity = data.get("verbosity")
-    if verbosity == "short":
-        data["verbosity"] = "low"
-    elif verbosity == "long":
-        data["verbosity"] = "high"
-    elif verbosity and verbosity not in ("low", "medium", "high"):
-        raise HTTPException(status_code=400, detail="verbosity must be low|medium|high")
+    data["verbosity"] = _normalize_verbosity_to_db(data.get("verbosity"))
 
     reasoning = data.get("reasoning_effort")
     if reasoning and reasoning not in ("low", "medium", "high"):
         raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
 
     result = upsert_model_asset(data)
+    result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
     return {"data": result}
 
 
@@ -156,6 +152,7 @@ async def get_model_asset_by_id(
     asset = get_model_asset(asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Model asset not found")
+    asset["verbosity"] = _normalize_verbosity_to_client(asset.get("verbosity"))
     return {"data": asset}
 
 
@@ -195,20 +192,14 @@ async def update_model_asset(
     if "name" in data and not data["name"]:
         raise HTTPException(status_code=400, detail="name cannot be empty")
 
-    # normalize verbosity to accepted values (low/medium/high)
-    verbosity = data.get("verbosity")
-    if verbosity == "short":
-        data["verbosity"] = "low"
-    elif verbosity == "long":
-        data["verbosity"] = "high"
-    elif verbosity and verbosity not in ("low", "medium", "high"):
-        raise HTTPException(status_code=400, detail="verbosity must be low|medium|high")
+    data["verbosity"] = _normalize_verbosity_to_db(data.get("verbosity"))
 
     reasoning = data.get("reasoning_effort")
     if reasoning and reasoning not in ("low", "medium", "high"):
         raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
 
     result = upsert_model_asset(data)
+    result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
     return {"data": result}
 
 
@@ -226,3 +217,23 @@ async def delete_model_asset_by_id(
         raise HTTPException(status_code=404, detail="Model asset not found")
 
     return {"message": "Model asset deleted successfully"}
+def _normalize_verbosity_to_db(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value == "low":
+        return "short"
+    if value == "high":
+        return "long"
+    if value in ("medium", "short", "long"):
+        return value
+    raise HTTPException(status_code=400, detail="verbosity must be low|medium|high")
+
+
+def _normalize_verbosity_to_client(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value == "short":
+        return "low"
+    if value == "long":
+        return "high"
+    return value
