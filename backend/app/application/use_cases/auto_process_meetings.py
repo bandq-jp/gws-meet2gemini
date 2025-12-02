@@ -285,8 +285,18 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    matches = zoho.search_app_hc_by_exact_name(extracted, limit=5)
-                    if len(matches) != 1:
+                    # Use partial search to handle variant characters (異体字対応)
+                    # Search with partial match, then filter by normalized exact match
+                    all_matches = zoho.search_app_hc_by_name(extracted, limit=10)
+                    
+                    # Filter matches by normalized exact match to handle variant characters
+                    exact_matches = []
+                    for match in all_matches:
+                        zoho_name = match.get("candidate_name", "")
+                        if matcher.is_exact_match(extracted, zoho_name):
+                            exact_matches.append(match)
+                    
+                    if len(exact_matches) != 1:
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'zoho_not_exact',
                             'meeting_id': meeting_id,
@@ -295,16 +305,7 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    match = matches[0]
-
-                    if not matcher.is_exact_match(extracted, match.get("candidate_name", "")):
-                        mock_candidate = type('SkippedCandidate', (), {
-                            'skip_reason': 'zoho_not_exact',
-                            'meeting_id': meeting_id,
-                            'title': title
-                        })()
-                        candidates.append(mock_candidate)
-                        continue
+                    match = exact_matches[0]
 
                     priority_score = self._calculate_priority_score(full, extracted)
                     text_len = len(full.get("text_content", ""))
