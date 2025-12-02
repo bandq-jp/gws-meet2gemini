@@ -1,13 +1,52 @@
 from __future__ import annotations
 import time
 import json
-from typing import Any, Dict, List, Optional
+import threading
+from typing import Any, Dict, List, Optional, Tuple
 from urllib import request, parse, error
 
 from app.infrastructure.config.settings import get_settings
 import logging
 
 logger = logging.getLogger(__name__)
+
+# --- Shared access token cache (per-process) ---
+_token_lock = threading.Lock()
+_shared_access_token: Optional[str] = None
+_shared_token_expiry: float = 0.0
+
+
+def _token_valid_shared() -> bool:
+    return bool(_shared_access_token) and (time.time() < _shared_token_expiry - 30)
+
+
+def _refresh_access_token(settings) -> Tuple[str, int]:
+    """Perform refresh-token flow and return (access_token, expires_in)."""
+    if not (settings.zoho_client_id and settings.zoho_client_secret and settings.zoho_refresh_token):
+        raise ZohoAuthError("Zoho credentials are not configured. Set ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN.")
+
+    token_url = f"{settings.zoho_accounts_base_url}/oauth/v2/token"
+    data = parse.urlencode(
+        {
+            "refresh_token": settings.zoho_refresh_token,
+            "client_id": settings.zoho_client_id,
+            "client_secret": settings.zoho_client_secret,
+            "grant_type": "refresh_token",
+        }
+    ).encode("utf-8")
+    req = request.Request(token_url, data=data, method="POST")
+    try:
+        with request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except error.HTTPError as e:
+        raise ZohoAuthError(f"Failed to refresh token: {e.read().decode('utf-8', 'ignore')}") from e
+
+    access = payload.get("access_token")
+    if not access:
+        raise ZohoAuthError(f"Invalid token response: {payload}")
+
+    expires_in = int(payload.get("expires_in", 3600))
+    return access, expires_in
 
 
 class ZohoAuthError(RuntimeError):
@@ -31,41 +70,51 @@ class ZohoClient:
         self._access_token: Optional[str] = None
         self._token_expiry: float = 0.0
 
-    def _token_valid(self) -> bool:
-        return bool(self._access_token) and (time.time() < self._token_expiry - 30)
+    def _get_access_token(self) -> str:
+        global _shared_access_token, _shared_token_expiry
+        # Fast path: shared cache hit
+        if _token_valid_shared():
+            self._access_token = _shared_access_token  # type: ignore[assignment]
+            self._token_expiry = _shared_token_expiry
+            return self._access_token  # type: ignore[return-value]
 
-    def _fetch_access_token(self) -> str:
-        if not (self.settings.zoho_client_id and self.settings.zoho_client_secret and self.settings.zoho_refresh_token):
-            raise ZohoAuthError("Zoho credentials are not configured. Set ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN.")
+        # Refresh under lock to avoid burst refresh (Zoho 10req/10min limit)
+        with _token_lock:
+            if _token_valid_shared():
+                self._access_token = _shared_access_token  # type: ignore[assignment]
+                self._token_expiry = _shared_token_expiry
+                return self._access_token  # type: ignore[return-value]
 
-        token_url = f"{self.settings.zoho_accounts_base_url}/oauth/v2/token"
-        data = parse.urlencode(
-            {
-                "refresh_token": self.settings.zoho_refresh_token,
-                "client_id": self.settings.zoho_client_id,
-                "client_secret": self.settings.zoho_client_secret,
-                "grant_type": "refresh_token",
-            }
-        ).encode("utf-8")
-        req = request.Request(token_url, data=data, method="POST")
+            access, expires_in = _refresh_access_token(self.settings)
+            _shared_access_token = access
+            _shared_token_expiry = time.time() + expires_in
+            self._access_token = access
+            self._token_expiry = _shared_token_expiry
+            logger.info("[zoho] access token refreshed (expires_in=%ss)", expires_in)
+            return access
+
+    def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """Minimal POST helper (JSON) with shared auth handling."""
+        base = self.settings.zoho_api_base_url.rstrip("/")
+        url = f"{base}{path}"
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {self._get_access_token()}",
+            "Content-Type": "application/json",
+        }
+        data = json.dumps(body).encode("utf-8")
+        req = request.Request(url, data=data, headers=headers, method="POST")
         try:
             with request.urlopen(req, timeout=30) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+                text = resp.read().decode("utf-8")
+                return json.loads(text) if text else {}
         except error.HTTPError as e:
-            raise ZohoAuthError(f"Failed to refresh token: {e.read().decode('utf-8', 'ignore')}") from e
-
-        access = payload.get("access_token")
-        if not access:
-            raise ZohoAuthError(f"Invalid token response: {payload}")
-        self._access_token = access
-        # Zoho returns expires_in (seconds)
-        self._token_expiry = time.time() + int(payload.get("expires_in", 3600))
-        return access
-
-    def _get_access_token(self) -> str:
-        if self._token_valid():
-            return self._access_token  # type: ignore[return-value]
-        return self._fetch_access_token()
+            if e.code == 204:
+                return {}
+            body = e.read().decode("utf-8", "ignore")
+            raise RuntimeError(f"Zoho POST {path} failed: {e.code} {body}") from e
+        except ZohoAuthError:
+            # bubble up to caller; they decide whether to surface 400 or continue
+            raise
 
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         base = self.settings.zoho_api_base_url.rstrip("/")
@@ -144,8 +193,8 @@ class ZohoClient:
                 "APP-hc name field API not resolvable. Set ZOHO_APP_HC_MODULE/ZOHO_APP_HC_NAME_FIELD_API explicitly or use /api/v1/zoho/modules and /api/v1/zoho/fields to discover."
             )
 
-        # Helper to call search with a specific operator and minimal fields
-        def _search_with(op: str) -> Dict[str, Any]:
+        # Search Records API helper
+        def _search_api(op: str) -> Dict[str, Any]:
             crit = f"({name_field}:{op}:{name})"
             params: Dict[str, Any] = {"criteria": crit, "per_page": limit}
             fields = ["id", name_field]
@@ -154,22 +203,26 @@ class ZohoClient:
             params["fields"] = ",".join(fields)
             return self._get(f"/crm/v2/{module_api}/search", params) or {}
 
-        data: Dict[str, Any] = {}
+        data: List[Dict[str, Any]] = []
         last_err: Optional[Exception] = None
-        for op in ("contains", "starts_with", "equals"):
+        # contains is often unsupported on custom modules; try safer ops first
+        for op in ("starts_with", "equals", "contains"):
             try:
-                data = _search_with(op)
-                break
+                legacy = _search_api(op)
+                data = legacy.get("data", []) or []
+                if data:
+                    logger.info("[zoho] search op=%s hit=%s", op, len(data))
+                    break
             except Exception as e:
-                # Keep last error and try next operator
                 last_err = e
+                logger.warning("[zoho] search API failed op=%s err=%s", op, e)
                 continue
+
         if not data and last_err:
-            # 検索に失敗した場合（例：サポート外の演算子）、例外を発生させる代わりに空の結果を返す。
-            # これにより、APIクライアント側では「候補者が見つからなかった」として処理される。
+            # Return empty for caller-friendly "not found" behavior
             pass
         records = []
-        for r in data.get("data", []) or []:
+        for r in data or []:
             records.append(
                 {
                     "record_id": r.get("id"),
@@ -203,18 +256,27 @@ class ZohoClient:
                 "APP-hc name field API not resolvable. Set ZOHO_APP_HC_MODULE/ZOHO_APP_HC_NAME_FIELD_API explicitly or use /api/v1/zoho/modules and /api/v1/zoho/fields to discover."
             )
 
-        # Build strict equals criteria
-        crit = f"({name_field}:equals:{name})"
-        params: Dict[str, Any] = {"criteria": crit, "per_page": limit}
-        fields = ["id", name_field]
-        if id_field:
-            fields.append(id_field)
-        params["fields"] = ",".join(fields)
+        def _search_api_equals() -> Dict[str, Any]:
+            crit = f"({name_field}:equals:{name})"
+            params: Dict[str, Any] = {"criteria": crit, "per_page": limit}
+            fields = ["id", name_field]
+            if id_field:
+                fields.append(id_field)
+            params["fields"] = ",".join(fields)
+            return self._get(f"/crm/v2/{module_api}/search", params) or {}
 
-        logger.info("[zoho] search exact: module=%s name=%s", module_api, name)
-        data = self._get(f"/crm/v2/{module_api}/search", params) or {}
+        logger.info("[zoho] search exact (search API): module=%s name=%s", module_api, name)
+        data: List[Dict[str, Any]] = []
+        try:
+            legacy = _search_api_equals()
+            data = legacy.get("data", []) or []
+        except ZohoAuthError:
+            raise
+        except Exception as e:
+            logger.warning("[zoho] search exact failed: %s", e)
+
         records = []
-        for r in data.get("data", []) or []:
+        for r in data or []:
             records.append(
                 {
                     "record_id": r.get("id"),
@@ -437,35 +499,32 @@ class ZohoWriteClient:
         return bool(self._access_token) and (time.time() < self._token_expiry - 30)
     
     def _fetch_access_token(self) -> str:
-        if not (self.settings.zoho_client_id and self.settings.zoho_client_secret and self.settings.zoho_refresh_token):
-            raise ZohoAuthError("Zoho credentials are not configured. Set ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN.")
-        
-        token_url = f"{self.settings.zoho_accounts_base_url}/oauth/v2/token"
-        data = parse.urlencode({
-            "refresh_token": self.settings.zoho_refresh_token,
-            "client_id": self.settings.zoho_client_id,
-            "client_secret": self.settings.zoho_client_secret,
-            "grant_type": "refresh_token",
-        }).encode("utf-8")
-        
-        req = request.Request(token_url, data=data, method="POST")
-        try:
-            with request.urlopen(req, timeout=30) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except error.HTTPError as e:
-            raise ZohoAuthError(f"Failed to refresh token: {e.read().decode('utf-8', 'ignore')}") from e
-        
-        access = payload.get("access_token")
-        if not access:
-            raise ZohoAuthError(f"Invalid token response: {payload}")
+        access, expires_in = _refresh_access_token(self.settings)
         self._access_token = access
-        self._token_expiry = time.time() + int(payload.get("expires_in", 3600))
+        self._token_expiry = time.time() + expires_in
         return access
     
     def _get_access_token(self) -> str:
-        if self._token_valid():
+        global _shared_access_token, _shared_token_expiry
+        if _token_valid_shared():
+            self._access_token = _shared_access_token  # type: ignore[assignment]
+            self._token_expiry = _shared_token_expiry
             return self._access_token  # type: ignore[return-value]
-        return self._fetch_access_token()
+
+        with _token_lock:
+            if _token_valid_shared():
+                self._access_token = _shared_access_token  # type: ignore[assignment]
+                self._token_expiry = _shared_token_expiry
+                return self._access_token  # type: ignore[return-value]
+
+            # Fallback to instance fetch (also updates shared via self variables after)
+            access, expires_in = _refresh_access_token(self.settings)
+            _shared_access_token = access
+            _shared_token_expiry = time.time() + expires_in
+            self._access_token = access
+            self._token_expiry = _shared_token_expiry
+            logger.info("[zoho] access token refreshed (write) expires_in=%s", expires_in)
+            return access
     
     def _convert_structured_data_to_zoho(self, structured_data: Dict[str, Any]) -> Dict[str, Any]:
         """構造化出力データをZohoフィールド形式に変換（再実行・上書き対応）"""
