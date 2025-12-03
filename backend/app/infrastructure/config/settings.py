@@ -80,6 +80,7 @@ class Settings:
     marketing_search_country: str = os.getenv("MARKETING_SEARCH_COUNTRY", "JP")
     marketing_enable_web_search: bool = os.getenv("MARKETING_ENABLE_WEB_SEARCH", "true").lower() != "false"
     marketing_enable_code_interpreter: bool = os.getenv("MARKETING_ENABLE_CODE_INTERPRETER", "true").lower() != "false"
+    marketing_enable_canvas: bool = os.getenv("MARKETING_ENABLE_CANVAS", "true").lower() != "false"
     marketing_workflow_id: str = os.getenv("MARKETING_WORKFLOW_ID", "wf_690a1d2e1ce881908e92b6826428f3af060621f24cf1b2bb")
     marketing_chatkit_token_secret: str = os.getenv("MARKETING_CHATKIT_TOKEN_SECRET", "")
     marketing_chatkit_token_ttl: int = int(os.getenv("MARKETING_CHATKIT_TOKEN_TTL", "900"))

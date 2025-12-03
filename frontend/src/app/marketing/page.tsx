@@ -235,6 +235,7 @@ export type ModelAsset = {
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
+  enable_canvas?: boolean;
   system_prompt_addition?: string | null;
   visibility?: "public" | "private";
   created_by?: string | null;
@@ -463,6 +464,11 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
   const [isResponding, setIsResponding] = useState(false);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
   const currentAssetIdRef = useRef<string>(selectedAssetId);
+  const canvasEnabled = useMemo(() => {
+    const asset = assets.find((a) => a.id === selectedAssetId);
+    if (!asset) return true;
+    return asset.enable_canvas ?? true;
+  }, [assets, selectedAssetId]);
 
   const marketingPrompts = useMemo(
     () => [
@@ -560,6 +566,9 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         name: string;
         params: Record<string, unknown>;
       }) => {
+        if (!canvasEnabled) {
+          return { ok: false, disabled: true };
+        }
         if (name === "seo_open_canvas") {
           setCanvas((prev) => {
             const next: CanvasState = {
@@ -627,7 +636,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       }
     };
     setup();
-  }, [customFetch, marketingPrompts, initialThreadId]);
+  }, [customFetch, marketingPrompts, initialThreadId, canvasEnabled]);
 
   // Listen for response start/end to toggle spinner (from ChatKit custom events)
   useEffect(() => {
@@ -668,6 +677,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
 
   const handleApplyLocal = useCallback(
     (body: string) => {
+      if (!canvasEnabled) return;
       const text = `Canvasで直接編集しました。最新本文を適用してください。articleId: ${canvas.articleId ?? "(not set)"}\n\n=== 新しい本文 ===\n${body}`;
       const el = chatkitRef.current as ChatKitElement | null;
       type SenderCapable = { sendUserMessage?: (msg: { content: string }) => void };
@@ -676,7 +686,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         sender({ content: text });
       }
     },
-    [canvas.articleId]
+    [canvas.articleId, canvasEnabled]
   );
 
   const handleSelectAsset = useCallback((id: string) => {
@@ -698,11 +708,22 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         });
         if (!res.ok) throw new Error("モデルアセット取得に失敗しました");
         const data = await res.json();
-        const list: ModelAsset[] = data?.data ?? [];
+        const list: ModelAsset[] = (data?.data ?? []).map((a: ModelAsset) => ({
+          ...a,
+          enable_canvas: a.enable_canvas ?? true,
+        }));
         const withDefault =
           list.length && list.find((a) => a.id === "standard")
             ? list
-            : [{ id: "standard", name: "スタンダード", visibility: "public" } as ModelAsset, ...list];
+            : [
+                {
+                  id: "standard",
+                  name: "スタンダード",
+                  visibility: "public",
+                  enable_canvas: true,
+                } as ModelAsset,
+                ...list,
+              ];
         setAssets(withDefault);
         if (withDefault.length && !withDefault.find((a) => a.id === currentAssetIdRef.current)) {
           handleSelectAsset(withDefault[0].id);
@@ -737,7 +758,10 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
           throw new Error(detail?.error || "モデルアセットの保存に失敗しました");
         }
         const data = await res.json();
-        const saved: ModelAsset = data?.data;
+        const saved: ModelAsset = {
+          ...(data?.data || {}),
+          enable_canvas: (data?.data || {}).enable_canvas ?? true,
+        };
         setAssets((prev) => {
           const filtered = prev.filter((a) => a.id !== saved.id);
           return [saved, ...filtered];
@@ -784,6 +808,14 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     },
     [ensureClientSecret, selectedAssetId, assets, handleSelectAsset]
   );
+
+  useEffect(() => {
+    if (!canvasEnabled && canvas.visible) {
+      setCanvas((prev) => ({ ...prev, visible: false }));
+    }
+  }, [canvasEnabled, canvas.visible]);
+
+  const showCanvasPane = canvasEnabled && canvas.visible;
 
   return (
     <>
@@ -839,7 +871,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         <div className={`h-full flex ${tokenError ? 'pt-16' : ''}`}>
           <div
             className={`h-full overflow-hidden transition-all duration-300 ${
-              canvas.visible ? "w-[45%]" : "w-full"
+              showCanvasPane ? "w-[45%]" : "w-full"
             }`}
           >
             <openai-chatkit
@@ -849,7 +881,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
               style={{ width: "100%", height: "100%", display: "block" }}
             />
           </div>
-          {canvas.visible && (
+          {showCanvasPane && (
             <div className="h-full w-[55%] overflow-hidden border-l-2 animate-in slide-in-from-right duration-300">
               <SeoCanvas state={canvas} isResponding={isResponding} onApply={handleApplyLocal} />
             </div>

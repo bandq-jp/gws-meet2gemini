@@ -15,7 +15,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Globe, Code2, BarChart3, Search, ExternalLink, FileText } from "lucide-react";
+import { Globe, Code2, BarChart3, Search, ExternalLink, FileText, LayoutTemplate } from "lucide-react";
 
 export type ModelAsset = {
   id: string;
@@ -29,6 +29,7 @@ export type ModelAsset = {
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
+  enable_canvas?: boolean;
   system_prompt_addition?: string | null;
   visibility?: "public" | "private";
   created_by?: string | null;
@@ -80,6 +81,12 @@ const TOOL_CONFIG = [
     description: "WordPress記事の管理",
     icon: <FileText className="h-4 w-4" />,
   },
+  {
+    key: "enable_canvas",
+    label: "キャンバス / 記事編集",
+    description: "キャンバスでのSEO記事編集",
+    icon: <LayoutTemplate className="h-4 w-4" />,
+  },
 ] as const;
 
 export function ModelAssetForm({
@@ -109,6 +116,7 @@ export function ModelAssetForm({
     enable_gsc: initialValues?.enable_gsc ?? true,
     enable_ahrefs: initialValues?.enable_ahrefs ?? true,
     enable_wordpress: initialValues?.enable_wordpress ?? true,
+    enable_canvas: initialValues?.enable_canvas ?? true,
   });
 
   const toggleFlag = (key: keyof typeof toolFlags) => {
@@ -140,7 +148,7 @@ export function ModelAssetForm({
             id="name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="例: 女性転職分析プリセット"
+            placeholder="例: AhrefsSEO分析プリセット"
             required
           />
         </div>
@@ -272,15 +280,12 @@ export function ModelAssetForm({
         <Label htmlFor="system-prompt" className="text-sm font-semibold">
           追加システムプロンプト（任意）
         </Label>
-        <p className="text-xs text-muted-foreground mb-2">
-          MARKETING_INSTRUCTIONSの前に挿入される追加指示
-        </p>
         <Textarea
           id="system-prompt"
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
           rows={6}
-          placeholder="例: 女性向けの記事ではインクルーシブな表現を優先し、統計は最新の厚労省資料を参照すること。"
+          placeholder="処理フローや特定の指示など、自由なカスタムプロンプトを追加してください。"
           className="font-mono text-xs resize-none"
         />
       </div>

@@ -29,7 +29,7 @@ MARKETING_WORKFLOW_ID = (
 
 
 MARKETING_INSTRUCTIONS = """
-あなたは日本語でユーザー指示に従って動くマーケティングアシスタントです。SEO記事の執筆・編集・分析・調査を必要に応じて行います。記事執筆モードでは左ペインはチャット、右ペインは記事キャンバス（Canvas）として活用します。以下は推奨手順とガイドラインであり、ユーザーの指示を優先し、不要ならスキップして構いません。
+あなたは日本語でユーザー指示に従って動くマーケティングアシスタントです。SEO記事の執筆・編集・分析・調査を必要に応じて行います。以下は推奨手順とガイドラインであり、ユーザーの指示を優先し、不要ならスキップして構いません。
 
 ## 役割
 - BtoB/BtoC いずれも対応するSEOライター兼エディター・アナリスト。
@@ -44,8 +44,8 @@ MARKETING_INSTRUCTIONS = """
 - アウトライン/タイトル更新が必要なら: `seo_update_canvas` または `save_seo_article`（body は渡さない）。
 - 本文初稿を保存するとき: `save_seo_article_body`（apply_patch は使わない）。
 - 最新状態の取得が必要なら: `get_seo_article`。
-- 既存本文の差分編集が必要なら: `apply_patch_to_article` を1回だけ呼ぶ（戻り値 body を正とする）。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
-- SERP/計測が必要なときだけ Web Search / GA4 / GSC / Ahrefs MCP を呼ぶ。
+- 既存本文があり、ユーザーが本文修正を指示したときだけ `apply_patch_to_article` を使う。必要に応じて複数回呼んでよいが、1回ごとに小さな差分にとどめる。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
+- 指示が合った場合や、あなたが必要な情報がほしいとき、柔軟に Web Search / GA4 / GSC / Ahrefs / WordPress MCP を呼ぶ。
 - 自社サイトの投稿・公開情報が必要なときだけ WordPress MCP を呼ぶ（閲覧系アビリティのみ）。
 - ステータス更新が必要な場合のみ `save_seo_article` を呼ぶ。`status` は `draft` / `in_progress` / `published` / `archived` のいずれかを使い、その他の値は使わない（公式の許可リスト）。
 
@@ -55,35 +55,35 @@ MARKETING_INSTRUCTIONS = """
 3) 競合・補足調査が必要な場合のみ Web Search/MCP を実行。
 4) H2/H3 のアウトラインを提示し、必要なら `seo_update_canvas` でアウトライン＋ステータスだけ右ペインへ送る（本文は送らない）。
 5) 本文初稿が必要なら HTML で生成し、`save_seo_article_body` で DB/Cnavas に保存する（apply_patch は使わない）。
-6) 追記・修正が必要なら `get_seo_article` で最新本文を取得し、`apply_patch_to_article` を1回だけ呼んで差分更新。キャンバスへの反映はツール返り値に任せ、チャット側は変更概要のみ報告。
+6) 追記・修正が必要なら `get_seo_article` で最新本文を取得し、`apply_patch_to_article` を必要なだけ（小分けで）呼んで差分更新。キャンバスへの反映はツール返り値に任せ、チャット側は変更概要のみ報告。
 7) 必要に応じて `save_seo_article` でステータスを更新する（本文は送らない）。
 
 ## 編集フロー（差分重視）
-- ユーザーの編集指示を短く要約 → `get_seo_article` で最新本文 → `apply_patch_to_article` を **1回だけ** 呼んで最小差分で修正。
+- ユーザーの編集指示を短く要約 → `get_seo_article` で最新本文 → `apply_patch_to_article` を必要に応じて小分けで呼び、最小限の差分で修正。
 - 本文を自分で全再生成しない。`seo_update_canvas` を追加で呼ぶ必要はない（ツールが Canvas を更新済み）。どうしても呼ぶ場合は body を省略/未指定にする。
 - apply_patch が失敗/未適用の場合は「最新本文を見直して再指示してほしい」とチャットで案内し、本文は触らない。
 - 変更理由・影響箇所を左ペインで1段落+箇条書きで説明する。本文全文は貼らない。
 
-## 品質・スタイル
+## もし記事を書く場合の品質・スタイル
 - SEO基本: 検索意図に沿った導入、見出し階層の一貫性、具体例とCTA、冗長回避。
-- 数値や根拠は出典（ツール名/指標）を添える。曖昧な推測はラベルを付ける。
-- 読みやすさを優先し、日本語で簡潔に。
+- 読みやすさを優先し、日本語でわかりやすくまとめる。
 - **チャット欄には本文全文を貼らない。** アウトラインとステータス更新は `seo_update_canvas` / `save_seo_article` でキャンバスへ送り、本文の変更は `apply_patch_to_article` だけで行う。チャット側は進捗と変更概要のみ。
 - 本文は **常にHTMLで生成** し、差分適用は `apply_patch_to_article` の V4A diff で行う。`seo_update_canvas` / `save_seo_article` に本文を渡さない。
 
-## SEO計測・調査タスク（Ahrefs / GSC / GA4 / WordPress を使う場合）
-以下の追加指示は、ユーザーが計測・調査を求めたときだけ実行すること。回答は日本語で。
-1. Ahrefs を使って現状のSEO指標を初期分析し、着目ポイントを理由付きで示す。
-2. 追加で深掘りすべき項目を明示し、理由を説明する。
-3. GSC / GA4 でどのデータを確認するかを示し、それで何が分かるかを説明し、得られた結果をまとめる。
-4. 全体を総括し、課題と次アクションを分かりやすく提示する（専門用語には簡単な補足を）。
-5. 必要に応じて WordPress MCP で記事やメタ情報の現状を確認し、改善案の根拠にする（公開/下書きなど状態確認のみ行う）。
+## SEO計測・調査タスク（Ahrefs / GSC / GA4 / WordPress を使う場合。用途はこれに限らない。）
+- Ahrefs を使って現状のSEO指標を初期分析し、着目ポイントを理由付きで示すなど。
+- 追加で深掘りすべき項目を明示し、理由を説明することもできる。
+- GSC / GA4 でどのデータを確認するかを示し、それで何が分かるかを説明し、得られた結果をまとめることもできる。
+- 全体を総括し、課題と次アクションを分かりやすく提示する（専門用語には簡単な補足を）。
+- 必要に応じて WordPress MCP で記事やメタ情報の現状を確認し、改善案の根拠にする（公開/下書きなど状態確認のみ行う）。
 
 ## WordPress MCP 利用ルール
-- WordPress MCP は「閲覧系アビリティ（readonly-plugin/*）」のみ使用し、投稿作成・更新系のアビリティがあっても呼ばない。
-- ユーザーが「記事を追加/更新して」と明示しない限り、WordPress 側への書き込み操作は禁止。
-- 「最近の記事は？」「このURLの本文を見せて」など閲覧要望に限定して使う。
+- WordPress MCP は適切に必要な機能を使用する。
+- まずアビリティ一覧を確認して、必要な機能を使用する。
+
+
 出力形式: 見出し付きステップ（例: 1. Ahrefsを用いた初期分析）、箇条書き・表を活用し、根拠データを具体的に引用する。
+
 対象アカウント/プロパティ（必要時のみ参照）:
 - GA4: hitocareer.com (ID: 423714093) / achievehr.jp (ID: 502875325)
 - Analyticsアカウント: hitocareer.com (ID: 299317813) / achievehr.jp (ID: 366605478)
@@ -199,6 +199,9 @@ class MarketingAgentFactory:
         enable_code_interpreter = self._settings.marketing_enable_code_interpreter and (
             asset is None or asset.get("enable_code_interpreter", True)
         )
+        enable_canvas = self._settings.marketing_enable_canvas and (
+            asset is None or asset.get("enable_canvas", True)
+        )
 
         if enable_web_search:
             tools.append(
@@ -225,17 +228,17 @@ class MarketingAgentFactory:
 
         tools.extend(self._hosted_tools(asset))
 
-        tools.extend(
-            [
-                create_seo_article,
-                get_seo_article,
-                save_seo_article,
-                save_seo_article_body,
-                seo_open_canvas,
-                seo_update_canvas,
-                apply_patch_to_article,
-            ]
-        )
+        canvas_tools = [
+            create_seo_article,
+            get_seo_article,
+            save_seo_article,
+            save_seo_article_body,
+            seo_open_canvas,
+            seo_update_canvas,
+            apply_patch_to_article,
+        ]
+        if enable_canvas:
+            tools.extend(canvas_tools)
 
         reasoning_effort = (
             asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort
@@ -245,10 +248,26 @@ class MarketingAgentFactory:
 
         base_instructions = MARKETING_INSTRUCTIONS.strip()
         addition = (asset or {}).get("system_prompt_addition")
+        parts: list[str] = []
         if addition:
-            final_instructions = f"{addition.strip()}\n\n{base_instructions}"
-        else:
-            final_instructions = base_instructions
+            parts.append(addition.strip())
+        if not enable_canvas:
+            parts.append(
+                "このプリセットでは記事キャンバス（Canvas）/SEO記事編集ツールが無効です。"
+                "seo_open_canvas, seo_update_canvas, create_seo_article, save_seo_article, "
+                "save_seo_article_body, get_seo_article, apply_patch_to_article などのキャンバス系ツールは呼び出さず、"
+                "アウトラインや本文が必要な場合はチャット欄で直接提示してください。"
+                "記事の永続化や右ペイン更新は行いません。"
+            )
+        parts.append(base_instructions)
+        final_instructions = "\n\n".join(parts)
+
+        stop_at_tool_names = [
+            "seo_open_canvas",
+            "seo_update_canvas",
+            "create_seo_article",
+            "save_seo_article",
+        ] if enable_canvas else []
 
         agent = Agent(
             name="SEOAgent",
@@ -263,14 +282,9 @@ class MarketingAgentFactory:
                 ),
                 verbosity=verbosity or "medium",
             ),
-            tool_use_behavior=StopAtTools(
-                stop_at_tool_names=[
-                    "seo_open_canvas",
-                    "seo_update_canvas",
-                    "create_seo_article",
-                    "save_seo_article",
-                ]
-            ),
+            tool_use_behavior=StopAtTools(stop_at_tool_names=stop_at_tool_names)
+            if stop_at_tool_names
+            else "run_llm_again",
         )
         return agent
 

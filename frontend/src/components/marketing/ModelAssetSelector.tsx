@@ -28,6 +28,7 @@ import {
   Search,
   ExternalLink,
   FileText,
+  LayoutTemplate,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,7 @@ export type ModelAsset = {
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
+  enable_canvas?: boolean;
   system_prompt_addition?: string | null;
   visibility?: "public" | "private";
   created_by?: string | null;
@@ -66,6 +68,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   enable_gsc: <Search className="h-3 w-3" />,
   enable_ahrefs: <ExternalLink className="h-3 w-3" />,
   enable_wordpress: <FileText className="h-3 w-3" />,
+  enable_canvas: <LayoutTemplate className="h-3 w-3" />,
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -75,6 +78,7 @@ const TOOL_LABELS: Record<string, string> = {
   enable_gsc: "GSC",
   enable_ahrefs: "Ahrefs",
   enable_wordpress: "WP",
+  enable_canvas: "Canvas",
 };
 
 export function ModelAssetSelector({

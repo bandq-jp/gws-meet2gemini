@@ -34,6 +34,7 @@ import {
   Search as SearchIcon,
   ExternalLink,
   FileText,
+  LayoutTemplate,
 } from "lucide-react";
 import { ModelAssetForm } from "./ModelAssetForm";
 
@@ -49,6 +50,7 @@ export type ModelAsset = {
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
+  enable_canvas?: boolean;
   system_prompt_addition?: string | null;
    visibility?: "public" | "private";
    created_by?: string | null;
@@ -69,6 +71,7 @@ const TOOL_ICONS: Record<string, { icon: React.ReactNode; label: string }> = {
   enable_gsc: { icon: <SearchIcon className="h-3.5 w-3.5" />, label: "GSC" },
   enable_ahrefs: { icon: <ExternalLink className="h-3.5 w-3.5" />, label: "Ahrefs" },
   enable_wordpress: { icon: <FileText className="h-3.5 w-3.5" />, label: "WP" },
+  enable_canvas: { icon: <LayoutTemplate className="h-3.5 w-3.5" />, label: "Canvas" },
 };
 
 export function ModelAssetTable({ assets, onSave, onDelete }: Props) {
