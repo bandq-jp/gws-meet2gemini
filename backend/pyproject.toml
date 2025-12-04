@@ -20,7 +20,8 @@ dependencies = [
     "google-cloud-tasks>=2.19.3",
     "openai>=1.61.0",
     "openai-agents>=0.5.1",
-    "openai-chatkit>=1.2.0",
+    # Align with official ChatKit samples (1.4.x) to avoid item schema drift
+    "openai-chatkit>=1.4.0",
 ]
 
 [dependency-groups]
