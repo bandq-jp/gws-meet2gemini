@@ -31,6 +31,8 @@ import {
   Sparkles,
   RefreshCw,
   PlusCircle,
+  Copy,
+  Download,
 } from "lucide-react";
 import {
   Dialog,
@@ -248,11 +250,33 @@ function SeoCanvas({ state, isResponding, onApply }: {
   isResponding: boolean;
   onApply: (body: string) => void;
 }) {
-  const [draft, setDraft] = useState(state.body ?? "");
-
-  useEffect(() => {
-    setDraft(state.body ?? "");
+  const handleCopyHtml = useCallback(async () => {
+    if (!state.body) return;
+    try {
+      await navigator.clipboard.writeText(state.body);
+      // TODO: Show toast notification
+      alert("HTMLをクリップボードにコピーしました");
+    } catch (err) {
+      console.error("Failed to copy:", err);
+      alert("コピーに失敗しました");
+    }
   }, [state.body]);
+
+  const handleDownloadHtml = useCallback(() => {
+    if (!state.body) return;
+    const blob = new Blob([state.body], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const filename = state.articleId
+      ? `${state.articleId}.html`
+      : `article-${new Date().toISOString().slice(0, 10)}.html`;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [state.body, state.articleId]);
 
   if (!state.visible) {
     return (
@@ -348,7 +372,7 @@ function SeoCanvas({ state, isResponding, onApply }: {
               </TabsTrigger>
               <TabsTrigger value="html" className="gap-2">
                 <Code2 className="h-4 w-4" />
-                HTML編集
+                HTMLプレビュー
               </TabsTrigger>
             </TabsList>
           </div>
@@ -378,31 +402,38 @@ function SeoCanvas({ state, isResponding, onApply }: {
           </TabsContent>
 
           <TabsContent value="html" className="flex-1 min-h-0 mt-0 overflow-hidden flex flex-col">
-            <div className="flex-1 min-h-0 p-4 overflow-auto">
-              <textarea
-                className="w-full h-full min-h-[500px] p-4 font-mono text-sm leading-relaxed resize-none border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="HTML または Markdown を入力..."
-              />
-            </div>
-            <div className="flex-shrink-0 flex items-center justify-end gap-2 p-4 border-t bg-muted/20">
+            <div className="flex-shrink-0 flex items-center justify-end gap-2 p-4 border-b bg-muted/20">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setDraft(state.body ?? "")}
-                disabled={draft === state.body}
+                onClick={handleCopyHtml}
+                disabled={!state.body}
               >
-                <RefreshCw className="h-3 w-3 mr-2" />
-                リセット
+                <Copy className="h-3 w-3 mr-2" />
+                HTMLをコピー
               </Button>
               <Button
+                variant="outline"
                 size="sm"
-                onClick={() => onApply(draft)}
-                disabled={draft === state.body || !draft.trim()}
+                onClick={handleDownloadHtml}
+                disabled={!state.body}
               >
-                この本文で更新してと伝える
+                <Download className="h-3 w-3 mr-2" />
+                HTMLをダウンロード
               </Button>
+            </div>
+            <div className="flex-1 min-h-0 p-4 overflow-auto bg-white">
+              {state.body ? (
+                <pre className="w-full p-4 bg-slate-900 text-slate-50 rounded-lg overflow-auto font-mono text-sm leading-relaxed whitespace-pre-wrap break-words">
+                  <code>{state.body}</code>
+                </pre>
+              ) : (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-slate-400 text-base">
+                    HTMLがまだ生成されていません
+                  </p>
+                </div>
+              )}
             </div>
           </TabsContent>
         </Tabs>
