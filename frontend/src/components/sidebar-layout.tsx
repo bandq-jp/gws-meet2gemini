@@ -59,10 +59,8 @@ export function SidebarLayout({ children }: SidebarLayoutProps) {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <main className="flex-1 overflow-hidden">
-        <div className="h-screen overflow-auto">
-          {children}
-        </div>
+      <main className="flex-1 overflow-hidden h-screen">
+        {children}
       </main>
     </SidebarProvider>
   );

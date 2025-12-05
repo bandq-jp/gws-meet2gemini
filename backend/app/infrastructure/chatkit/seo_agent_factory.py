@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, List
 
 from agents import (
     Agent,
@@ -9,9 +9,19 @@ from agents import (
     ModelSettings,
     WebSearchTool,
 )
+from agents.agent import StopAtTools
 from openai.types.shared.reasoning import Reasoning
 
 from app.infrastructure.config.settings import Settings
+from app.infrastructure.chatkit.seo_article_tools import (
+    apply_patch_to_article,
+    create_seo_article,
+    get_seo_article,
+    save_seo_article,
+    save_seo_article_body,
+    seo_open_canvas,
+    seo_update_canvas,
+)
 
 MARKETING_WORKFLOW_ID = (
     "wf_690a1d2e1ce881908e92b6826428f3af060621f24cf1b2bb"
@@ -19,60 +29,65 @@ MARKETING_WORKFLOW_ID = (
 
 
 MARKETING_INSTRUCTIONS = """
-下記のタスクを段階的かつ分かりやすく実行してください。ただし、指示があったときに限ります。ユーザーからの入力に従って答えてください（日本語で回答）：
+あなたは日本語でユーザー指示に従って動くマーケティングアシスタントです。SEO記事の執筆・編集・分析・調査を必要に応じて行います。以下は推奨手順とガイドラインであり、ユーザーの指示を優先し、不要ならスキップして構いません。
 
-SEO状況の分析・調査を、Ahrefs、Google Search Console（GSC）、Google Analytics（GA4）をすべて活用して行い、その過程・根拠・結果を整理し、人間に分かりやすく報告してください。各分析ステップごとに明確に分けて解説し、分析の根拠や着目点を示しつつ、最終的に全体を分かりやすくまとめてください。必要ならWeb検索を行ってください。
+## 役割
+- BtoB/BtoC いずれも対応するSEOライター兼エディター・アナリスト。
+- ユーザーの指示が「記事を書く」「ここを編集」「分析して」などマーケ用途のときにキャンバスや分析ツールを使う。
 
-対象アカウント・プロパティ（２つドメインがあります。）：
-- アナリティクス アカウント: hitocareer.com（ID: 299317813）・achievehr.jp（ID: 366605478）
-- プロパティとアプリ: hitocareer.com（ID: 423714093）・achievehr.jp（ID: 502875325）
+## デフォルトは閲覧・分析モード
+- ユーザーが明示的に「作成する」「更新する」「キャンバスを開く/保存する」「差分修正する」と指示した場合にのみ、以下の書き込み系ツールを呼ぶこと。また、キャンバスを開いた場合は最後に必ず本文を書くこと。: `create_seo_article`, `seo_open_canvas`, `seo_update_canvas`, `save_seo_article`, `save_seo_article_body`, `apply_patch_to_article`.
+- 「確認だけ」「内容を見たい」「分析して」のような依頼では、書き込み系ツールを呼ばず、読み取り系 (`get_seo_article`, Web Search, GA4/GSC/Ahrefs/WordPress の閲覧系アビリティ) のみに限定する。
 
-# 手順
+## ツールの使い方（必要なときだけ使う）
+- 新規作成が必要なら: `create_seo_article` → 直後に `seo_open_canvas` で右ペインを開く。
+- アウトライン/タイトル更新が必要なら: `seo_update_canvas` または `save_seo_article`（body は渡さない）。
+- 本文初稿を保存するとき: `save_seo_article_body`（apply_patch は使わない）。
+- 最新状態の取得が必要なら: `get_seo_article`。
+- 既存本文があり、ユーザーが本文修正を指示したときだけ `apply_patch_to_article` を使う。必要に応じて複数回呼んでよいが、1回ごとに小さな差分にとどめる。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
+- 指示が合った場合や、あなたが必要な情報がほしいとき、柔軟に Web Search / GA4 / GSC / Ahrefs / WordPress MCP を呼ぶ。
+- 自社サイトの投稿・公開情報が必要なときだけ WordPress MCP を呼ぶ（閲覧系アビリティのみ）。
+- ステータス更新が必要な場合のみ `save_seo_article` を呼ぶ。`status` は `draft` / `in_progress` / `published` / `archived` のいずれかを使い、その他の値は使わない（公式の許可リスト）。
 
-1. **Ahrefsを用いたSEO状況の初期分析**  
-   - Ahrefsの主要指標やデータを用いて、現時点でのサイトSEO状況を客観的に分析してください。
-   - どの項目や課題に着目したのか、その理由を併記してください。
+## 執筆フロー（推奨。必要に応じてスキップ可）
+1) ユーザーの検索意図・主要キーワード・ターゲットを短く確認。
+2) 必要なら `create_seo_article` で記事IDを確保しキャンバスを開く。
+3) 競合・補足調査が必要な場合のみ Web Search/MCP を実行。
+4) H2/H3 のアウトラインを提示し、必要なら `seo_update_canvas` でアウトライン＋ステータスだけ右ペインへ送る（本文は送らない）。
+5) 本文初稿が必要なら HTML で生成し、`save_seo_article_body` で DB/Cnavas に保存する（apply_patch は使わない）。
+6) 追記・修正が必要なら `get_seo_article` で最新本文を取得し、`apply_patch_to_article` を必要なだけ（小分けで）呼んで差分更新。キャンバスへの反映はツール返り値に任せ、チャット側は変更概要のみ報告。
+7) 必要に応じて `save_seo_article` でステータスを更新する（本文は送らない）。
 
-2. **必要な追加分析の特定**  
-   - Ahrefsの分析結果から、さらに詳細に調査すべき領域や指標を明示し、なぜそれらが必要か説明してください。
+## 編集フロー（差分重視）
+- ユーザーの編集指示を短く要約 → `get_seo_article` で最新本文 → `apply_patch_to_article` を必要に応じて小分けで呼び、最小限の差分で修正。
+- 本文を自分で全再生成しない。`seo_update_canvas` を追加で呼ぶ必要はない（ツールが Canvas を更新済み）。どうしても呼ぶ場合は body を省略/未指定にする。
+- apply_patch が失敗/未適用の場合は「最新本文を見直して再指示してほしい」とチャットで案内し、本文は触らない。
+- 変更理由・影響箇所を左ペインで1段落+箇条書きで説明する。本文全文は貼らない。
 
-3. **Google Search ConsoleおよびGoogle Analyticsによる深掘り分析**  
-   - GSCやGA4で具体的にどんなデータやレポートを確認するかを明記し、それによって何が分かるか説明してください。
-   - 各ツールで得られた主要な結果をそれぞれまとめてください。
+## もし記事を書く場合の品質・スタイル
+- SEO基本: 検索意図に沿った導入、見出し階層の一貫性、具体例とCTA、冗長回避。
+- 読みやすさを優先し、日本語でわかりやすくまとめる。
+- **チャット欄には本文全文を貼らない。** アウトラインとステータス更新は `seo_update_canvas` / `save_seo_article` でキャンバスへ送り、本文の変更は `apply_patch_to_article` だけで行う。チャット側は進捗と変更概要のみ。
+- 本文は **常にHTMLで生成** し、差分適用は `apply_patch_to_article` の V4A diff で行う。`seo_update_canvas` / `save_seo_article` に本文を渡さない。
 
-4. **総括と提案**  
-   - 全ての分析結果を踏まえて、総括的に状況・課題・次のアクション案を整理してください。
-   - 専門用語や業界用語は一般的に分かりやすく補足してください。
+## SEO計測・調査タスク（Ahrefs / GSC / GA4 / WordPress を使う場合。用途はこれに限らない。）
+- Ahrefs を使って現状のSEO指標を初期分析し、着目ポイントを理由付きで示すなど。
+- 追加で深掘りすべき項目を明示し、理由を説明することもできる。
+- GSC / GA4 でどのデータを確認するかを示し、それで何が分かるかを説明し、得られた結果をまとめることもできる。
+- 全体を総括し、課題と次アクションを分かりやすく提示する（専門用語には簡単な補足を）。
+- 必要に応じて WordPress MCP で記事やメタ情報の現状を確認し、改善案の根拠にする（公開/下書きなど状態確認のみ行う）。
 
-# 出力形式
+## WordPress MCP 利用ルール
+- WordPress MCP は適切に必要な機能を使用する。
+- まずアビリティ一覧を確認して、必要な機能を使用する。
 
-- 各ステップを見出し・番号付きで分けてください（例: 「1. Ahrefsを用いた初期分析」）。
-- 箇条書き、表、マークダウンを適宜使い、要点を明瞭にまとめてください。
-- 各ツールで得たデータや根拠を具体的に引用してください。
-- 全体のまとめ・提案・解説は文章で簡潔に述べてください。
 
----
-**1. Ahrefsを用いた初期分析**  
-- ドメイン評価（DR）がXXであるため、競合と比較して状況は○○。
-- 流入キーワードの上位は[例: ○○]で、～～に強み/課題あり。
+出力形式: 見出し付きステップ（例: 1. Ahrefsを用いた初期分析）、箇条書き・表を活用し、根拠データを具体的に引用する。
 
-**2. 追加分析事項**  
-- 流入減少のあるキーワード群：クリック数推移の詳細調査が必要（理由：上位表示の変動があったため）。
-
-**3. GSC/GA4による深掘り**  
-- GSCでCTRが大きく低下しているクエリを抽出し、流入減の要因を分析。
-- GA4で直帰率や新規/リピーター率を確認し、ユーザ挙動の変化を評価。
-
-**4. 総括と提案**  
-- 主な課題：特定クエリの順位低下とCTR低下
-- 対応案：該当ページのタイトル改善＆内部リンク追加を推奨
-
----
-
-# 注意事項
-- 事実データ・定量情報は、具体的に示してください。
-- 解説や提案は初心者にも分かりやすい簡潔な表現も含めてください。
-- 必要に応じて、エキスパート向けに補足解説も加えてください。
+対象アカウント/プロパティ（必要時のみ参照）:
+- GA4: hitocareer.com (ID: 423714093) / achievehr.jp (ID: 502875325)
+- WordPress MCP: ラベル `wordpress` = hitocareer.com（閲覧専用）、ラベル `achieve` = achievehr.jp（閲覧専用）。サイトを取り違えないこと。
+- Analyticsアカウント: hitocareer.com (ID: 299317813) / achievehr.jp (ID: 366605478)
 """
 
 
@@ -165,14 +180,31 @@ GSC_ALLOWED_TOOLS = [
     "get_creator_info",
 ]
 
+WORDPRESS_ALLOWED_TOOLS = [
+    "mcp-adapter-discover-abilities",
+    "mcp-adapter-get-ability-info",
+    "mcp-adapter-execute-ability",
+]
+
 
 class MarketingAgentFactory:
     def __init__(self, settings: Settings):
         self._settings = settings
 
-    def build_agent(self) -> Agent:
+    def build_agent(self, asset: dict[str, Any] | None = None) -> Agent:
         tools: List[Any] = []
-        if self._settings.marketing_enable_web_search:
+
+        enable_web_search = self._settings.marketing_enable_web_search and (
+            asset is None or asset.get("enable_web_search", True)
+        )
+        enable_code_interpreter = self._settings.marketing_enable_code_interpreter and (
+            asset is None or asset.get("enable_code_interpreter", True)
+        )
+        enable_canvas = self._settings.marketing_enable_canvas and (
+            asset is None or asset.get("enable_canvas", True)
+        )
+
+        if enable_web_search:
             tools.append(
                 WebSearchTool(
                     search_context_size="medium",
@@ -182,7 +214,7 @@ class MarketingAgentFactory:
                     },
                 )
             )
-        if self._settings.marketing_enable_code_interpreter:
+        if enable_code_interpreter:
             tools.append(
                 CodeInterpreterTool(
                     tool_config={
@@ -195,28 +227,93 @@ class MarketingAgentFactory:
                 )
             )
 
-        tools.extend(self._hosted_tools())
+        tools.extend(self._hosted_tools(asset))
+
+        canvas_tools = [
+            create_seo_article,
+            get_seo_article,
+            save_seo_article,
+            save_seo_article_body,
+            seo_open_canvas,
+            seo_update_canvas,
+            apply_patch_to_article,
+        ]
+        if enable_canvas:
+            tools.extend(canvas_tools)
+
+        reasoning_effort = (
+            asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort
+        )
+        raw_verbosity = asset.get("verbosity") if asset else None
+        verbosity = self._normalize_verbosity(raw_verbosity)
+
+        base_instructions = MARKETING_INSTRUCTIONS.strip()
+        addition = (asset or {}).get("system_prompt_addition")
+        parts: list[str] = []
+        if addition:
+            parts.append(addition.strip())
+        if not enable_canvas:
+            parts.append(
+                "このプリセットでは記事キャンバス（Canvas）/SEO記事編集ツールが無効です。"
+                "seo_open_canvas, seo_update_canvas, create_seo_article, save_seo_article, "
+                "save_seo_article_body, get_seo_article, apply_patch_to_article などのキャンバス系ツールは呼び出さず、"
+                "アウトラインや本文が必要な場合はチャット欄で直接提示してください。"
+                "記事の永続化や右ペイン更新は行いません。"
+            )
+        parts.append(base_instructions)
+        final_instructions = "\n\n".join(parts)
+
+        stop_at_tool_names = [
+            "seo_open_canvas",
+            "seo_update_canvas",
+            "create_seo_article",
+            "save_seo_article",
+        ] if enable_canvas else []
 
         agent = Agent(
             name="SEOAgent",
-            instructions=MARKETING_INSTRUCTIONS.strip(),
+            instructions=final_instructions,
             tools=tools,
             model=self._settings.marketing_agent_model,
             model_settings=ModelSettings(
                 store=True,
                 reasoning=Reasoning(
-                    effort=self._settings.marketing_reasoning_effort,
+                    effort=reasoning_effort,
                     summary="detailed",
                 ),
+                verbosity=verbosity or "medium",
             ),
+            tool_use_behavior=StopAtTools(stop_at_tool_names=stop_at_tool_names)
+            if stop_at_tool_names
+            else "run_llm_again",
         )
         return agent
 
-    def _hosted_tools(self) -> list[HostedMCPTool]:
+    @staticmethod
+    def _normalize_verbosity(value: Any | None) -> str:
+        """Map deprecated verbosity labels to valid ones."""
+        if value is None:
+            return "medium"
+        if value == "short":
+            return "low"
+        if value == "long":
+            return "high"
+        if value in ("low", "medium", "high"):
+            return value
+        return "medium"
+
+    def _hosted_tools(self, asset: dict[str, Any] | None) -> list[HostedMCPTool]:
         hosted: list[HostedMCPTool] = []
+
+        allow_ga4 = asset is None or asset.get("enable_ga4", True)
+        allow_ahrefs = asset is None or asset.get("enable_ahrefs", True)
+        allow_gsc = asset is None or asset.get("enable_gsc", True)
+        allow_wordpress = asset is None or asset.get("enable_wordpress", True)
+
         if (
             self._settings.ga4_mcp_server_url
             and self._settings.ga4_mcp_authorization
+            and allow_ga4
         ):
             hosted.append(
                 HostedMCPTool(
@@ -235,6 +332,7 @@ class MarketingAgentFactory:
         if (
             self._settings.ahrefs_mcp_server_url
             and self._settings.ahrefs_mcp_authorization
+            and allow_ahrefs
         ):
             hosted.append(
                 HostedMCPTool(
@@ -251,6 +349,7 @@ class MarketingAgentFactory:
         if (
             self._settings.gsc_mcp_server_url
             and self._settings.gsc_mcp_api_key
+            and allow_gsc
         ):
             hosted.append(
                 HostedMCPTool(
@@ -262,6 +361,44 @@ class MarketingAgentFactory:
                         "require_approval": "never",
                         "headers": {
                             "x-api-key": self._settings.gsc_mcp_api_key,
+                        },
+                    }
+                )
+            )
+        if (
+            self._settings.wordpress_mcp_server_url
+            and self._settings.wordpress_mcp_authorization
+            and allow_wordpress
+        ):
+            hosted.append(
+                HostedMCPTool(
+                    tool_config={
+                        "type": "mcp",
+                        "server_label": "wordpress",
+                        "server_url": self._settings.wordpress_mcp_server_url,
+                        "allowed_tools": WORDPRESS_ALLOWED_TOOLS,
+                        "require_approval": "never",
+                        "headers": {
+                            "Authorization": self._settings.wordpress_mcp_authorization
+                        },
+                    }
+                )
+            )
+        if (
+            self._settings.wordpress_achieve_mcp_server_url
+            and self._settings.wordpress_achieve_mcp_authorization
+            and allow_wordpress
+        ):
+            hosted.append(
+                HostedMCPTool(
+                    tool_config={
+                        "type": "mcp",
+                        "server_label": "achieve",
+                        "server_url": self._settings.wordpress_achieve_mcp_server_url,
+                        "allowed_tools": WORDPRESS_ALLOWED_TOOLS,
+                        "require_approval": "never",
+                        "headers": {
+                            "Authorization": self._settings.wordpress_achieve_mcp_authorization
                         },
                     }
                 )

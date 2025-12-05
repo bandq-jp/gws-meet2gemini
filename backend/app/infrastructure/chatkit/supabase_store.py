@@ -112,11 +112,15 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         self, thread: ThreadMetadata, context: MarketingRequestContext
     ) -> None:
         sb = self._client()
+        metadata = thread.metadata or {}
+        # Inject model asset id from context if provided and not already set
+        if context.model_asset_id and not metadata.get("model_asset_id"):
+            metadata = {**metadata, "model_asset_id": context.model_asset_id}
         payload = {
             "id": thread.id,
             "title": thread.title or f"{context.user_name or 'マーケティング'}のチャット",
             "status": getattr(thread.status, "type", "active"),
-            "metadata": thread.metadata,
+            "metadata": metadata,
             "owner_email": context.user_email,
             "owner_clerk_id": context.user_id,
             "last_message_at": thread.metadata.get("last_message_at")
@@ -139,37 +143,64 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         sb = self._client()
         query = sb.table(self.ITEM_TABLE).select("*").eq("conversation_id", thread_id)
         desc = order == "desc"
+
+        # Cursor pagination with a tie‑breaker on id so items sharing the same timestamp
+        # are not skipped or duplicated (ChatKit can emit multiple rows within the same ms).
         if after:
             after_rows = (
                 sb.table(self.ITEM_TABLE)
-                .select("created_at")
+                .select("created_at,id")
                 .eq("id", after)
                 .limit(1)
                 .execute()
             ).data or []
             if not after_rows:
                 raise NotFoundError(f"Thread item {after} not found")
-            after_ts = after_rows[0]["created_at"]
+            after_created_at = _parse_dt(after_rows[0]["created_at"]).isoformat()
             comparator = "lt" if desc else "gt"
-            query = getattr(query, comparator)("created_at", after_ts)
+            cursor_filter = (
+                f"created_at.{comparator}.{after_created_at},"
+                f"and(created_at.eq.{after_created_at},id.{comparator}.{after})"
+            )
+            query = query.or_(cursor_filter)
 
-        query = query.order("created_at", desc=desc).limit(limit + 1)
+        query = (
+            query.order("created_at", desc=desc)
+            .order("id", desc=desc)
+            .limit(limit + 1)
+        )
         res = query.execute()
         rows: list[dict[str, Any]] = res.data or []
         has_more = len(rows) > limit
         rows = rows[:limit]
         items: list[ThreadItem] = []
+        logger.info(f"Loading {len(rows)} thread items from Supabase for thread {thread_id}")
         for row in rows:
             content = row.get("content") or {}
+            item_type = content.get("type", "unknown")
+            item_id = row.get("id", "unknown")
             try:
                 thread_item = self._item_adapter.validate_python(content)
-                items.append(thread_item)
-            except Exception:
-                logger.exception(
-                    "Failed to deserialize marketing message id=%s", row.get("id")
-                )
-                continue
-        next_after = rows[-1]["id"] if rows else None
+                logger.debug(f"Successfully validated item: type={item_type}, id={item_id[:8]}...")
+            except Exception as e:
+                # 1.4 系以降で追加された item.type がある場合、厳密検証だと落ちる。
+                # モデル構築のみで通し、コンテキスト欠落を防ぐ。
+                logger.info(f"Strict validation failed for type={item_type}, trying lenient construction: {e}")
+                try:
+                    thread_item = ThreadItem.model_construct(**content)
+                    logger.warning(
+                        "Leniently accepted unknown ThreadItem type=%s id=%s",
+                        content.get("type"),
+                        row.get("id"),
+                    )
+                except Exception as e2:
+                    logger.exception(
+                        "Failed to deserialize marketing message id=%s type=%s: %s", row.get("id"), item_type, e2
+                    )
+                    continue
+            items.append(thread_item)
+            logger.debug(f"Added item to list: type={thread_item.type}, id={thread_item.id[:8]}...")
+        next_after = rows[-1]["id"] if has_more and rows else None
         return Page[ThreadItem](data=items, has_more=has_more, after=next_after)
 
     async def save_attachment(
@@ -226,18 +257,26 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         if after:
             after_rows = (
                 sb.table(self.THREAD_TABLE)
-                .select("created_at")
+                .select("created_at,id")
                 .eq("id", after)
                 .limit(1)
                 .execute()
             ).data or []
             if not after_rows:
                 raise NotFoundError(f"Thread {after} not found")
-            after_ts = after_rows[0]["created_at"]
+            after_ts = _parse_dt(after_rows[0]["created_at"]).isoformat()
             comparator = "lt" if desc else "gt"
-            query = getattr(query, comparator)("created_at", after_ts)
+            cursor_filter = (
+                f"created_at.{comparator}.{after_ts},"
+                f"and(created_at.eq.{after_ts},id.{comparator}.{after})"
+            )
+            query = query.or_(cursor_filter)
 
-        query = query.order("created_at", desc=desc).limit(limit + 1)
+        query = (
+            query.order("created_at", desc=desc)
+            .order("id", desc=desc)
+            .limit(limit + 1)
+        )
         res = query.execute()
         rows = res.data or []
         has_more = len(rows) > limit
@@ -248,7 +287,7 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
                 threads.append(await self.load_thread(row["id"], context))
             except NotFoundError:
                 continue
-        next_after = rows[-1]["id"] if rows else None
+        next_after = rows[-1]["id"] if has_more and rows else None
         return Page[ThreadMetadata](data=threads, has_more=has_more, after=next_after)
 
     async def add_thread_item(
@@ -265,7 +304,9 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
             "created_by": context.user_email,
             "created_at": getattr(item, "created_at", datetime.utcnow()).isoformat(),
         }
+        logger.info(f"Saving thread item to Supabase: type={item.type}, id={item.id[:8]}..., thread={thread_id[:8]}...")
         sb.table(self.ITEM_TABLE).upsert(payload).execute()
+        logger.info(f"Successfully saved thread item: type={item.type}, id={item.id[:8]}...")
         sb.table(self.THREAD_TABLE).update(
             {
                 "last_message_at": payload["created_at"],
@@ -317,8 +358,15 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
             return "user"
         if item.type == "client_tool_call":
             return "tool"
+        if item.type == "tool_output":
+            return "tool"
         if item.type == "workflow":
             return "workflow"
         if item.type == "hidden_context_item":
             return "context"
+        # Fallback: treat any tool-ish type as tool so it is stored and can be reloaded
+        if "tool" in item.type:
+            return "tool"
+        if item.type in ("progress", "event"):
+            return item.type
         return item.type

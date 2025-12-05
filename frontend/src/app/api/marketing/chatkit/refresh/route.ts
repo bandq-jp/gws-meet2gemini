@@ -16,11 +16,12 @@ const DEV_AUTH_ENABLED =
 const DEV_USER_ID = process.env.DEV_MARKETING_USER_ID || "dev-marketing-user";
 
 async function resolveUserId(): Promise<string | null> {
+  const { userId } = await auth();
+  if (userId) return userId;
   if (DEV_AUTH_ENABLED) {
     return DEV_USER_ID;
   }
-  const { userId } = await auth();
-  return userId ?? null;
+  return null;
 }
 
 export async function POST(request: Request) {

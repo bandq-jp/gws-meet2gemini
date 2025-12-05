@@ -9,6 +9,12 @@ from starlette.responses import StreamingResponse
 from chatkit.server import NonStreamingResult, StreamingResult
 
 from app.infrastructure.chatkit.context import MarketingRequestContext
+from app.infrastructure.chatkit.model_assets import (
+    list_model_assets,
+    upsert_model_asset,
+    get_model_asset,
+    delete_model_asset,
+)
 from app.infrastructure.chatkit.marketing_server import get_marketing_chat_server
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.security.marketing_token_service import (
@@ -29,6 +35,9 @@ async def require_marketing_context(
     authorization: Annotated[str | None, Header(convert_underscores=False)] = None,
     marketing_client_secret: Annotated[
         str | None, Header(alias="x-marketing-client-secret", convert_underscores=False)
+    ] = None,
+    model_asset_id: Annotated[
+        str | None, Header(alias="x-model-asset-id", convert_underscores=False)
     ] = None,
 ) -> MarketingRequestContext:
     token: str | None = None
@@ -55,6 +64,7 @@ async def require_marketing_context(
         user_id=claims.sub,
         user_email=claims.email,
         user_name=claims.name,
+        model_asset_id=model_asset_id,
     )
 
 
@@ -85,3 +95,164 @@ async def marketing_chatkit(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unhandled ChatKit response",
     )
+
+
+@router.get("/model-assets")
+async def get_model_assets(
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    # context is validated; assets are shared globally
+    assets = list_model_assets(context)
+    for asset in assets:
+        asset["verbosity"] = _normalize_verbosity_to_client(asset.get("verbosity"))
+    return {"data": assets}
+
+
+@router.post("/model-assets")
+async def create_or_update_model_asset(
+    payload: dict,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    allowed_keys = {
+        "id",
+        "name",
+        "description",
+        "base_model",
+        "reasoning_effort",
+        "verbosity",
+        "enable_web_search",
+        "enable_code_interpreter",
+        "enable_ga4",
+        "enable_gsc",
+        "enable_ahrefs",
+        "enable_wordpress",
+        "enable_canvas",
+        "system_prompt_addition",
+        "metadata",
+        "visibility",
+    }
+    data = {k: v for k, v in payload.items() if k in allowed_keys}
+    if "name" not in data or not data["name"]:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    data["verbosity"] = _normalize_verbosity_to_db(data.get("verbosity"))
+
+    visibility = data.get("visibility") or "public"
+    if visibility not in ("public", "private"):
+        raise HTTPException(status_code=400, detail="visibility must be public|private")
+    data["visibility"] = visibility
+
+    reasoning = data.get("reasoning_effort")
+    if reasoning and reasoning not in ("low", "medium", "high"):
+        raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
+
+    result = upsert_model_asset(data, context=context)
+    result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
+    return {"data": result}
+
+
+@router.get("/model-assets/{asset_id}")
+async def get_model_asset_by_id(
+    asset_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    asset = get_model_asset(asset_id, context=context)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+    asset["verbosity"] = _normalize_verbosity_to_client(asset.get("verbosity"))
+    return {"data": asset}
+
+
+@router.put("/model-assets/{asset_id}")
+async def update_model_asset(
+    asset_id: str,
+    payload: dict,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    # Verify asset exists
+    existing = get_model_asset(asset_id, context=context)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+
+    # Prevent updating standard preset
+    if asset_id == "standard":
+        raise HTTPException(status_code=400, detail="Cannot update standard preset")
+
+    allowed_keys = {
+        "name",
+        "description",
+        "base_model",
+        "reasoning_effort",
+        "verbosity",
+        "enable_web_search",
+        "enable_code_interpreter",
+        "enable_ga4",
+        "enable_gsc",
+        "enable_ahrefs",
+        "enable_wordpress",
+        "enable_canvas",
+        "system_prompt_addition",
+        "metadata",
+        "visibility",
+    }
+    data = {k: v for k, v in payload.items() if k in allowed_keys}
+    data["id"] = asset_id  # Ensure ID is preserved
+
+    if "name" in data and not data["name"]:
+        raise HTTPException(status_code=400, detail="name cannot be empty")
+
+    data["verbosity"] = _normalize_verbosity_to_db(data.get("verbosity"))
+
+    visibility = data.get("visibility") or existing.get("visibility") or "public"
+    if visibility not in ("public", "private"):
+        raise HTTPException(status_code=400, detail="visibility must be public|private")
+    data["visibility"] = visibility
+
+    reasoning = data.get("reasoning_effort")
+    if reasoning and reasoning not in ("low", "medium", "high"):
+        raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
+
+    result = upsert_model_asset(data, context=context)
+    result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
+    return {"data": result}
+
+
+@router.delete("/model-assets/{asset_id}")
+async def delete_model_asset_by_id(
+    asset_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    # Prevent deletion of standard preset
+    if asset_id == "standard":
+        raise HTTPException(status_code=400, detail="Cannot delete standard preset")
+
+    asset = get_model_asset(asset_id, context=context)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+
+    success = delete_model_asset(asset_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Model asset not found")
+
+    return {"message": "Model asset deleted successfully"}
+def _normalize_verbosity_to_db(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value in ("low", "medium", "high"):
+        return value
+    # backward compatibility with older stored values
+    if value == "short":
+        return "low"
+    if value == "long":
+        return "high"
+    raise HTTPException(status_code=400, detail="verbosity must be low|medium|high")
+
+
+def _normalize_verbosity_to_client(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if value == "short":
+        return "low"
+    if value == "long":
+        return "high"
+    return value

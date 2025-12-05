@@ -75,11 +75,12 @@ class Settings:
     autoproc_gemini_model_large_threshold: int = int(os.getenv("AUTOPROC_GEMINI_MODEL_LARGE_THRESHOLD", "15000"))
 
     # Marketing chat / ChatKit
-    marketing_agent_model: str = os.getenv("MARKETING_AGENT_MODEL", "gpt-5-mini")
+    marketing_agent_model: str = os.getenv("MARKETING_AGENT_MODEL", "gpt-5.1")
     marketing_reasoning_effort: str = os.getenv("MARKETING_REASONING_EFFORT", "high")
     marketing_search_country: str = os.getenv("MARKETING_SEARCH_COUNTRY", "JP")
     marketing_enable_web_search: bool = os.getenv("MARKETING_ENABLE_WEB_SEARCH", "true").lower() != "false"
     marketing_enable_code_interpreter: bool = os.getenv("MARKETING_ENABLE_CODE_INTERPRETER", "true").lower() != "false"
+    marketing_enable_canvas: bool = os.getenv("MARKETING_ENABLE_CANVAS", "true").lower() != "false"
     marketing_workflow_id: str = os.getenv("MARKETING_WORKFLOW_ID", "wf_690a1d2e1ce881908e92b6826428f3af060621f24cf1b2bb")
     marketing_chatkit_token_secret: str = os.getenv("MARKETING_CHATKIT_TOKEN_SECRET", "")
     marketing_chatkit_token_ttl: int = int(os.getenv("MARKETING_CHATKIT_TOKEN_TTL", "900"))
@@ -91,6 +92,10 @@ class Settings:
     ahrefs_mcp_authorization: str = os.getenv("AHREFS_MCP_AUTHORIZATION", "")
     gsc_mcp_server_url: str = os.getenv("GSC_MCP_SERVER_URL", "")
     gsc_mcp_api_key: str = os.getenv("GSC_MCP_API_KEY", "")
+    wordpress_mcp_server_url: str = os.getenv("WORDPRESS_MCP_SERVER_URL", "")
+    wordpress_mcp_authorization: str = os.getenv("WORDPRESS_MCP_AUTHORIZATION", "")
+    wordpress_achieve_mcp_server_url: str = os.getenv("WORDPRESS_ACHIEVE_MCP_SERVER_URL", "")
+    wordpress_achieve_mcp_authorization: str = os.getenv("WORDPRESS_ACHIEVE_MCP_AUTHORIZATION", "")
 
 
 @lru_cache(maxsize=1)
