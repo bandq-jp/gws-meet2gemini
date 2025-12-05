@@ -4,3 +4,5 @@ __pycache__/
 backend/tests/meet-txt
 
 supabase/.temp
+
+openai-chatkit-advanced-samples
