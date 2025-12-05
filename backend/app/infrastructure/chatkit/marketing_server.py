@@ -72,10 +72,29 @@ class MarketingThreadItemConverter(ThreadItemConverter):
                 tool_name = content_data.get("tool_name", "Tool")
                 output = content_data.get("output", "")
 
-                # Truncate very long outputs
-                max_output_length = 2000
+                # Decode Unicode escape sequences for better readability
+                # (e.g., \u3010 -> 【)
+                if output and isinstance(output, str):
+                    try:
+                        # Try to parse as JSON and re-dump with ensure_ascii=False
+                        parsed = json.loads(output)
+                        output = json.dumps(parsed, ensure_ascii=False, indent=2)
+                    except (json.JSONDecodeError, TypeError):
+                        # Not JSON or already decoded, keep as-is
+                        pass
+
+                # Smart truncation for extremely long outputs
+                # Keep more data to preserve important information
+                max_output_length = 100000  # 100K characters limit
                 if len(output) > max_output_length:
-                    output = output[:max_output_length] + f"\n... (truncated, {len(output) - max_output_length} more characters)"
+                    # Keep first and last parts to preserve structure
+                    keep_start = max_output_length // 2
+                    keep_end = max_output_length // 2
+                    output = (
+                        output[:keep_start]
+                        + f"\n\n... [省略: {len(output) - max_output_length} 文字] ...\n\n"
+                        + output[-keep_end:]
+                    )
 
                 text = f"Tool Result: {tool_name}\nOutput: {output}"
 
