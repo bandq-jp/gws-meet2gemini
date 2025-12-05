@@ -86,6 +86,7 @@ MARKETING_INSTRUCTIONS = """
 
 対象アカウント/プロパティ（必要時のみ参照）:
 - GA4: hitocareer.com (ID: 423714093) / achievehr.jp (ID: 502875325)
+- WordPress MCP: ラベル `wordpress` = hitocareer.com（閲覧専用）、ラベル `achieve` = achievehr.jp（閲覧専用）。サイトを取り違えないこと。
 - Analyticsアカウント: hitocareer.com (ID: 299317813) / achievehr.jp (ID: 366605478)
 """
 
@@ -379,6 +380,25 @@ class MarketingAgentFactory:
                         "require_approval": "never",
                         "headers": {
                             "Authorization": self._settings.wordpress_mcp_authorization
+                        },
+                    }
+                )
+            )
+        if (
+            self._settings.wordpress_achieve_mcp_server_url
+            and self._settings.wordpress_achieve_mcp_authorization
+            and allow_wordpress
+        ):
+            hosted.append(
+                HostedMCPTool(
+                    tool_config={
+                        "type": "mcp",
+                        "server_label": "achieve",
+                        "server_url": self._settings.wordpress_achieve_mcp_server_url,
+                        "allowed_tools": WORDPRESS_ALLOWED_TOOLS,
+                        "require_approval": "never",
+                        "headers": {
+                            "Authorization": self._settings.wordpress_achieve_mcp_authorization
                         },
                     }
                 )

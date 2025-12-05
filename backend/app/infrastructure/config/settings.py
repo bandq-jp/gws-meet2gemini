@@ -94,6 +94,8 @@ class Settings:
     gsc_mcp_api_key: str = os.getenv("GSC_MCP_API_KEY", "")
     wordpress_mcp_server_url: str = os.getenv("WORDPRESS_MCP_SERVER_URL", "")
     wordpress_mcp_authorization: str = os.getenv("WORDPRESS_MCP_AUTHORIZATION", "")
+    wordpress_achieve_mcp_server_url: str = os.getenv("WORDPRESS_ACHIEVE_MCP_SERVER_URL", "")
+    wordpress_achieve_mcp_authorization: str = os.getenv("WORDPRESS_ACHIEVE_MCP_AUTHORIZATION", "")
 
 
 @lru_cache(maxsize=1)
