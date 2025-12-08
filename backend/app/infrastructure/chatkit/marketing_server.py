@@ -17,12 +17,41 @@ from chatkit.types import (
     UserMessageItem,
 )
 from openai.types.responses import ResponseInputTextParam
+from openai.types.responses.response_input_file_param import ResponseInputFileParam
 from openai.types.responses.response_input_item_param import Message
 import json
 
 
 class MarketingThreadItemConverter(ThreadItemConverter):
     """ThreadItem converter that is lenient to unknown item types (tool/workflow outputs)."""
+
+    async def attachment_to_message_content(self, attachment):
+        """Map uploaded attachments to Response input files for the model."""
+        attachment_id = getattr(attachment, "id", None)
+        if not attachment_id:
+            raise ValueError("Attachment is missing id")
+
+        # Check if the ID is already an OpenAI File ID (starts with 'file-')
+        if attachment_id.startswith("file-"):
+            openai_file_id = attachment_id
+            logger.info(f"Attachment ID is already OpenAI file_id: {openai_file_id}")
+        else:
+            # Try to get file_id from attachment object
+            openai_file_id = getattr(attachment, "file_id", None)
+
+            # If not available, this is an error - upload should have set file_id
+            if not openai_file_id:
+                raise ValueError(
+                    f"Attachment {attachment_id} missing file_id. "
+                    "This indicates the upload did not complete successfully."
+                )
+
+            logger.info(f"Using OpenAI file_id={openai_file_id} for attachment {attachment_id}")
+
+        return ResponseInputFileParam(
+            type="input_file",
+            file_id=openai_file_id,
+        )
 
     async def hidden_context_to_input(self, item):
         """Convert hidden context items (including tool calls and outputs) to model input."""
@@ -169,6 +198,7 @@ from app.infrastructure.chatkit.seo_agent_factory import (
     MarketingAgentFactory,
 )
 from app.infrastructure.chatkit.supabase_store import SupabaseChatStore
+from app.infrastructure.chatkit.attachment_store import SupabaseAttachmentStore
 from app.infrastructure.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -180,10 +210,11 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
     def __init__(
         self,
         store: Store[MarketingRequestContext],
+        attachment_store: SupabaseAttachmentStore,
         agent_factory: MarketingAgentFactory,
         workflow_id: str,
     ):
-        super().__init__(store=store, attachment_store=None)
+        super().__init__(store=store, attachment_store=attachment_store)
         self._agent_factory = agent_factory
         self._workflow_id = workflow_id or MARKETING_WORKFLOW_ID
         self._converter = MarketingThreadItemConverter()
@@ -308,6 +339,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
 def get_marketing_chat_server() -> MarketingChatKitServer:
     settings = get_settings()
     store = SupabaseChatStore()
+    attachment_store = SupabaseAttachmentStore()
     agent_factory = MarketingAgentFactory(settings)
     if settings.openai_api_key:
         # Runner respects OPENAI_API_KEY env; set proactively when settings change
@@ -316,6 +348,7 @@ def get_marketing_chat_server() -> MarketingChatKitServer:
         os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
     return MarketingChatKitServer(
         store=store,
+        attachment_store=attachment_store,
         agent_factory=agent_factory,
         workflow_id=settings.marketing_workflow_id,
     )

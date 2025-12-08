@@ -52,6 +52,7 @@ import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
   process.env.NEXT_PUBLIC_MARKETING_CHATKIT_DOMAIN_KEY ?? "bnq-marketing";
+const FILE_ID_PATTERN = /(file|cfile)-[A-Za-z0-9_-]+/;
 
 // Custom components for rich markdown/HTML rendering
 const markdownComponents: Components = {
@@ -90,17 +91,26 @@ const markdownComponents: Components = {
       {children}
     </p>
   ),
-  a: ({ children, href, ...props }) => (
-    <a
-      href={href}
-      className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-500 transition-colors"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    >
-      {children}
-    </a>
-  ),
+  a: ({ children, href, ...props }) => {
+    let finalHref = href ?? "";
+    const match = href && href.match(FILE_ID_PATTERN);
+    if (match) {
+      finalHref = `/api/backend/marketing/files/${match[0]}`;
+    }
+    return (
+      <a
+        href={finalHref}
+        className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-500 transition-colors"
+        target="_blank"
+        rel="noopener noreferrer"
+        download={match ? true : undefined}
+        {...props}
+      >
+        {children}
+        {match && <Download className="inline-block w-3 h-3 ml-1" />}
+      </a>
+    );
+  },
   strong: ({ children, ...props }) => (
     <strong className="font-bold text-slate-900" {...props}>
       {children}
@@ -193,14 +203,21 @@ const markdownComponents: Components = {
       {children}
     </td>
   ),
-  img: ({ src, alt, ...props }) => (
-    <img
-      src={src}
-      alt={alt}
-      className="rounded-lg shadow-md my-4 max-w-full h-auto"
-      {...props}
-    />
-  ),
+  img: ({ src, alt, ...props }) => {
+    let finalSrc = src;
+    const match = src && src.match(FILE_ID_PATTERN);
+    if (match) {
+      finalSrc = `/api/backend/marketing/files/${match[0]}`;
+    }
+    return (
+      <img
+        src={finalSrc}
+        alt={alt}
+        className="rounded-lg shadow-md my-4 max-w-full h-auto"
+        {...props}
+      />
+    );
+  },
 };
 
 type TokenState = {
@@ -569,6 +586,9 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         url: CHATKIT_URL,
         domainKey: CHATKIT_DOMAIN_KEY,
         fetch: customFetch,
+        uploadStrategy: {
+          type: "two_phase",
+        },
       },
       locale: "ja",
       theme: "light",
@@ -584,7 +604,17 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       },
       composer: {
         placeholder: "例: WordPressの過去記事を参考に『エンジニア 転職 失敗』記事を書いて",
-        attachments: { enabled: false },
+        attachments: {
+          enabled: true,
+          maxSize: 20 * 1024 * 1024,
+          maxCount: 5,
+          accept: {
+            "text/csv": [".csv"],
+            "application/pdf": [".pdf"],
+            "text/plain": [".txt", ".md"],
+            "application/vnd.ms-excel": [".xls", ".xlsx"],
+          },
+        },
       },
       disclaimer: {
         text: "生成されたインサイトは社内共有前に必ず確認してください。",

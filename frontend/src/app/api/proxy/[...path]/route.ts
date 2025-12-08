@@ -88,20 +88,47 @@ async function handleRequest(
     console.log(`[Proxy] Mode: ${USE_LOCAL_BACKEND ? 'LOCAL' : 'PRODUCTION'}`);
     console.log(`[Proxy] ${method} ${targetUrl}`);
 
-    // リクエストボディの準備
-    let body: string | undefined = undefined;
+    // リクエストボディとヘッダーの準備
+    let body: ArrayBuffer | string | undefined = undefined;
+    const contentType = request.headers.get('content-type');
+    const isFileUpload = path.includes('attachments') && path.includes('upload');
+
     if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
-      const requestBody = await request.text();
-      if (requestBody) {
-        body = requestBody;
+      // ファイルアップロードの場合はバイナリとして処理
+      if (isFileUpload) {
+        body = await request.arrayBuffer();
+        console.log(`[Proxy] File upload detected, body size: ${body.byteLength} bytes`);
+      } else {
+        const requestBody = await request.text();
+        if (requestBody) {
+          body = requestBody;
+        }
       }
     }
 
     // ローカル開発の場合は直接fetch
     if (USE_LOCAL_BACKEND) {
-      const headers: HeadersInit = {
-        'Content-Type': 'application/json',
-      };
+      const headers: HeadersInit = {};
+
+      // Content-Typeを元のリクエストから引き継ぐ
+      if (contentType) {
+        headers['Content-Type'] = contentType;
+      } else if (!isFileUpload) {
+        headers['Content-Type'] = 'application/json';
+      }
+
+      // ファイルアップロード時に重要なヘッダーを引き継ぐ
+      if (isFileUpload) {
+        const contentLength = request.headers.get('content-length');
+        const contentDisposition = request.headers.get('content-disposition');
+        const xFilename = request.headers.get('x-filename');
+
+        if (contentLength) headers['Content-Length'] = contentLength;
+        if (contentDisposition) headers['Content-Disposition'] = contentDisposition;
+        if (xFilename) headers['X-Filename'] = xFilename;
+
+        console.log(`[Proxy] Upload headers:`, { 'Content-Type': contentType, 'Content-Length': contentLength });
+      }
 
       const response = await fetch(targetUrl, {
         method,
@@ -148,15 +175,32 @@ async function handleRequest(
     const googleAuth = new GoogleAuth({
       credentials: JSON.parse(GCP_SA_JSON)
     });
-    
+
     const client = await googleAuth.getIdTokenClient(CLOUD_RUN_BASE_URL);
-    
+
+    // ヘッダーの準備（本番環境）
+    const requestHeaders: Record<string, string> = {};
+    if (contentType) {
+      requestHeaders['Content-Type'] = contentType;
+    } else if (!isFileUpload) {
+      requestHeaders['Content-Type'] = 'application/json';
+    }
+
+    // ファイルアップロード時に重要なヘッダーを引き継ぐ
+    if (isFileUpload) {
+      const contentLength = request.headers.get('content-length');
+      const contentDisposition = request.headers.get('content-disposition');
+      const xFilename = request.headers.get('x-filename');
+
+      if (contentLength) requestHeaders['Content-Length'] = contentLength;
+      if (contentDisposition) requestHeaders['Content-Disposition'] = contentDisposition;
+      if (xFilename) requestHeaders['X-Filename'] = xFilename;
+    }
+
     const requestConfig = {
       url: targetUrl,
       method: method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: requestHeaders,
       validateStatus: () => true, // すべてのステータスコードを有効とする
       data: body || undefined,
     };

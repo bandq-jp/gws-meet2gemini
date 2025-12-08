@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import json
+import logging
 from functools import lru_cache
 from typing import Annotated
+import mimetypes
+import cgi
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+    UploadFile,
+)
+from fastapi import File as FastAPIFile
+from fastapi import Form
 from starlette.responses import StreamingResponse
+from openai import OpenAI
 
 from chatkit.server import NonStreamingResult, StreamingResult
 
@@ -17,12 +34,15 @@ from app.infrastructure.chatkit.model_assets import (
 )
 from app.infrastructure.chatkit.marketing_server import get_marketing_chat_server
 from app.infrastructure.config.settings import get_settings
+from app.infrastructure.supabase.client import get_supabase
 from app.infrastructure.security.marketing_token_service import (
     MarketingTokenError,
     MarketingTokenService,
 )
 
 router = APIRouter(prefix="/marketing", tags=["marketing"])
+logger = logging.getLogger(__name__)
+ATTACHMENT_BUCKET = "marketing-attachments"
 
 
 @lru_cache(maxsize=1)
@@ -66,6 +86,341 @@ async def require_marketing_context(
         user_name=claims.name,
         model_asset_id=model_asset_id,
     )
+
+
+@router.api_route("/attachments/{attachment_id}/upload", methods=["PUT", "POST", "OPTIONS"])
+async def upload_marketing_attachment(
+    attachment_id: str,
+    request: Request,
+    token: str | None = Query(default=None),
+    thread_id: str | None = Query(default=None),
+    authorization: Annotated[str | None, Header(convert_underscores=False)] = None,
+    marketing_client_secret: Annotated[
+        str | None, Header(alias="x-marketing-client-secret", convert_underscores=False)
+    ] = None,
+):
+    """
+    Two-phase upload target used by ChatKit AttachmentStore.
+    Accepts a short-lived token (preferred) or the standard marketing client secret.
+    """
+    # Handle CORS preflight
+    if request.method == "OPTIONS":
+        logger.info(
+            "CORS preflight request: attachment_id=%s origin=%s",
+            attachment_id,
+            request.headers.get("origin"),
+        )
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+                "Access-Control-Allow-Methods": "POST, PUT, OPTIONS",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Max-Age": "600",
+            },
+        )
+
+    context: MarketingRequestContext | None = None
+    attachment_meta: dict = {}
+
+    # 1) Try standard header-based auth (used when custom fetch forwards headers)
+    if marketing_client_secret or authorization:
+        try:
+            context = await require_marketing_context(
+                authorization=authorization,
+                marketing_client_secret=marketing_client_secret,
+                model_asset_id=None,
+            )
+        except HTTPException:
+            context = None
+
+    # 2) Fallback to token-based auth
+    if context is None and token:
+        try:
+            claims = _token_service().verify(token)
+            attachment_meta = (claims.extra or {}).get("attachment", {}) if claims.extra else {}
+            if attachment_meta.get("id") and attachment_meta["id"] != attachment_id:
+                raise HTTPException(status_code=403, detail="Attachment token mismatch")
+            context = MarketingRequestContext(
+                user_id=claims.sub,
+                user_email=claims.email,
+                user_name=claims.name,
+            )
+        except MarketingTokenError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    if context is None:
+        raise HTTPException(status_code=401, detail="Missing marketing client token")
+
+    settings = get_settings()
+    sb = get_supabase()
+    _ensure_bucket_exists(sb, ATTACHMENT_BUCKET)
+    content_type_header = request.headers.get("content-type") or ""
+    body: bytes
+    header_filename = None
+    cd_filename = None
+
+    logger.info(
+        "Upload attachment request: id=%s content_type=%s content_length=%s",
+        attachment_id,
+        content_type_header,
+        request.headers.get("content-length"),
+    )
+
+    # ChatKit two-phase upload sends raw bytes (not multipart) with content-type: application/octet-stream
+    # but in some cases can be multipart; handle both.
+    body = b""
+    mime_type = "application/octet-stream"
+
+    if "multipart/form-data" in content_type_header.lower():
+        logger.info("Processing multipart/form-data upload")
+        form = await request.form()
+        upload_file: UploadFile | None = None
+
+        # Debug: log all form items with their types
+        for key, value in form.multi_items():
+            logger.info(f"Form item: key={key}, type={type(value).__name__}")
+            # Check if it's an UploadFile by duck typing (has read method)
+            if hasattr(value, 'read') and key == 'file':
+                upload_file = value
+                break
+
+        if upload_file:
+            # Always treat it as an UploadFile-like object
+            body = await upload_file.read()
+            header_filename = getattr(upload_file, 'filename', None)
+            # Get mime_type from upload_file first, then from token metadata
+            upload_content_type = getattr(upload_file, 'content_type', None)
+            mime_type = upload_content_type or attachment_meta.get("mime_type") or "application/octet-stream"
+            logger.info("Found file in multipart: filename=%s size=%s mime=%s", header_filename, len(body), mime_type)
+        else:
+            # No file found in multipart request
+            logger.error("No file found in multipart request, form keys: %s", list(form.keys()))
+            raise HTTPException(status_code=400, detail="No file found in multipart upload")
+    else:
+        logger.info("Processing raw body upload")
+        body = await request.body()
+        mime_type = attachment_meta.get("mime_type") or request.headers.get("content-type") or "application/octet-stream"
+        logger.info("Received raw body: size=%s mime=%s", len(body), mime_type)
+
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty upload body")
+
+    # --- Determine original filename as best as possible ---
+    header_filename = (
+        header_filename
+        or request.headers.get("x-filename")
+        or request.headers.get("x-file-name")
+        or request.headers.get("X-Filename")
+    )
+    # Content-Disposition: attachment; filename="..." or filename*=utf-8''...
+    cd = request.headers.get("content-disposition")
+    if cd:
+        _, cd_params = cgi.parse_header(cd)
+        cd_filename = cd_params.get("filename") or cd_params.get("filename*")
+
+    filename = attachment_meta.get("name") or header_filename or cd_filename or attachment_id
+
+    size_hint = attachment_meta.get("size")
+    if size_hint and len(body) != int(size_hint):
+        logger.warning(
+            "Uploaded size mismatch for attachment %s (expected=%s, actual=%s)",
+            attachment_id,
+            size_hint,
+            len(body),
+        )
+
+    # Ensure file has proper extension
+    import os
+    base, ext = os.path.splitext(filename)
+
+    # If no extension or filename is just the attachment_id, add extension from MIME type
+    if not ext or filename == attachment_id:
+        ext_from_mime = mimetypes.guess_extension(mime_type.split(";")[0].strip()) or ""
+        if ext_from_mime:
+            # Use the base name if available, otherwise use attachment_id
+            candidate_name = f"{base or attachment_id}{ext_from_mime}"
+        else:
+            candidate_name = filename
+    else:
+        candidate_name = filename
+
+    safe_name = _safe_filename(candidate_name)
+    logger.info(
+        "Attachment upload: raw_filename=%s header_filename=%s cd_filename=%s chosen=%s mime=%s size=%s",
+        filename,
+        header_filename,
+        cd_filename,
+        safe_name,
+        mime_type,
+        len(body),
+    )
+    storage_path = f"attachments/{attachment_id}/{safe_name}"
+    bucket = sb.storage.from_(ATTACHMENT_BUCKET)
+
+    try:
+        bucket.upload(
+            path=storage_path,
+            file=body,
+            file_options={"content-type": mime_type, "x-upsert": "true"},
+        )
+    except Exception as exc:
+        logger.exception("Failed to upload attachment to Supabase Storage")
+        raise HTTPException(status_code=500, detail="Failed to store attachment") from exc
+
+    # Upload to OpenAI Files so Code Interpreter can access it
+    client = OpenAI(api_key=settings.openai_api_key)
+    try:
+        # Responses/Agents では assistants 用のファイルとしてアップロードする
+        openai_file = client.files.create(
+            purpose="assistants",
+            file=(safe_name, body),
+        )
+    except Exception as exc:
+        logger.exception("Failed to upload attachment to OpenAI")
+        raise HTTPException(status_code=502, detail="Failed to upload to OpenAI") from exc
+
+    storage_metadata = {
+        "id": attachment_id,
+        "openai_file_id": getattr(openai_file, "id", None),
+        "name": safe_name,
+        "mime_type": mime_type,
+        "size": len(body),
+        "storage_path": storage_path,
+        "thread_id": thread_id or attachment_meta.get("thread_id"),
+        "uploaded_by": context.user_email,
+    }
+
+    try:
+        bucket.upload(
+            path=f"attachments/{attachment_id}/meta.json",
+            file=json.dumps(storage_metadata).encode("utf-8"),
+            file_options={"content-type": "application/json", "x-upsert": "true"},
+        )
+    except Exception:
+        logger.exception("Failed to cache attachment metadata for %s", attachment_id)
+
+    # Persist DB row if thread_id is available (FK constraint)
+    conversation_id = storage_metadata.get("thread_id")
+    if conversation_id:
+        try:
+            sb.table("marketing_attachments").upsert(
+                {
+                    "id": attachment_id,
+                    "conversation_id": conversation_id,
+                    "owner_email": context.user_email,
+                    "filename": safe_name,
+                    "mime_type": mime_type,
+                    "size_bytes": len(body),
+                    "storage_metadata": storage_metadata,
+                }
+            ).execute()
+        except Exception:
+            logger.exception("Failed to upsert attachment row (id=%s thread=%s)", attachment_id, conversation_id)
+
+    return {"id": attachment_id, "file_id": storage_metadata.get("openai_file_id")}
+
+
+@router.get("/files/{file_id}")
+async def download_openai_file(
+    file_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Proxy downloads for files produced by Code Interpreter / Responses API.
+    Caches the payload in Supabase Storage to avoid repeated egress.
+    """
+    settings = get_settings()
+    sb = get_supabase()
+    bucket = sb.storage.from_(ATTACHMENT_BUCKET)
+    storage_path = f"openai_cache/{file_id}"
+
+    # Serve cached copy if available
+    try:
+        cached = bucket.download(storage_path)
+        if cached:
+            return Response(content=cached, media_type="application/octet-stream")
+    except Exception:
+        logger.info("Cache miss for generated file %s", file_id)
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    try:
+        content_stream = client.files.content(file_id)
+        file_bytes = content_stream.read()
+        file_info = client.files.retrieve(file_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"File not found or expired: {exc}") from exc
+
+    try:
+        bucket.upload(
+            path=storage_path,
+            file=file_bytes,
+            file_options={"content-type": "application/octet-stream", "upsert": True},
+        )
+    except Exception:
+        logger.exception("Failed to cache OpenAI file %s", file_id)
+
+    filename = getattr(file_info, "filename", None) or f"{file_id}.bin"
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    return Response(content=file_bytes, media_type="application/octet-stream", headers=headers)
+
+
+def _safe_filename(value: str) -> str:
+    """
+    Sanitize a filename for Supabase Storage (ASCII-only).
+    - Keeps only ASCII letters/digits, hyphens, underscores.
+    - Replaces other chars with underscore.
+    - Ensures there is always a base name (`file`) and keeps the original extension (lowercased).
+    """
+    import os
+    import unicodedata
+
+    if not value:
+        return "file"
+
+    # Strip path parts if any
+    name = value.split("/")[-1].split("\\")[-1]
+    base, ext = os.path.splitext(name)
+
+    def _clean(s: str) -> str:
+        # Normalize unicode characters to ASCII equivalents where possible
+        try:
+            s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+        except:
+            pass
+
+        cleaned = []
+        for ch in s:
+            # Only allow ASCII alphanumeric, hyphen, and underscore
+            if ch.isascii() and (ch.isalnum() or ch in ("-", "_")):
+                cleaned.append(ch)
+            elif ch == ' ':
+                cleaned.append('_')
+            # Skip non-ASCII characters
+
+        result = "".join(cleaned).strip("_")
+        return result if result else "file"
+
+    base_clean = _clean(base)
+    ext_clean = ext.lower() if ext else ""
+
+    return base_clean + ext_clean
+
+
+def _ensure_bucket_exists(sb, bucket: str) -> None:
+    try:
+        info = sb.storage.get_bucket(bucket)
+        if info:
+            return
+    except Exception:
+        logger.info("Attachment bucket %s not found, creating...", bucket)
+    try:
+        # storage3 Sync API signature: create_bucket(id, name=None, **options)
+        sb.storage.create_bucket(bucket)
+    except Exception:
+        # If it already exists or creation forbidden, log but continue
+        logger.exception("Failed to create or verify attachment bucket %s", bucket)
 
 
 @router.post("/chatkit")

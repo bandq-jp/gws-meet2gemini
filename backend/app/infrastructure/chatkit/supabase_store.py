@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from typing import Any, Iterable, Optional
 
 from chatkit.store import NotFoundError, Store
-from chatkit.types import Attachment, Page, ThreadItem, ThreadMetadata
+from chatkit.types import Attachment, FileAttachment, Page, ThreadItem, ThreadMetadata
 from pydantic import TypeAdapter
 
 from app.infrastructure.chatkit.context import MarketingRequestContext
@@ -52,6 +53,7 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
     THREAD_TABLE = "marketing_conversations"
     ITEM_TABLE = "marketing_messages"
     ATTACHMENT_TABLE = "marketing_attachments"
+    ATTACHMENT_BUCKET = "marketing-attachments"
 
     def __init__(self):
         self._thread_adapter = _thread_adapter
@@ -60,6 +62,41 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
 
     def _client(self):
         return get_supabase()
+
+    def _storage_prefix(self, attachment_id: str) -> str:
+        return f"attachments/{attachment_id}"
+
+    def _load_attachment_metadata(self, attachment_id: str) -> dict[str, Any]:
+        """
+        Load attachment metadata from DB; fall back to Supabase Storage cache.
+        """
+        sb = self._client()
+
+        # 1) Try persisted row
+        try:
+            res = (
+                sb.table(self.ATTACHMENT_TABLE)
+                .select("storage_metadata")
+                .eq("id", attachment_id)
+                .limit(1)
+                .execute()
+            )
+            row = (res.data or [None])[0]
+            if row and row.get("storage_metadata"):
+                return row["storage_metadata"] or {}
+        except Exception:
+            logger.exception("Failed to load attachment metadata from table for %s", attachment_id)
+
+        # 2) Fallback to storage meta.json
+        try:
+            raw = (
+                sb.storage.from_(self.ATTACHMENT_BUCKET)
+                .download(f"{self._storage_prefix(attachment_id)}/meta.json")
+            )
+            return json.loads(raw) if raw else {}
+        except Exception:
+            logger.info("No storage metadata found for attachment %s", attachment_id)
+            return {}
 
     def _serialize_thread(self, thread: ThreadMetadata) -> dict[str, Any]:
         payload = thread.model_dump(mode="json")
@@ -207,9 +244,16 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         self, attachment: Attachment, context: MarketingRequestContext
     ) -> None:
         sb = self._client()
+        thread_id = getattr(attachment, "thread_id", None)
+        if not thread_id and context.scope:
+            thread_id = context.scope.get("thread_id")
+        if not thread_id:
+            # Without a thread we cannot satisfy the FK constraint; skip quietly.
+            logger.warning("Skipping attachment save because thread_id is missing (id=%s)", attachment.id)
+            return
         payload = {
             "id": attachment.id,
-            "conversation_id": attachment.thread_id,
+            "conversation_id": thread_id,
             "owner_email": context.user_email,
             "filename": getattr(attachment, "name", None),
             "mime_type": getattr(attachment, "mime_type", None),
@@ -221,24 +265,43 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
     async def load_attachment(
         self, attachment_id: str, context: MarketingRequestContext
     ) -> Attachment:
-        sb = self._client()
-        res = (
-            sb.table(self.ATTACHMENT_TABLE)
-            .select("storage_metadata")
-            .eq("id", attachment_id)
-            .limit(1)
-            .execute()
-        )
-        rows = res.data or []
-        if not rows:
+        metadata = self._load_attachment_metadata(attachment_id)
+        if not metadata:
             raise NotFoundError(f"Attachment {attachment_id} not found")
-        return self._attachment_adapter.validate_python(rows[0]["storage_metadata"])
+
+        file_id = metadata.get("openai_file_id") or metadata.get("file_id") or attachment_id
+        name = metadata.get("name") or metadata.get("filename") or attachment_id
+        mime = metadata.get("mime_type") or "application/octet-stream"
+
+        # Validate to ensure schema compatibility, but return as FileAttachment
+        try:
+            validated = self._attachment_adapter.validate_python(
+                {"id": file_id, "name": name, "mime_type": mime, "type": "file"}
+            )
+            if isinstance(validated, FileAttachment):
+                return validated
+        except Exception:
+            logger.exception("Failed to validate attachment %s; returning lenient FileAttachment", attachment_id)
+
+        return FileAttachment(id=file_id, name=name, mime_type=mime)
 
     async def delete_attachment(
         self, attachment_id: str, context: MarketingRequestContext
     ) -> None:
         sb = self._client()
-        sb.table(self.ATTACHMENT_TABLE).delete().eq("id", attachment_id).execute()
+        try:
+            sb.table(self.ATTACHMENT_TABLE).delete().eq("id", attachment_id).execute()
+        except Exception:
+            logger.exception("Failed to delete attachment row for %s", attachment_id)
+
+        try:
+            prefix = self._storage_prefix(attachment_id)
+            objects = sb.storage.from_(self.ATTACHMENT_BUCKET).list(path=prefix) or []
+            targets = [f"{prefix}/{obj['name']}" for obj in objects]
+            if targets:
+                sb.storage.from_(self.ATTACHMENT_BUCKET).remove(targets)
+        except Exception:
+            logger.exception("Failed to delete attachment storage objects for %s", attachment_id)
 
     async def load_threads(
         self,

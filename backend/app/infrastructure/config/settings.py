@@ -85,6 +85,8 @@ class Settings:
     marketing_chatkit_token_secret: str = os.getenv("MARKETING_CHATKIT_TOKEN_SECRET", "")
     marketing_chatkit_token_ttl: int = int(os.getenv("MARKETING_CHATKIT_TOKEN_TTL", "900"))
     marketing_chatkit_api_base: str = os.getenv("MARKETING_CHATKIT_API_BASE", "/api/v1/marketing/chatkit")
+    # ブラウザがアップロード先にアクセスするときのベースURL（必須: スキーム/ホスト付き）
+    marketing_upload_base_url: str = os.getenv("MARKETING_UPLOAD_BASE_URL", "http://localhost:3000")
 
     ga4_mcp_server_url: str = os.getenv("GA4_MCP_SERVER_URL", "")
     ga4_mcp_authorization: str = os.getenv("GA4_MCP_AUTHORIZATION", "")

@@ -29,16 +29,26 @@ class MarketingTokenClaims:
     name: str | None
     exp: int
     iat: int
+    extra: Dict[str, Any] | None = None
 
     @classmethod
     def from_payload(cls, payload: Dict[str, Any]) -> "MarketingTokenClaims":
+        payload_copy = dict(payload)
         try:
+            sub = str(payload_copy.pop("sub"))
+            email = str(payload_copy.pop("email"))
+            name = payload_copy.pop("name", None)
+            exp = int(payload_copy.pop("exp"))
+            iat = int(payload_copy.pop("iat"))
+            # Remaining keys are treated as additional claims
+            extra = payload_copy or None
             return cls(
-                sub=str(payload["sub"]),
-                email=str(payload["email"]),
-                name=payload.get("name"),
-                exp=int(payload["exp"]),
-                iat=int(payload["iat"]),
+                sub=sub,
+                email=email,
+                name=name,
+                exp=exp,
+                iat=iat,
+                extra=extra,
             )
         except KeyError as exc:
             raise MarketingTokenError(f"Missing required claim: {exc}") from exc
