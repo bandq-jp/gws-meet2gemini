@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from functools import lru_cache
 from typing import Annotated
 import mimetypes
 import cgi
 import httpx
+from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
@@ -50,6 +52,37 @@ ATTACHMENT_BUCKET = "marketing-attachments"
 def _token_service() -> MarketingTokenService:
     settings = get_settings()
     return MarketingTokenService(settings.marketing_chatkit_token_secret)
+
+
+def _build_signed_download_url(
+    *,
+    file_id: str,
+    container_id: str | None,
+    context: MarketingRequestContext,
+) -> str:
+    """
+    Build a signed relative URL for downloading files via the frontend proxy.
+    """
+    svc = _token_service()
+    settings = get_settings()
+    now = int(time.time())
+    ttl = max(settings.marketing_chatkit_token_ttl, 60)
+    payload = {
+        "sub": context.user_id,
+        "email": context.user_email,
+        "name": context.user_name,
+        "iat": now,
+        "exp": now + ttl,
+        "file_id": file_id,
+    }
+    if container_id:
+        payload["container_id"] = container_id
+    token = svc.sign(payload)
+    query = f"token={token}"
+    if container_id:
+        query += f"&container_id={container_id}"
+    encoded_file = quote(file_id, safe="")
+    return f"/api/marketing/files/{encoded_file}?{query}"
 
 
 async def require_marketing_context(
@@ -327,11 +360,19 @@ async def upload_marketing_attachment(
 async def download_openai_file(
     file_id: str,
     container_id: str | None = Query(default=None),
-    context: MarketingRequestContext = Depends(require_marketing_context),
+    token: str | None = Query(default=None),
+    marketing_client_secret: Annotated[
+        str | None, Header(alias="x-marketing-client-secret", convert_underscores=False)
+    ] = None,
+    authorization: Annotated[str | None, Header(convert_underscores=False)] = None,
 ):
     """
     Proxy downloads for files produced by Code Interpreter / Responses API.
     Caches the payload in Supabase Storage to avoid repeated egress.
+
+    AuthN:
+      - Preferred: query param `token` signed with MARKETING_CHATKIT_TOKEN_SECRET
+      - Fallback: x-marketing-client-secret header or Bearer token (same as chat)
 
     For Code Interpreter generated files, container_id should be provided.
     For regular uploaded files, container_id can be omitted.
@@ -353,6 +394,39 @@ async def download_openai_file(
         logger.info("Cache miss for generated file %s", file_id)
 
     file_bytes: bytes
+
+    # --- AuthN: token or header ---
+    context: MarketingRequestContext | None = None
+    token_service = _token_service()
+
+    if token:
+        try:
+            claims = token_service.verify(token)
+            extra = claims.extra or {}
+            token_file_id = extra.get("file_id")
+            token_container_id = extra.get("container_id")
+            if token_file_id and token_file_id != file_id:
+                raise HTTPException(status_code=403, detail="Token file mismatch")
+            if token_container_id and container_id and token_container_id != container_id:
+                raise HTTPException(status_code=403, detail="Token container mismatch")
+            context = MarketingRequestContext(
+                user_id=claims.sub,
+                user_email=claims.email,
+                user_name=claims.name,
+            )
+        except MarketingTokenError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    if context is None:
+        # Fallback to header-based auth
+        try:
+            context = await require_marketing_context(
+                authorization=authorization,
+                marketing_client_secret=marketing_client_secret,
+                model_asset_id=None,
+            )
+        except HTTPException as exc:
+            raise exc
 
     # Guard against missing container_id when cfile is requested
     if file_id.startswith("cfile") and not container_id:
@@ -415,6 +489,60 @@ async def download_openai_file(
 
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=file_bytes, media_type="application/octet-stream", headers=headers)
+
+
+@router.get("/threads/{thread_id}/attachments")
+async def list_marketing_attachments(
+    thread_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Return container/file attachment metadata for a thread so the frontend can render download buttons.
+    """
+    sb = get_supabase()
+    try:
+        rows = (
+            sb.table("marketing_messages")
+            .select("id, role, attachments, created_at")
+            .eq("conversation_id", thread_id)
+            .order("created_at", desc=True)
+            .limit(80)
+            .execute()
+            .data
+        )
+    except Exception as exc:
+        logger.exception("Failed to load attachments for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="failed to load attachments") from exc
+
+    attachments: list[dict] = []
+    for row in rows or []:
+        att_list = row.get("attachments") or []
+        if not isinstance(att_list, list):
+            continue
+        for att in att_list:
+            file_id = att.get("file_id")
+            if not file_id:
+                continue
+            container_id = att.get("container_id")
+            download_url = _build_signed_download_url(
+                file_id=file_id,
+                container_id=container_id,
+                context=context,
+            )
+            attachments.append(
+                {
+                    "message_id": row.get("id"),
+                    "file_id": file_id,
+                    "container_id": container_id,
+                    "filename": att.get("filename"),
+                    "download_url": download_url,
+                    "created_at": row.get("created_at"),
+                }
+            )
+
+    # Sort newest first by message timestamp
+    attachments.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    return {"attachments": attachments}
 
 
 def _safe_filename(value: str) -> str:

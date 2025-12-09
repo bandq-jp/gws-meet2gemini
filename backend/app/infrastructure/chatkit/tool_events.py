@@ -21,6 +21,8 @@ from chatkit.types import (
     WorkflowTaskUpdated,
     AssistantMessageItem,
 )
+from app.infrastructure.config.settings import get_settings
+from app.infrastructure.security.marketing_token_service import MarketingTokenService
 logger = logging.getLogger(__name__)
 SANDBOX_LINK_RE = re.compile(r"\[([^\]]+)\]\((sandbox:/[^\)]+)\)")
 
@@ -130,6 +132,9 @@ class ToolUsageTracker:
         self._container_files: Dict[str, Tuple[str, str]] = {}
         # file_id -> container_id
         self._file_to_container: Dict[str, str] = {}
+        self._token_service: MarketingTokenService | None = None
+        # collected attachments for the current assistant message
+        self._attachments: list[dict[str, str | None]] = []
 
     async def observe(self, event: StreamEvent) -> None:
         # Log all events for debugging
@@ -203,6 +208,7 @@ class ToolUsageTracker:
             # This event contains the final output including Code Interpreter results
             logger.info(f"Message output created event")
             logger.debug(f"Message output item: {event.item}")
+            self._attachments.clear()
 
             # Extract file annotations from the message content
             if hasattr(event.item, "raw_item"):
@@ -227,8 +233,9 @@ class ToolUsageTracker:
                 if top_level_content:
                     self._extract_container_files_from_content_blocks(top_level_content)
 
-                # After registering container files, rewrite the assistant message text in the store
+                # After registering container files, rewrite links and attach metadata
                 await self._rewrite_assistant_message_links(raw_item)
+                await self._attach_container_file_metadata(raw_item)
         else:
             # Log other event names
             logger.debug(f"Unhandled RunItemStreamEvent: name={event.name}")
@@ -336,6 +343,7 @@ class ToolUsageTracker:
         self._tool_calls.clear()
         self._container_files.clear()
         self._file_to_container.clear()
+        self._attachments.clear()
 
     def _register_container_file(
         self, *, filename: str | None, file_id: str, container_id: str
@@ -451,6 +459,61 @@ class ToolUsageTracker:
                         file_id=file_id,
                         container_id=container_id,
                     )
+                    self._attachments.append(
+                        {
+                            "file_id": file_id,
+                            "container_id": container_id,
+                            "filename": filename,
+                        }
+                    )
+
+    async def _attach_container_file_metadata(self, raw_message: Any) -> None:
+        """
+        Persist attachments to Supabase (marketing_messages.attachments & marketing_attachments).
+        """
+        try:
+            thread_id = self._ctx.thread.id if self._ctx and self._ctx.thread else None
+            item_id = getattr(raw_message, "id", None) or self._get_field(raw_message, "id")
+            if not thread_id or not item_id:
+                logger.debug("Cannot attach metadata: missing thread_id or item_id")
+                return
+
+            attachments = list(getattr(self, "_attachments", []) or [])
+            if not attachments:
+                logger.debug("No attachments collected; skip metadata attach")
+                return
+
+            from app.infrastructure.supabase.client import get_supabase
+
+            sb = get_supabase()
+            # Update marketing_messages.attachments
+            try:
+                sb.table("marketing_messages").update({"attachments": attachments}).eq("id", item_id).execute()
+            except Exception:
+                logger.exception("Failed to persist attachments on marketing_messages for %s", item_id)
+
+            # Upsert marketing_attachments for searchability
+            for att in attachments:
+                try:
+                    sb.table("marketing_attachments").upsert(
+                        {
+                            "id": att["file_id"],
+                            "conversation_id": thread_id,
+                            "owner_email": getattr(self._ctx.request_context, "user_email", None),
+                            "filename": att.get("filename"),
+                            "storage_metadata": {
+                                "container_id": att.get("container_id"),
+                            },
+                        }
+                    ).execute()
+                except Exception:
+                    logger.exception("Failed to upsert marketing_attachment %s", att.get("file_id"))
+
+            logger.info("Saved %d attachments for message %s", len(attachments), item_id)
+            # clear for next message
+            self._attachments.clear()
+        except Exception:
+            logger.exception("Unexpected error while attaching container file metadata")
 
     async def _rewrite_assistant_message_links(self, raw_message: Any) -> None:
         """
@@ -574,7 +637,7 @@ class ToolUsageTracker:
                 return match.group(0)
 
             container_id, file_id = ref
-            download_url = f"/api/backend/marketing/files/{file_id}?container_id={container_id}"
+            download_url = self._build_download_url(file_id=file_id, container_id=container_id)
             return f"[{label}]({download_url})"
 
         return SANDBOX_LINK_RE.sub(replacer, text)
@@ -582,6 +645,51 @@ class ToolUsageTracker:
     def get_container_file_map(self) -> Dict[str, Tuple[str, str]]:
         """Return a copy of the current container file mapping."""
         return dict(self._container_files)
+
+    # --- URL / token helpers -------------------------------------------------
+
+    def _get_token_service(self) -> MarketingTokenService:
+        if self._token_service:
+            return self._token_service
+        settings = get_settings()
+        self._token_service = MarketingTokenService(settings.marketing_chatkit_token_secret)
+        return self._token_service
+
+    def _build_download_url(self, file_id: str, container_id: str | None) -> str:
+        """
+        Build a signed, relative download URL for the frontend proxy.
+        Token is short‑lived and bound to file/container to avoid leaking secrets via headers.
+        """
+        try:
+            svc = self._get_token_service()
+            now = int(datetime.now().timestamp())
+            ttl = max(get_settings().marketing_chatkit_token_ttl, 60)
+            safe_file_id = self._sanitize_id(file_id)
+            safe_container_id = self._sanitize_id(container_id) if container_id else None
+            payload = {
+                "sub": getattr(self._ctx.request_context, "user_id", "unknown"),
+                "email": getattr(self._ctx.request_context, "user_email", "unknown"),
+                "name": getattr(self._ctx.request_context, "user_name", None),
+                "iat": now,
+                "exp": now + ttl,
+                "file_id": safe_file_id,
+            }
+            if safe_container_id:
+                payload["container_id"] = safe_container_id
+            token = svc.sign(payload)
+            query = f"token={token}"
+            if safe_container_id:
+                query += f"&container_id={safe_container_id}"
+            # URL‑encode file_id in path to avoid hidden chars breaking the link
+            from urllib.parse import quote
+
+            encoded_file_id = quote(safe_file_id, safe="")
+            return f"/api/marketing/files/{encoded_file_id}?{query}"
+        except Exception:
+            logger.exception("Failed to sign download URL; falling back to unsigned")
+            if container_id:
+                return f"/api/marketing/files/{file_id}?container_id={container_id}"
+            return f"/api/marketing/files/{file_id}"
 
     def _describe_tool_call(self, raw_item: Any) -> Optional[dict[str, Any]]:
         identifier = self._extract_identifier(raw_item)

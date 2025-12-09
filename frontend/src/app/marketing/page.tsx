@@ -49,6 +49,15 @@ import { ModelAssetSelector } from "@/components/marketing/ModelAssetSelector";
 import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
 import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 
+type Attachment = {
+  file_id: string;
+  filename?: string | null;
+  container_id?: string | null;
+  download_url: string;
+  message_id?: string;
+  created_at?: string | null;
+};
+
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
   process.env.NEXT_PUBLIC_MARKETING_CHATKIT_DOMAIN_KEY ?? "bnq-marketing";
@@ -114,8 +123,9 @@ const markdownComponents: Components = {
     if (fileIdMatch) {
       isDownloadable = true;
       // Keep backend URLs (with query params) intact to preserve container_id
-      if (!href.startsWith("/api/backend/marketing/files/")) {
-        finalHref = `/api/backend/marketing/files/${fileIdMatch[0]}`;
+      const alreadyBackend = href.startsWith("/api/marketing/files/");
+      if (!alreadyBackend) {
+        finalHref = `/api/marketing/files/${fileIdMatch[0]}`;
       }
     }
 
@@ -237,8 +247,11 @@ const markdownComponents: Components = {
     }
 
     const fileIdMatch = src.match(FILE_ID_PATTERN);
-    if (fileIdMatch && !src.startsWith("/api/backend/marketing/files/")) {
-      finalSrc = `/api/backend/marketing/files/${fileIdMatch[0]}`;
+    if (fileIdMatch) {
+      const alreadyBackend = src.startsWith("/api/marketing/files/");
+      if (!alreadyBackend) {
+        finalSrc = `/api/marketing/files/${fileIdMatch[0]}`;
+      }
     }
 
     return (
@@ -542,6 +555,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     return stored ?? { visible: false, version: 0 };
   });
   const [isResponding, setIsResponding] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
   const currentAssetIdRef = useRef<string>(selectedAssetId);
   const canvasEnabled = useMemo(() => {
@@ -586,6 +600,16 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       secret: data.client_secret,
       expiresAt: now + (data.expires_in ?? 900) * 1000,
     };
+
+    // Persist for download proxy so <a> links can forward credentials
+    try {
+      const maxAge = Math.max((data.expires_in ?? 900) - 5, 60); // guard against very small TTLs
+      const secure = typeof window !== "undefined" && window.location.protocol === "https:";
+      document.cookie = `marketing_client_secret=${data.client_secret}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? "; Secure" : ""}`;
+    } catch (err) {
+      console.warn("Failed to set marketing_client_secret cookie", err);
+    }
+
     return tokenRef.current.secret!;
   }, []);
 
@@ -603,6 +627,28 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         const message = error instanceof Error ? error.message : "Token refresh failed";
         setTokenError(message);
         throw error;
+      }
+    },
+    [ensureClientSecret]
+  );
+
+  const loadAttachments = useCallback(
+    async (threadId: string | null) => {
+      if (!threadId) {
+        setAttachments([]);
+        return;
+      }
+      try {
+        const secret = await ensureClientSecret();
+        const res = await fetch(`/api/marketing/threads/${threadId}/attachments`, {
+          headers: { "x-marketing-client-secret": secret },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`failed to fetch attachments: ${res.status}`);
+        const data = await res.json();
+        setAttachments(data.attachments || []);
+      } catch (err) {
+        console.error("loadAttachments failed", err);
       }
     },
     [ensureClientSecret]
@@ -736,7 +782,10 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     const el = chatkitRef.current;
     if (!el) return;
     const onStart = () => setIsResponding(true);
-    const onEnd = () => setIsResponding(false);
+    const onEnd = () => {
+      setIsResponding(false);
+      loadAttachments(currentThreadIdRef.current);
+    };
     const handleThread = (threadId: string | null) => {
       currentThreadIdRef.current = threadId;
       const stored = loadStoredCanvas(threadId);
@@ -746,6 +795,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       if (typeof window !== "undefined" && window.location.pathname !== target) {
         window.history.replaceState({}, "", target);
       }
+      loadAttachments(threadId);
     };
     const onThreadChange = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId: string | null }>).detail;
@@ -827,6 +877,10 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     };
     loadAssets();
   }, [ensureClientSecret, handleSelectAsset]);
+
+  useEffect(() => {
+    loadAttachments(initialThreadId ?? null);
+  }, [initialThreadId, loadAttachments]);
 
   const handleSaveAsset = useCallback(
     async (form: Partial<ModelAsset>, assetId?: string) => {
@@ -917,6 +971,32 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         strategy="beforeInteractive"
         crossOrigin="anonymous"
       />
+      {/* Make CI download links look like buttons even inside ChatKit messages */}
+      <style jsx global>{`
+        openai-chatkit a[href^="/api/marketing/files/"] {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 10px;
+          border-radius: 8px;
+          border: 1px solid #2563eb;
+          background: #eef2ff;
+          color: #1d4ed8 !important;
+          font-weight: 600;
+          text-decoration: none !important;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+          transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+        }
+        openai-chatkit a[href^="/api/marketing/files/"]:hover {
+          background: #dbeafe;
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
+          transform: translateY(-1px);
+        }
+        openai-chatkit a[href^="/api/marketing/files/"]::before {
+          content: "⬇";
+          font-size: 14px;
+        }
+      `}</style>
       <div className="h-full w-full overflow-hidden bg-background relative">
         {/* モデルアセットセレクター */}
         <div className="absolute top-4 left-4 z-40 flex items-center gap-3">
@@ -973,6 +1053,26 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
               }}
               style={{ width: "100%", height: "100%", display: "block" }}
             />
+            {/* Attachment buttons rendered outside ChatKit */}
+            {attachments.length > 0 && (
+              <div className="absolute bottom-4 left-4 right-4 z-30">
+                <div className="flex flex-wrap gap-2 bg-white/90 backdrop-blur border border-slate-200 shadow-lg rounded-lg p-3">
+                  {attachments.map((att) => (
+                    <a
+                      key={`${att.message_id}-${att.file_id}`}
+                      href={att.download_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition"
+                      download
+                    >
+                      <Download className="h-4 w-4" />
+                      {att.filename || att.file_id}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           {showCanvasPane && (
             <div className="h-full w-[55%] overflow-hidden border-l-2 animate-in slide-in-from-right duration-300">
