@@ -360,6 +360,7 @@ async def upload_marketing_attachment(
 async def download_openai_file(
     file_id: str,
     container_id: str | None = Query(default=None),
+    filename: str | None = Query(default=None),
     token: str | None = Query(default=None),
     marketing_client_secret: Annotated[
         str | None, Header(alias="x-marketing-client-secret", convert_underscores=False)
@@ -382,7 +383,7 @@ async def download_openai_file(
     bucket = sb.storage.from_(ATTACHMENT_BUCKET)
     storage_path = f"openai_cache/{file_id}"
 
-    filename = f"{file_id}.bin"
+    resolved_filename = filename or f"{file_id}.bin"
 
     # Serve cached copy if available
     try:
@@ -394,6 +395,7 @@ async def download_openai_file(
         logger.info("Cache miss for generated file %s", file_id)
 
     file_bytes: bytes
+    meta_filename: str | None = None
 
     # --- AuthN: token or header ---
     context: MarketingRequestContext | None = None
@@ -461,7 +463,7 @@ async def download_openai_file(
                 meta_resp = await client.get(meta_url, headers=headers)
                 if meta_resp.status_code == 200:
                     meta = meta_resp.json()
-                    filename = meta.get("filename") or meta.get("name") or filename
+                    meta_filename = meta.get("filename") or meta.get("name") or meta_filename
         else:
             # Use regular Files API for uploads or fine-tuning artifacts
             logger.info(f"Using regular files API for: file_id={file_id}")
@@ -469,13 +471,33 @@ async def download_openai_file(
             content_stream = client.files.content(file_id)
             file_bytes = content_stream.read()
             file_info = client.files.retrieve(file_id)
-            filename = getattr(file_info, "filename", None) or filename
+            meta_filename = getattr(file_info, "filename", None) or meta_filename
 
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception(f"Failed to download file {file_id}")
         raise HTTPException(status_code=404, detail=f"File not found or expired: {exc}") from exc
+
+    # Resolve best filename (priority: query > OpenAI meta > DB > default)
+    if filename:
+        resolved_filename = filename
+    elif meta_filename:
+        resolved_filename = meta_filename
+    else:
+        try:
+            row = (
+                sb.table("marketing_attachments")
+                .select("filename")
+                .eq("id", file_id)
+                .limit(1)
+                .execute()
+                .data
+            )
+            if row and row[0].get("filename"):
+                resolved_filename = row[0]["filename"]
+        except Exception:
+            logger.info("Filename lookup in marketing_attachments failed for %s", file_id)
 
     # Cache the file
     try:
@@ -487,7 +509,7 @@ async def download_openai_file(
     except Exception:
         logger.exception("Failed to cache OpenAI file %s", file_id)
 
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    headers = {"Content-Disposition": f'attachment; filename="{resolved_filename}"'}
     return Response(content=file_bytes, media_type="application/octet-stream", headers=headers)
 
 
