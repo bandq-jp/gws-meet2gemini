@@ -2,6 +2,13 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 
+
+class TranscriptUpdateIn(BaseModel):
+    """議事録本文の上書きリクエスト"""
+    text_content: str = Field(..., description="貼り付けた議事録全文")
+    transcript_provider: Optional[str] = Field(default=None, description="文字起こし元サービス名（任意）")
+    delete_structured: bool = Field(default=True, description="既存の構造化データを削除するか")
+
 class MeetingSummary(BaseModel):
     """軽量な議事録サマリー（一覧表示用）"""
     id: str

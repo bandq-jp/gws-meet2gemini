@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { CandidateSearchDialog } from "@/components/candidate-search-dialog";
@@ -121,6 +123,10 @@ export default function MeetingDetailPage() {
   const [loading, setLoading] = useState(true);
   const [loadingStructured, setLoadingStructured] = useState(false);
   const [showCandidateSearch, setShowCandidateSearch] = useState(false);
+  const [isEditingTranscript, setIsEditingTranscript] = useState(false);
+  const [transcriptSaving, setTranscriptSaving] = useState(false);
+  const [draftTranscript, setDraftTranscript] = useState("");
+  const [transcriptProvider, setTranscriptProvider] = useState("");
 
   // Load meeting data on mount
   useEffect(() => {
@@ -138,6 +144,12 @@ export default function MeetingDetailPage() {
       setStructuredData(null);
       setCandidateSuggestions([]);
       setSelectedCandidate(null);
+      setDraftTranscript(fullMeeting.text_content || "");
+      const provider =
+        (fullMeeting as any)?.metadata?.transcript_provider ||
+        (fullMeeting as any)?.metadata?.transcriptProvider ||
+        "";
+      setTranscriptProvider(provider);
 
       setLoadingStructured(true);
       const data = await apiClient.getStructuredData(fullMeeting.id);
@@ -263,6 +275,27 @@ export default function MeetingDetailPage() {
       toast.error('構造化処理に失敗しました');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  const handleSaveTranscript = async () => {
+    if (!selectedMeeting) return;
+    try {
+      setTranscriptSaving(true);
+      const updated = await apiClient.updateTranscript(selectedMeeting.id, {
+        text_content: draftTranscript.trim(),
+        transcript_provider: transcriptProvider || undefined,
+        delete_structured: true,
+      });
+      setSelectedMeeting(updated);
+      setStructuredData(null); // 旧構造化結果をクリア
+      toast.success("議事録を更新しました。再度「再実行」で構造化してください。");
+      setIsEditingTranscript(false);
+    } catch (error) {
+      console.error("Failed to update transcript:", error);
+      toast.error("議事録の保存に失敗しました");
+    } finally {
+      setTranscriptSaving(false);
     }
   };
 
@@ -497,23 +530,87 @@ export default function MeetingDetailPage() {
 
             {/* Preview Section */}
             <div className="space-y-6 min-w-0">
-              {selectedMeeting.text_content && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center space-x-2">
-                      <Eye className="h-5 w-5" />
-                      <span>議事録プレビュー</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                  <div className="flex items-center space-x-2">
+                    <Eye className="h-5 w-5" />
+                    <CardTitle className="text-base sm:text-lg">議事録プレビュー</CardTitle>
+                  </div>
+                  <div className="flex gap-2">
+                    {structuredData === null && (
+                      <Badge variant="secondary" className="hidden sm:inline-flex">テキスト更新済み</Badge>
+                    )}
+                    {isEditingTranscript ? (
+                      <>
+                        <Button
+                          size="sm"
+                          onClick={handleSaveTranscript}
+                          disabled={transcriptSaving}
+                        >
+                          {transcriptSaving ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              保存中...
+                            </>
+                          ) : (
+                            "保存して閉じる"
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setIsEditingTranscript(false);
+                            setDraftTranscript(selectedMeeting.text_content || "");
+                          }}
+                          disabled={transcriptSaving}
+                        >
+                          キャンセル
+                        </Button>
+                      </>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => setIsEditingTranscript(true)}>
+                        編集
+                      </Button>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isEditingTranscript ? (
+                    <>
+                      <div className="space-y-2">
+                        <Label className="text-sm">文字起こしテキスト</Label>
+                        <Textarea
+                          value={draftTranscript}
+                          onChange={(e) => setDraftTranscript(e.target.value)}
+                          className="min-h-[260px]"
+                          placeholder="ここに議事録テキストを貼り付けてください"
+                        />
+                        <div className="text-xs text-muted-foreground text-right">
+                          {draftTranscript.length.toLocaleString()} 文字
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm">文字起こし提供元（任意）</Label>
+                        <Input
+                          value={transcriptProvider}
+                          onChange={(e) => setTranscriptProvider(e.target.value)}
+                          placeholder="例: Notta, Google Meet, 文字起こしメモなど"
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        保存するとSupabase上の議事録本文が上書きされ、既存の構造化結果はクリアされます。左の「再実行」で最新本文を基に構造化してください。
+                      </p>
+                    </>
+                  ) : (
                     <ScrollArea className="h-96 w-full rounded-md border p-4">
                       <pre className="whitespace-pre-wrap text-sm break-words overflow-hidden">
-                        {selectedMeeting.text_content}
+                        {selectedMeeting.text_content || "まだ本文がありません。編集を押して貼り付けてください。"}
                       </pre>
                     </ScrollArea>
-                  </CardContent>
-                </Card>
-              )}
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </div>
         </div>

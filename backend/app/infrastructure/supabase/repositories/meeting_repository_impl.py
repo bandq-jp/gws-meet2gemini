@@ -207,3 +207,36 @@ class MeetingRepositoryImpl:
             data['is_structured'] = bool(structured_data and len(structured_data) > 0)
             return data
         return {}
+
+    def update_transcript(
+        self,
+        meeting_id: str,
+        text_content: str,
+        transcript_provider: Optional[str] = None,
+        transcript_source: str = "manual_edit",
+    ) -> Dict[str, Any]:
+        """議事録本文を上書きする。metadataにtranscript_providerを残す。"""
+        sb = get_supabase()
+
+        # 既存metadataを取得してマージ
+        existing = self.get_meeting(meeting_id)
+        if not existing:
+            return {}
+
+        metadata = existing.get("metadata") or {}
+        if transcript_provider:
+            metadata = {**metadata, "transcript_provider": transcript_provider}
+
+        payload = {
+            "text_content": text_content,
+            "metadata": metadata,
+        }
+
+        res = sb.table(self.TABLE).update(payload).eq("id", meeting_id).execute()
+        data = getattr(res, "data", None)
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        # 返却が空のときは再取得して返す
+        return self.get_meeting(meeting_id)
