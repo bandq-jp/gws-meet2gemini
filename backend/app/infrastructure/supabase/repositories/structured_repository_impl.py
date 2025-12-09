@@ -62,3 +62,8 @@ class StructuredRepositoryImpl:
             data=data['data'],
             zoho_candidate=zoho_candidate
         )
+
+    def delete_by_meeting_id(self, meeting_id: str) -> None:
+        """構造化データを削除する（再処理前にクリアしたい場合に使用）"""
+        sb = get_supabase()
+        sb.table(self.TABLE).delete().eq("meeting_id", meeting_id).execute()

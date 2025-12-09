@@ -236,6 +236,16 @@ class ApiClient {
     return this.request<Meeting>(`/meetings/${encodeURIComponent(id)}`);
   }
 
+  async updateTranscript(
+    meetingId: string,
+    payload: { text_content: string; transcript_provider?: string; delete_structured?: boolean }
+  ): Promise<Meeting> {
+    return this.request<Meeting>(`/meetings/${encodeURIComponent(meetingId)}/transcript`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async collectMeetings(
     accounts?: string[], 
     includeStructure = false, 

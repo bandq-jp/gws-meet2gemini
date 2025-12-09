@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query, HTTPException, Body, Request, Response, st
 from pydantic import BaseModel
 import logging
 
-from app.presentation.schemas.meeting import MeetingOut, MeetingListResponse
+from app.presentation.schemas.meeting import MeetingOut, MeetingListResponse, TranscriptUpdateIn
 from app.application.use_cases.collect_meetings import CollectMeetingsUseCase
 from app.infrastructure.background.job_tracker import JobTracker
 
@@ -13,6 +13,7 @@ from app.application.use_cases.get_meeting_list_paginated import GetMeetingListP
 from app.application.use_cases.get_meeting_detail import GetMeetingDetailUseCase
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.gcp.tasks import enqueue_collect_meetings_task
+from app.application.use_cases.update_meeting_transcript import UpdateMeetingTranscriptUseCase
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -110,6 +111,26 @@ async def get_available_accounts():
 async def get_meeting_detail(meeting_id: str):
     use_case = GetMeetingDetailUseCase()
     return await use_case.execute(meeting_id)
+
+@router.put("/{meeting_id}/transcript", response_model=MeetingOut)
+async def update_meeting_transcript(meeting_id: str, body: TranscriptUpdateIn = Body(...)):
+    """議事録テキストを上書きし、必要なら既存の構造化データをクリア"""
+    use_case = UpdateMeetingTranscriptUseCase()
+    try:
+        updated = use_case.execute(
+            meeting_id=meeting_id,
+            text_content=body.text_content,
+            transcript_provider=body.transcript_provider,
+            delete_structured=body.delete_structured,
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="meeting not found")
+        return updated
+    except ValueError:
+        raise HTTPException(status_code=404, detail="meeting not found")
+    except Exception as e:
+        logger.exception("Failed to update transcript: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/collect-task", response_model=dict, status_code=202)
 async def enqueue_collect_meetings(
