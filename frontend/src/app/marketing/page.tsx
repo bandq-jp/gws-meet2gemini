@@ -103,10 +103,11 @@ const markdownComponents: Components = {
     </p>
   ),
   a: ({ children, href, ...props }) => {
-    let finalHref = href ?? "";
+    const hrefStr = typeof href === "string" ? href : "";
+    let finalHref = hrefStr;
     let isDownloadable = false;
 
-    if (!href) {
+    if (!hrefStr) {
       return (
         <a {...props}>
           {children}
@@ -114,16 +115,16 @@ const markdownComponents: Components = {
       );
     }
 
-    const sandboxMatch = SANDBOX_URL_PATTERN.test(href);
+    const sandboxMatch = SANDBOX_URL_PATTERN.test(hrefStr);
     if (sandboxMatch) {
-      console.warn(`Unconverted sandbox URL detected: ${href}`);
+      console.warn(`Unconverted sandbox URL detected: ${hrefStr}`);
     }
 
-    const fileIdMatch = href.match(FILE_ID_PATTERN);
+    const fileIdMatch = hrefStr.match(FILE_ID_PATTERN);
     if (fileIdMatch) {
       isDownloadable = true;
       // Keep backend URLs (with query params) intact to preserve container_id
-      const alreadyBackend = href.startsWith("/api/marketing/files/");
+      const alreadyBackend = hrefStr.startsWith("/api/marketing/files/");
       if (!alreadyBackend) {
         finalHref = `/api/marketing/files/${fileIdMatch[0]}`;
       }
@@ -236,19 +237,20 @@ const markdownComponents: Components = {
     </td>
   ),
   img: ({ src, alt, ...props }) => {
-    let finalSrc = src ?? "";
+    const srcStr = typeof src === "string" ? src : "";
+    let finalSrc = srcStr;
 
-    if (!src) {
+    if (!srcStr) {
       return <img alt={alt} {...props} />;
     }
 
-    if (SANDBOX_URL_PATTERN.test(src)) {
-      console.warn(`Unconverted sandbox URL in image src: ${src}`);
+    if (SANDBOX_URL_PATTERN.test(srcStr)) {
+      console.warn(`Unconverted sandbox URL in image src: ${srcStr}`);
     }
 
-    const fileIdMatch = src.match(FILE_ID_PATTERN);
+    const fileIdMatch = srcStr.match(FILE_ID_PATTERN);
     if (fileIdMatch) {
-      const alreadyBackend = src.startsWith("/api/marketing/files/");
+      const alreadyBackend = srcStr.startsWith("/api/marketing/files/");
       if (!alreadyBackend) {
         finalSrc = `/api/marketing/files/${fileIdMatch[0]}`;
       }
