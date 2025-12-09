@@ -556,6 +556,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
   });
   const [isResponding, setIsResponding] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [showAttachments, setShowAttachments] = useState(false);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
   const currentAssetIdRef = useRef<string>(selectedAssetId);
   const canvasEnabled = useMemo(() => {
@@ -1043,7 +1044,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         )}
         <div className={`h-full flex ${tokenError ? 'pt-16' : ''}`}>
           <div
-            className={`h-full overflow-hidden transition-all duration-300 ${
+            className={`relative h-full overflow-hidden transition-all duration-300 ${
               showCanvasPane ? "w-[45%]" : "w-full"
             }`}
           >
@@ -1053,25 +1054,66 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
               }}
               style={{ width: "100%", height: "100%", display: "block" }}
             />
-            {/* Attachment buttons rendered outside ChatKit */}
+
+            {/* Attachment panel toggle & list (floats above ChatKit but avoids composer) */}
             {attachments.length > 0 && (
-              <div className="absolute bottom-4 left-4 right-4 z-30">
-                <div className="flex flex-wrap gap-2 bg-white/90 backdrop-blur border border-slate-200 shadow-lg rounded-lg p-3">
-                  {attachments.map((att) => (
-                    <a
-                      key={`${att.message_id}-${att.file_id}`}
-                      href={att.download_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-md border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition"
-                      download
-                    >
-                      <Download className="h-4 w-4" />
-                      {att.filename || att.file_id}
-                    </a>
-                  ))}
+              <>
+                <div className="absolute bottom-4 right-4 z-30">
+                  <button
+                    type="button"
+                    onClick={() => setShowAttachments((v) => !v)}
+                    className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  >
+                    <Download className="h-4 w-4" />
+                    添付 {attachments.length} 件
+                  </button>
                 </div>
-              </div>
+                <div
+                  className={`absolute bottom-16 right-4 z-30 w-80 max-w-[92vw] transition-all duration-200 ${
+                    showAttachments ? "opacity-100 translate-y-0" : "opacity-0 pointer-events-none translate-y-2"
+                  }`}
+                >
+                  <div className="bg-white/95 backdrop-blur rounded-xl shadow-2xl border border-slate-200 max-h-[55vh] overflow-y-auto">
+                    <div className="px-4 py-3 border-b flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur rounded-t-xl">
+                      <div className="text-sm font-semibold text-slate-800">添付ファイル</div>
+                      <button
+                        type="button"
+                        className="text-xs text-slate-500 hover:text-slate-800"
+                        onClick={() => setShowAttachments(false)}
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                    <ul className="divide-y divide-slate-100">
+                      {attachments.map((att) => (
+                        <li key={`${att.message_id}-${att.file_id}`}>
+                          <a
+                            href={att.download_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-start gap-3 px-4 py-3 hover:bg-blue-50 transition"
+                            download
+                          >
+                            <div className="mt-0.5">
+                              <Download className="h-4 w-4 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-semibold text-slate-900 truncate">
+                                {att.filename || att.file_id}
+                              </div>
+                              {att.created_at && (
+                                <div className="text-xs text-slate-500">
+                                  {new Date(att.created_at).toLocaleString("ja-JP")}
+                                </div>
+                              )}
+                            </div>
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </>
             )}
           </div>
           {showCanvasPane && (
