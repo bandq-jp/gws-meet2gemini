@@ -1103,7 +1103,14 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
                               </div>
                               {att.created_at && (
                                 <div className="text-xs text-slate-500">
-                                  {new Date(att.created_at).toLocaleString("ja-JP")}
+                                  {new Date(att.created_at).toLocaleString("ja-JP", {
+                                    timeZone: "Asia/Tokyo",
+                                    year: "numeric",
+                                    month: "2-digit",
+                                    day: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
                                 </div>
                               )}
                             </div>
