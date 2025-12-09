@@ -4,9 +4,10 @@ import asyncio
 import json
 import logging
 import uuid
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterable, Optional, Tuple
 
 from agents.stream_events import RunItemStreamEvent, StreamEvent
 from chatkit.agents import AgentContext
@@ -14,12 +15,14 @@ from chatkit.types import (
     CustomTask,
     HiddenContextItem,
     ThreadItemUpdated,
+    ThreadItemReplacedEvent,
     WorkflowItem,
     WorkflowTaskAdded,
     WorkflowTaskUpdated,
+    AssistantMessageItem,
 )
-
 logger = logging.getLogger(__name__)
+SANDBOX_LINK_RE = re.compile(r"\[([^\]]+)\]\((sandbox:/[^\)]+)\)")
 
 
 @dataclass
@@ -123,10 +126,21 @@ class ToolUsageTracker:
         self._presenter = ToolWorkflowPresenter(ctx)
         self._ctx = ctx
         self._tool_calls: Dict[str, Dict[str, Any]] = {}
+        # filename / basename -> (container_id, file_id)
+        self._container_files: Dict[str, Tuple[str, str]] = {}
+        # file_id -> container_id
+        self._file_to_container: Dict[str, str] = {}
 
     async def observe(self, event: StreamEvent) -> None:
+        # Log all events for debugging
+        logger.debug(f"Received event: type={type(event).__name__}, name={getattr(event, 'name', 'N/A')}")
+
         if not isinstance(event, RunItemStreamEvent):
             return
+
+        # Log RunItemStreamEvent details
+        logger.debug(f"RunItemStreamEvent: name={event.name}, item={type(event.item).__name__ if hasattr(event, 'item') else 'N/A'}")
+
         if event.name == "tool_called":
             # Debug logging to see what's coming through
             raw_item = event.item.raw_item
@@ -172,6 +186,12 @@ class ToolUsageTracker:
             identifier = self._extract_identifier(event.item.raw_item)
             tool_type = self._get_field(event.item.raw_item, "type")
             logger.info(f"Tool output event: identifier={identifier}, type={tool_type}")
+            logger.debug(f"Tool output raw_item: {event.item.raw_item}")
+
+            # File annotations for Code Interpreter outputs are handled in
+            # `message_output_created` where container_file_citation is present.
+            if tool_type == "code_interpreter_call":
+                logger.debug("Code Interpreter output observed; waiting for message_output_created for file citations")
 
             if identifier:
                 summary = self._summarize_output(event.item.output)
@@ -179,6 +199,39 @@ class ToolUsageTracker:
 
                 # Save tool output as hidden context for conversation history
                 await self._save_tool_output_as_context(identifier, event.item)
+        elif event.name == "message_output_created":
+            # This event contains the final output including Code Interpreter results
+            logger.info(f"Message output created event")
+            logger.debug(f"Message output item: {event.item}")
+
+            # Extract file annotations from the message content
+            if hasattr(event.item, "raw_item"):
+                raw_item = event.item.raw_item
+                logger.debug(f"Message output raw_item: {raw_item}")
+                # Responses API sometimes populates `output`/`outputs`, and sometimes only `content` on the message.
+                outputs = (
+                    getattr(raw_item, "output", None)
+                    or getattr(raw_item, "outputs", None)
+                    or []
+                )
+
+                # Always also look at top-level content for annotations.
+                top_level_content = getattr(raw_item, "content", None)
+
+                if not isinstance(outputs, list):
+                    outputs = [outputs]
+
+                logger.debug("message_output_created outputs len=%s", len(outputs))
+
+                self._extract_container_files_from_outputs(outputs)
+                if top_level_content:
+                    self._extract_container_files_from_content_blocks(top_level_content)
+
+                # After registering container files, rewrite the assistant message text in the store
+                await self._rewrite_assistant_message_links(raw_item)
+        else:
+            # Log other event names
+            logger.debug(f"Unhandled RunItemStreamEvent: name={event.name}")
 
     async def _save_tool_call_as_context(
         self, identifier: str, tool_call_item: Any, metadata: dict[str, Any]
@@ -281,6 +334,254 @@ class ToolUsageTracker:
     async def close(self) -> None:
         await self._presenter.close()
         self._tool_calls.clear()
+        self._container_files.clear()
+        self._file_to_container.clear()
+
+    def _register_container_file(
+        self, *, filename: str | None, file_id: str, container_id: str
+    ) -> None:
+        """Register a container/file mapping for later sandbox link rewrites."""
+        self._file_to_container[file_id] = container_id
+
+        # Canonical keys we want to match against: full filename, basename, /mnt/data/{basename}, sandbox:/mnt/data/{basename}
+        keys: list[str] = []
+        if filename:
+            keys.append(filename)
+            basename = filename.split("/")[-1]
+            keys.append(basename)
+            keys.append(f"/mnt/data/{basename}")
+            keys.append(f"sandbox:/mnt/data/{basename}")
+        else:
+            logger.info(
+                "Registered container file without filename: file_id=%s, container_id=%s",
+                file_id,
+                container_id,
+            )
+        for key in keys:
+            self._container_files[key] = (container_id, file_id)
+        if keys:
+            logger.info(
+                "Registered container file: keys=%s, file_id=%s, container_id=%s",
+                keys,
+                file_id,
+                container_id,
+            )
+
+    def lookup_container_file(self, path_or_name: str) -> tuple[str, str] | None:
+        """
+        Resolve sandbox path or filename to (container_id, file_id).
+        - Checks exact key
+        - Falls back to basename
+        """
+        if not path_or_name:
+            return None
+        normalized = path_or_name
+        if normalized.startswith("sandbox:"):
+            normalized = normalized.replace("sandbox:", "", 1)
+        basename = normalized.split("/")[-1]
+        return (
+            self._container_files.get(path_or_name)
+            or self._container_files.get(normalized)
+            or self._container_files.get(basename)
+            or self._container_files.get(f"/mnt/data/{basename}")
+            or self._container_files.get(f"sandbox:/mnt/data/{basename}")
+        )
+
+    # --- internal helpers -------------------------------------------------
+
+    def _extract_container_files_from_outputs(self, outputs: list[Any]) -> None:
+        for output in outputs:
+            output_dict = output
+            if hasattr(output, "model_dump"):
+                try:
+                    output_dict = output.model_dump()
+                except Exception:
+                    output_dict = output
+            if not isinstance(output_dict, dict):
+                output_dict = getattr(output, "__dict__", {}) or {}
+
+            output_type = output_dict.get("type") or getattr(output, "type", None)
+            if output_type != "output_text":
+                continue
+
+            content_items = output_dict.get("content") or getattr(output, "content", []) or []
+            self._extract_container_files_from_content_blocks(content_items)
+
+    def _extract_container_files_from_content_blocks(self, content_items: Any) -> None:
+        if not isinstance(content_items, list):
+            content_items = [content_items]
+
+        for content_item in content_items:
+            content_dict = content_item
+            if hasattr(content_item, "model_dump"):
+                try:
+                    content_dict = content_item.model_dump()
+                except Exception:
+                    content_dict = content_item
+            if not isinstance(content_dict, dict):
+                content_dict = getattr(content_item, "__dict__", {}) or {}
+
+            annotations = content_dict.get("annotations") or getattr(content_item, "annotations", []) or []
+            if not annotations:
+                continue
+
+            logger.debug("Found %s annotations on output content", len(annotations))
+
+            for annotation in annotations:
+                ann_dict = annotation
+                if hasattr(annotation, "model_dump"):
+                    try:
+                        ann_dict = annotation.model_dump()
+                    except Exception:
+                        ann_dict = annotation
+                if not isinstance(ann_dict, dict):
+                    ann_dict = getattr(annotation, "__dict__", {}) or {}
+
+                ann_type = ann_dict.get("type") or getattr(annotation, "type", None)
+                if ann_type != "container_file_citation":
+                    continue
+
+                container_id = ann_dict.get("container_id") or getattr(annotation, "container_id", None)
+                file_id = ann_dict.get("file_id") or getattr(annotation, "file_id", None)
+                filename = ann_dict.get("filename") or getattr(annotation, "filename", None)
+
+                if container_id and file_id:
+                    self._register_container_file(
+                        filename=filename,
+                        file_id=file_id,
+                        container_id=container_id,
+                    )
+
+    async def _rewrite_assistant_message_links(self, raw_message: Any) -> None:
+        """
+        After container files are registered for a message, rewrite sandbox links in the
+        stored AssistantMessageItem so that future renders use backend download URLs.
+        """
+        try:
+            thread_id = self._ctx.thread.id if self._ctx and self._ctx.thread else None
+            item_id = getattr(raw_message, "id", None) or self._get_field(raw_message, "id")
+            if not thread_id or not item_id:
+                logger.debug("Cannot rewrite links: missing thread_id or item_id")
+                return
+
+            container_files = dict(getattr(self, "_container_files", {}) or {})
+            if not container_files:
+                logger.debug("No container files registered; skip rewrite")
+                return
+
+            # Load the saved thread item
+            try:
+                item = await self._ctx.store.load_item(
+                    thread_id,
+                    item_id,
+                    self._ctx.request_context,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to load thread item for link rewrite: thread=%s item=%s",
+                    thread_id,
+                    item_id,
+                )
+                return
+
+            if not isinstance(item, AssistantMessageItem):
+                logger.debug(
+                    "Skip rewrite: item %s is not AssistantMessageItem (type=%s)",
+                    item_id,
+                    getattr(item, "type", None),
+                )
+                return
+
+            changed = False
+            for block in getattr(item, "content", []) or []:
+                text = getattr(block, "text", None)
+                if not text:
+                    continue
+                new_text = self._rewrite_text_with_container_files(text, container_files)
+                if new_text != text:
+                    block.text = new_text
+                    changed = True
+
+            if not changed:
+                logger.debug("No sandbox links rewritten for item %s", item_id)
+                return
+
+            try:
+                await self._ctx.store.save_item(
+                    thread_id,
+                    item,
+                    self._ctx.request_context,
+                )
+                logger.info(
+                    "Rewrote sandbox links for assistant message %s in thread %s",
+                    item_id,
+                    thread_id,
+                )
+
+                # Notify clients in the current stream so UI refreshes immediately
+                try:
+                    await self._ctx.stream(ThreadItemReplacedEvent(item=item))
+                except Exception:
+                    logger.exception(
+                        "Failed to stream ThreadItemReplacedEvent after rewrite: thread=%s item=%s",
+                        thread_id,
+                        item_id,
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to save rewritten assistant message: thread=%s item=%s",
+                    thread_id,
+                    item_id,
+                )
+        except Exception:
+            logger.exception("Unexpected error while rewriting assistant message links")
+
+    def _rewrite_text_with_container_files(
+        self,
+        text: str,
+        container_files: Dict[str, Tuple[str, str]],
+    ) -> str:
+        """Replace sandbox:/ links with backend download URLs using known container/file mappings."""
+        if not text or not container_files:
+            return text
+
+        def replacer(match: re.Match) -> str:
+            label = match.group(1)
+            sandbox_url = match.group(2)  # e.g. sandbox:/mnt/data/foo.csv
+            path = sandbox_url.replace("sandbox:", "", 1)
+            basename = path.split("/")[-1]
+
+            candidates = [
+                sandbox_url,
+                path,
+                f"/mnt/data/{basename}",
+                f"sandbox:/mnt/data/{basename}",
+                basename,
+            ]
+
+            ref: Tuple[str, str] | None = None
+            for key in candidates:
+                ref = container_files.get(key)
+                if ref:
+                    break
+
+            if not ref:
+                logger.warning(
+                    "No container file mapping for sandbox url %s (keys tried=%s)",
+                    sandbox_url,
+                    candidates,
+                )
+                return match.group(0)
+
+            container_id, file_id = ref
+            download_url = f"/api/backend/marketing/files/{file_id}?container_id={container_id}"
+            return f"[{label}]({download_url})"
+
+        return SANDBOX_LINK_RE.sub(replacer, text)
+
+    def get_container_file_map(self) -> Dict[str, Tuple[str, str]]:
+        """Return a copy of the current container file mapping."""
+        return dict(self._container_files)
 
     def _describe_tool_call(self, raw_item: Any) -> Optional[dict[str, Any]]:
         identifier = self._extract_identifier(raw_item)

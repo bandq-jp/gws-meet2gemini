@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from functools import lru_cache
 from typing import AsyncIterator, List
 
@@ -218,6 +219,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         self._agent_factory = agent_factory
         self._workflow_id = workflow_id or MARKETING_WORKFLOW_ID
         self._converter = MarketingThreadItemConverter()
+
     async def respond(
         self,
         thread: ThreadMetadata,
@@ -275,6 +277,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
 
         try:
             async for event in stream_agent_response(context_wrapper, monitored):
+                # sandbox リンク書き換えは ToolUsageTracker が DB を直接更新するので、ここではそのまま流す
                 yield event
         except APIError as exc:
             logger.exception("Marketing agent streaming failed")

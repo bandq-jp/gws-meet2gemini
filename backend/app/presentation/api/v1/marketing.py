@@ -6,6 +6,7 @@ from functools import lru_cache
 from typing import Annotated
 import mimetypes
 import cgi
+import httpx
 
 from fastapi import (
     APIRouter,
@@ -325,33 +326,84 @@ async def upload_marketing_attachment(
 @router.get("/files/{file_id}")
 async def download_openai_file(
     file_id: str,
+    container_id: str | None = Query(default=None),
     context: MarketingRequestContext = Depends(require_marketing_context),
 ):
     """
     Proxy downloads for files produced by Code Interpreter / Responses API.
     Caches the payload in Supabase Storage to avoid repeated egress.
+
+    For Code Interpreter generated files, container_id should be provided.
+    For regular uploaded files, container_id can be omitted.
     """
     settings = get_settings()
     sb = get_supabase()
     bucket = sb.storage.from_(ATTACHMENT_BUCKET)
     storage_path = f"openai_cache/{file_id}"
 
+    filename = f"{file_id}.bin"
+
     # Serve cached copy if available
     try:
         cached = bucket.download(storage_path)
         if cached:
-            return Response(content=cached, media_type="application/octet-stream")
+            headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+            return Response(content=cached, media_type="application/octet-stream", headers=headers)
     except Exception:
         logger.info("Cache miss for generated file %s", file_id)
 
-    client = OpenAI(api_key=settings.openai_api_key)
+    file_bytes: bytes
+
+    # Guard against missing container_id when cfile is requested
+    if file_id.startswith("cfile") and not container_id:
+        raise HTTPException(
+            status_code=400,
+            detail="container_id is required to download Code Interpreter files",
+        )
+
     try:
-        content_stream = client.files.content(file_id)
-        file_bytes = content_stream.read()
-        file_info = client.files.retrieve(file_id)
+        if container_id and file_id.startswith("cfile"):
+            # Use Container Files API via raw HTTP (not yet supported in SDK)
+            headers = {
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "OpenAI-Beta": "containers=v1",
+            }
+            base_url = "https://api.openai.com/v1"
+            async with httpx.AsyncClient(timeout=60) as client:
+                content_url = f"{base_url}/containers/{container_id}/files/{file_id}/content"
+                resp = await client.get(content_url, headers=headers)
+                if resp.status_code != 200:
+                    logger.error(
+                        "Failed to download container file %s (status=%s): %s",
+                        file_id,
+                        resp.status_code,
+                        resp.text,
+                    )
+                    raise HTTPException(status_code=404, detail="File not found")
+
+                file_bytes = resp.content
+
+                meta_url = f"{base_url}/containers/{container_id}/files/{file_id}"
+                meta_resp = await client.get(meta_url, headers=headers)
+                if meta_resp.status_code == 200:
+                    meta = meta_resp.json()
+                    filename = meta.get("filename") or meta.get("name") or filename
+        else:
+            # Use regular Files API for uploads or fine-tuning artifacts
+            logger.info(f"Using regular files API for: file_id={file_id}")
+            client = OpenAI(api_key=settings.openai_api_key)
+            content_stream = client.files.content(file_id)
+            file_bytes = content_stream.read()
+            file_info = client.files.retrieve(file_id)
+            filename = getattr(file_info, "filename", None) or filename
+
+    except HTTPException:
+        raise
     except Exception as exc:
+        logger.exception(f"Failed to download file {file_id}")
         raise HTTPException(status_code=404, detail=f"File not found or expired: {exc}") from exc
 
+    # Cache the file
     try:
         bucket.upload(
             path=storage_path,
@@ -361,7 +413,6 @@ async def download_openai_file(
     except Exception:
         logger.exception("Failed to cache OpenAI file %s", file_id)
 
-    filename = getattr(file_info, "filename", None) or f"{file_id}.bin"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
     return Response(content=file_bytes, media_type="application/octet-stream", headers=headers)
 

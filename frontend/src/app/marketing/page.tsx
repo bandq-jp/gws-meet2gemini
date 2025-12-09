@@ -52,7 +52,9 @@ import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
   process.env.NEXT_PUBLIC_MARKETING_CHATKIT_DOMAIN_KEY ?? "bnq-marketing";
+// Pattern to match OpenAI file IDs (file-xxx, cfile-xxx) and sandbox URLs
 const FILE_ID_PATTERN = /(file|cfile)-[A-Za-z0-9_-]+/;
+const SANDBOX_URL_PATTERN = /sandbox:\/[^\s\)\]"'<>]+/;
 
 // Custom components for rich markdown/HTML rendering
 const markdownComponents: Components = {
@@ -93,21 +95,41 @@ const markdownComponents: Components = {
   ),
   a: ({ children, href, ...props }) => {
     let finalHref = href ?? "";
-    const match = href && href.match(FILE_ID_PATTERN);
-    if (match) {
-      finalHref = `/api/backend/marketing/files/${match[0]}`;
+    let isDownloadable = false;
+
+    if (!href) {
+      return (
+        <a {...props}>
+          {children}
+        </a>
+      );
     }
+
+    const sandboxMatch = SANDBOX_URL_PATTERN.test(href);
+    if (sandboxMatch) {
+      console.warn(`Unconverted sandbox URL detected: ${href}`);
+    }
+
+    const fileIdMatch = href.match(FILE_ID_PATTERN);
+    if (fileIdMatch) {
+      isDownloadable = true;
+      // Keep backend URLs (with query params) intact to preserve container_id
+      if (!href.startsWith("/api/backend/marketing/files/")) {
+        finalHref = `/api/backend/marketing/files/${fileIdMatch[0]}`;
+      }
+    }
+
     return (
       <a
         href={finalHref}
         className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-500 transition-colors"
         target="_blank"
         rel="noopener noreferrer"
-        download={match ? true : undefined}
+        download={isDownloadable ? true : undefined}
         {...props}
       >
         {children}
-        {match && <Download className="inline-block w-3 h-3 ml-1" />}
+        {isDownloadable && <Download className="inline-block w-3 h-3 ml-1" />}
       </a>
     );
   },
@@ -204,11 +226,21 @@ const markdownComponents: Components = {
     </td>
   ),
   img: ({ src, alt, ...props }) => {
-    let finalSrc = src;
-    const match = src && src.match(FILE_ID_PATTERN);
-    if (match) {
-      finalSrc = `/api/backend/marketing/files/${match[0]}`;
+    let finalSrc = src ?? "";
+
+    if (!src) {
+      return <img alt={alt} {...props} />;
     }
+
+    if (SANDBOX_URL_PATTERN.test(src)) {
+      console.warn(`Unconverted sandbox URL in image src: ${src}`);
+    }
+
+    const fileIdMatch = src.match(FILE_ID_PATTERN);
+    if (fileIdMatch && !src.startsWith("/api/backend/marketing/files/")) {
+      finalSrc = `/api/backend/marketing/files/${fileIdMatch[0]}`;
+    }
+
     return (
       <img
         src={finalSrc}
