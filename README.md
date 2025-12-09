@@ -1,8 +1,11 @@
-# gws-meet2gemini API
+# b&qHubモノレポ
 
-Google Meet の議事録（Google ドキュメント）を収集し、Supabase に保存、Gemini で構造化要約を生成する FastAPI ベースのサーバー（Cloud Run 対応）です。DDD/オニオンアーキテクチャに基づき、拡張性・保守性に配慮した構成になっています。
+b&q 社内の業務をまとめる Hub です。ひとキャリの議事録収集・構造化（Meet/Docs → Supabase → Gemini）に加え、マーケティング分析アシスタント（ChatKit/SEO Canvas）など複数ドメインを同一基盤で運用します。FastAPI + Supabase + Next.js を DDD/オニオンで組み、Cloud Run 対応の拡張性・保守性を重視しています。
 
 ---
+
+## ひとキャリ（議事録）
+既存の議事録収集・構造化 API の説明です。
 
 ## 特長
 - FastAPI によるシンプルな REST API
@@ -192,6 +195,43 @@ gcloud run deploy meet2gemini \
 ## 将来拡張（要求整理）
 - Zoho CRM 連携による面談者紐付け（DB スキーマ拡張）
 - 構造化出力の CRM スキーマ項目へのマッピング/同期
+
+---
+
+## マーケティング部門
+SEO/集客向けの ChatKit ベース「マーケティング分析アシスタント」を提供します。Supabase に会話・添付・記事ドラフトを保存し、GA4/GSC/Ahrefs/WordPress などの外部データも統合できます。
+
+### 主な機能
+- ChatKit 経由のマーケティング対話（GPT-5.1、高推論、Web検索・コード実行・各種 MCP を利用可）
+- 添付ファイルのアップロード/検索（Supabase Storage `marketing-attachments` バケットに保存）
+- Gemini Code Interpreter 生成物のプロキシダウンロード（OpenAI Files/Containers 対応、キャッシュ保存）
+- 記事キャンバス連携：アウトライン/本文を Supabase `marketing_articles` に保存し、UI と同期
+- モデルプリセット管理：`marketing_model_assets` にプリセットを保存し、Web検索/CI/Canvas 有効可否を切替
+
+### バックエンド API（`/api/v1/marketing`）
+- `POST /chatkit` — ChatKit サーバー呼び出し（SSE ストリーム対応）
+- `POST|PUT /attachments/{attachment_id}/upload` — 2 段階アップロード（ヘッダ `x-marketing-client-secret` または `token` クエリで認証）
+- `GET /files/{file_id}` — Code Interpreter/アップロード済みファイルのプロキシダウンロード（`container_id` が必要な場合あり）
+- `GET /threads/{thread_id}/attachments` — 会話ごとの添付一覧
+- `GET /model-assets` / `POST /model-assets` / `PUT|DELETE /model-assets/{id}` — モデルプリセット CRUD
+
+認証: `x-marketing-client-secret` ヘッダ、または `Authorization: Bearer <token>`（いずれも `MARKETING_CHATKIT_TOKEN_SECRET` で署名された短期 JWT）。
+
+### 必要な環境変数（バックエンド）
+- `MARKETING_CHATKIT_TOKEN_SECRET`（必須） / `MARKETING_CHATKIT_TOKEN_TTL`（デフォルト 900 秒）
+- `MARKETING_AGENT_MODEL`（デフォルト `gpt-5.1`）, `MARKETING_REASONING_EFFORT`（`low|medium|high`）
+- `MARKETING_ENABLE_WEB_SEARCH`, `MARKETING_ENABLE_CODE_INTERPRETER`, `MARKETING_ENABLE_CANVAS`（各 true/false）
+- `MARKETING_SEARCH_COUNTRY`（デフォルト `JP`）
+- `MARKETING_WORKFLOW_ID`, `MARKETING_CHATKIT_API_BASE`, `MARKETING_UPLOAD_BASE_URL`
+- 外部 MCP 連携: `GA4_MCP_SERVER_URL`, `GA4_MCP_AUTHORIZATION`, `AHREFS_MCP_SERVER_URL`, `AHREFS_MCP_AUTHORIZATION`, `GSC_MCP_SERVER_URL`, `GSC_MCP_API_KEY`, `WORDPRESS_MCP_SERVER_URL`, `WORDPRESS_MCP_AUTHORIZATION`, `WORDPRESS_ACHIEVE_MCP_SERVER_URL`, `WORDPRESS_ACHIEVE_MCP_AUTHORIZATION`
+
+### Supabase テーブル/ストレージ
+- テーブル: `marketing_conversations`, `marketing_messages`, `marketing_attachments`, `marketing_articles`, `marketing_model_assets`
+- バケット: `marketing-attachments`（添付 & Code Interpreter 生成物キャッシュ）
+
+### フロントエンド（任意で利用）
+- `frontend/src/app/marketing` に ChatKit UI（記事キャンバス付き）。`bun dev` 後に `/marketing` へアクセス。
+- トークンは Next.js サーバールート `/api/marketing/chatkit/start|refresh` で発行し、ブラウザでは `x-marketing-client-secret` ヘッダとして送信・Cookie に保存。
 
 ---
 
