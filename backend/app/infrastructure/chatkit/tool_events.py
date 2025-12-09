@@ -604,7 +604,7 @@ class ToolUsageTracker:
         text: str,
         container_files: Dict[str, Tuple[str, str]],
     ) -> str:
-        """Replace sandbox:/ links with backend download URLs using known container/file mappings."""
+        """Replace sandbox:/ links with plain text labels (no hyperlink) to avoid in-message download links."""
         if not text or not container_files:
             return text
 
@@ -636,9 +636,8 @@ class ToolUsageTracker:
                 )
                 return match.group(0)
 
-            container_id, file_id = ref
-            download_url = self._build_download_url(file_id=file_id, container_id=container_id)
-            return f"[{label}]({download_url})"
+            # Return just the label (no hyperlink). Buttons are rendered separately from attachments metadata.
+            return label
 
         return SANDBOX_LINK_RE.sub(replacer, text)
 
