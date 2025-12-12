@@ -282,6 +282,7 @@ class MarketingAgentFactory:
                     summary="detailed",
                 ),
                 verbosity=verbosity or "medium",
+                response_include=["code_interpreter_call.outputs"],
             ),
             tool_use_behavior=StopAtTools(stop_at_tool_names=stop_at_tool_names)
             if stop_at_tool_names

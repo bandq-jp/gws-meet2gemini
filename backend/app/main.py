@@ -54,12 +54,15 @@ if not _cors_origins and os.getenv("ENV", "local") == "local":
     _cors_origins = ["http://localhost:3000"]
 
 if _cors_origins:
+    # For development, allow all headers to avoid CORS issues
+    # TODO: Restrict this in production
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],
     )
 
 app.include_router(api_v1_router, prefix="/api/v1")

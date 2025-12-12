@@ -49,9 +49,21 @@ import { ModelAssetSelector } from "@/components/marketing/ModelAssetSelector";
 import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
 import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 
+type Attachment = {
+  file_id: string;
+  filename?: string | null;
+  container_id?: string | null;
+  download_url: string;
+  message_id?: string;
+  created_at?: string | null;
+};
+
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
   process.env.NEXT_PUBLIC_MARKETING_CHATKIT_DOMAIN_KEY ?? "bnq-marketing";
+// Pattern to match OpenAI file IDs (file-xxx, cfile-xxx) and sandbox URLs
+const FILE_ID_PATTERN = /(file|cfile)-[A-Za-z0-9_-]+/;
+const SANDBOX_URL_PATTERN = /sandbox:\/[^\s\)\]"'<>]+/;
 
 // Custom components for rich markdown/HTML rendering
 const markdownComponents: Components = {
@@ -90,17 +102,48 @@ const markdownComponents: Components = {
       {children}
     </p>
   ),
-  a: ({ children, href, ...props }) => (
-    <a
-      href={href}
-      className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-500 transition-colors"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    >
-      {children}
-    </a>
-  ),
+  a: ({ children, href, ...props }) => {
+    const hrefStr = typeof href === "string" ? href : "";
+    let finalHref = hrefStr;
+    let isDownloadable = false;
+
+    if (!hrefStr) {
+      return (
+        <a {...props}>
+          {children}
+        </a>
+      );
+    }
+
+    const sandboxMatch = SANDBOX_URL_PATTERN.test(hrefStr);
+    if (sandboxMatch) {
+      console.warn(`Unconverted sandbox URL detected: ${hrefStr}`);
+    }
+
+    const fileIdMatch = hrefStr.match(FILE_ID_PATTERN);
+    if (fileIdMatch) {
+      isDownloadable = true;
+      // Keep backend URLs (with query params) intact to preserve container_id
+      const alreadyBackend = hrefStr.startsWith("/api/marketing/files/");
+      if (!alreadyBackend) {
+        finalHref = `/api/marketing/files/${fileIdMatch[0]}`;
+      }
+    }
+
+    return (
+      <a
+        href={finalHref}
+        className="text-blue-600 hover:text-blue-800 underline decoration-blue-300 hover:decoration-blue-500 transition-colors"
+        target="_blank"
+        rel="noopener noreferrer"
+        download={isDownloadable ? true : undefined}
+        {...props}
+      >
+        {children}
+        {isDownloadable && <Download className="inline-block w-3 h-3 ml-1" />}
+      </a>
+    );
+  },
   strong: ({ children, ...props }) => (
     <strong className="font-bold text-slate-900" {...props}>
       {children}
@@ -193,14 +236,35 @@ const markdownComponents: Components = {
       {children}
     </td>
   ),
-  img: ({ src, alt, ...props }) => (
-    <img
-      src={src}
-      alt={alt}
-      className="rounded-lg shadow-md my-4 max-w-full h-auto"
-      {...props}
-    />
-  ),
+  img: ({ src, alt, ...props }) => {
+    const srcStr = typeof src === "string" ? src : "";
+    let finalSrc = srcStr;
+
+    if (!srcStr) {
+      return <img alt={alt} {...props} />;
+    }
+
+    if (SANDBOX_URL_PATTERN.test(srcStr)) {
+      console.warn(`Unconverted sandbox URL in image src: ${srcStr}`);
+    }
+
+    const fileIdMatch = srcStr.match(FILE_ID_PATTERN);
+    if (fileIdMatch) {
+      const alreadyBackend = srcStr.startsWith("/api/marketing/files/");
+      if (!alreadyBackend) {
+        finalSrc = `/api/marketing/files/${fileIdMatch[0]}`;
+      }
+    }
+
+    return (
+      <img
+        src={finalSrc}
+        alt={alt}
+        className="rounded-lg shadow-md my-4 max-w-full h-auto"
+        {...props}
+      />
+    );
+  },
 };
 
 type TokenState = {
@@ -493,6 +557,8 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     return stored ?? { visible: false, version: 0 };
   });
   const [isResponding, setIsResponding] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [showAttachments, setShowAttachments] = useState(false);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
   const currentAssetIdRef = useRef<string>(selectedAssetId);
   const canvasEnabled = useMemo(() => {
@@ -537,6 +603,16 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       secret: data.client_secret,
       expiresAt: now + (data.expires_in ?? 900) * 1000,
     };
+
+    // Persist for download proxy so <a> links can forward credentials
+    try {
+      const maxAge = Math.max((data.expires_in ?? 900) - 5, 60); // guard against very small TTLs
+      const secure = typeof window !== "undefined" && window.location.protocol === "https:";
+      document.cookie = `marketing_client_secret=${data.client_secret}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? "; Secure" : ""}`;
+    } catch (err) {
+      console.warn("Failed to set marketing_client_secret cookie", err);
+    }
+
     return tokenRef.current.secret!;
   }, []);
 
@@ -559,6 +635,28 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     [ensureClientSecret]
   );
 
+  const loadAttachments = useCallback(
+    async (threadId: string | null) => {
+      if (!threadId) {
+        setAttachments([]);
+        return;
+      }
+      try {
+        const secret = await ensureClientSecret();
+        const res = await fetch(`/api/marketing/threads/${threadId}/attachments`, {
+          headers: { "x-marketing-client-secret": secret },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`failed to fetch attachments: ${res.status}`);
+        const data = await res.json();
+        setAttachments(data.attachments || []);
+      } catch (err) {
+        console.error("loadAttachments failed", err);
+      }
+    },
+    [ensureClientSecret]
+  );
+
   // Set options once ChatKit custom element is ready
   useEffect(() => {
     const el = chatkitRef.current;
@@ -569,6 +667,9 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         url: CHATKIT_URL,
         domainKey: CHATKIT_DOMAIN_KEY,
         fetch: customFetch,
+        uploadStrategy: {
+          type: "two_phase",
+        },
       },
       locale: "ja",
       theme: "light",
@@ -584,7 +685,17 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       },
       composer: {
         placeholder: "例: WordPressの過去記事を参考に『エンジニア 転職 失敗』記事を書いて",
-        attachments: { enabled: false },
+        attachments: {
+          enabled: true,
+          maxSize: 20 * 1024 * 1024,
+          maxCount: 5,
+          accept: {
+            "text/csv": [".csv"],
+            "application/pdf": [".pdf"],
+            "text/plain": [".txt", ".md"],
+            "application/vnd.ms-excel": [".xls", ".xlsx"],
+          },
+        },
       },
       disclaimer: {
         text: "生成されたインサイトは社内共有前に必ず確認してください。",
@@ -674,7 +785,10 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     const el = chatkitRef.current;
     if (!el) return;
     const onStart = () => setIsResponding(true);
-    const onEnd = () => setIsResponding(false);
+    const onEnd = () => {
+      setIsResponding(false);
+      loadAttachments(currentThreadIdRef.current);
+    };
     const handleThread = (threadId: string | null) => {
       currentThreadIdRef.current = threadId;
       const stored = loadStoredCanvas(threadId);
@@ -684,6 +798,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       if (typeof window !== "undefined" && window.location.pathname !== target) {
         window.history.replaceState({}, "", target);
       }
+      loadAttachments(threadId);
     };
     const onThreadChange = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId: string | null }>).detail;
@@ -765,6 +880,10 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     };
     loadAssets();
   }, [ensureClientSecret, handleSelectAsset]);
+
+  useEffect(() => {
+    loadAttachments(initialThreadId ?? null);
+  }, [initialThreadId, loadAttachments]);
 
   const handleSaveAsset = useCallback(
     async (form: Partial<ModelAsset>, assetId?: string) => {
@@ -855,6 +974,32 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         strategy="beforeInteractive"
         crossOrigin="anonymous"
       />
+      {/* Make CI download links look like buttons even inside ChatKit messages */}
+      <style jsx global>{`
+        openai-chatkit a[href^="/api/marketing/files/"] {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 10px;
+          border-radius: 8px;
+          border: 1px solid #2563eb;
+          background: #eef2ff;
+          color: #1d4ed8 !important;
+          font-weight: 600;
+          text-decoration: none !important;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+          transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+        }
+        openai-chatkit a[href^="/api/marketing/files/"]:hover {
+          background: #dbeafe;
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
+          transform: translateY(-1px);
+        }
+        openai-chatkit a[href^="/api/marketing/files/"]::before {
+          content: "⬇";
+          font-size: 14px;
+        }
+      `}</style>
       <div className="h-full w-full overflow-hidden bg-background relative">
         {/* モデルアセットセレクター */}
         <div className="absolute top-4 left-4 z-40 flex items-center gap-3">
@@ -901,7 +1046,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         )}
         <div className={`h-full flex ${tokenError ? 'pt-16' : ''}`}>
           <div
-            className={`h-full overflow-hidden transition-all duration-300 ${
+            className={`relative h-full overflow-hidden transition-all duration-300 ${
               showCanvasPane ? "w-[45%]" : "w-full"
             }`}
           >
@@ -911,6 +1056,74 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
               }}
               style={{ width: "100%", height: "100%", display: "block" }}
             />
+
+            {/* Attachment panel toggle & list (floats above ChatKit but avoids composer) */}
+            {attachments.length > 0 && (
+              <>
+                <div className="absolute bottom-4 right-4 z-30">
+                  <button
+                    type="button"
+                    onClick={() => setShowAttachments((v) => !v)}
+                    className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  >
+                    <Download className="h-4 w-4" />
+                    添付 {attachments.length} 件
+                  </button>
+                </div>
+                <div
+                  className={`absolute bottom-16 right-4 z-30 w-80 max-w-[92vw] transition-all duration-200 ${
+                    showAttachments ? "opacity-100 translate-y-0" : "opacity-0 pointer-events-none translate-y-2"
+                  }`}
+                >
+                  <div className="bg-white/95 backdrop-blur rounded-xl shadow-2xl border border-slate-200 max-h-[55vh] overflow-y-auto">
+                    <div className="px-4 py-3 border-b flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur rounded-t-xl">
+                      <div className="text-sm font-semibold text-slate-800">添付ファイル</div>
+                      <button
+                        type="button"
+                        className="text-xs text-slate-500 hover:text-slate-800"
+                        onClick={() => setShowAttachments(false)}
+                      >
+                        閉じる
+                      </button>
+                    </div>
+                    <ul className="divide-y divide-slate-100">
+                      {attachments.map((att) => (
+                        <li key={`${att.message_id}-${att.file_id}`}>
+                          <a
+                            href={att.download_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-start gap-3 px-4 py-3 hover:bg-blue-50 transition"
+                            download
+                          >
+                            <div className="mt-0.5">
+                              <Download className="h-4 w-4 text-blue-600" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-semibold text-slate-900 truncate">
+                                {att.filename || att.file_id}
+                              </div>
+                              {att.created_at && (
+                                <div className="text-xs text-slate-500">
+                                  {new Date(att.created_at).toLocaleString("ja-JP", {
+                                    timeZone: "Asia/Tokyo",
+                                    year: "numeric",
+                                    month: "2-digit",
+                                    day: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
           {showCanvasPane && (
             <div className="h-full w-[55%] overflow-hidden border-l-2 animate-in slide-in-from-right duration-300">

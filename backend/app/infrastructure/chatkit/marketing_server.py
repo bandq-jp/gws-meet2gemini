@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from functools import lru_cache
 from typing import AsyncIterator, List
 
@@ -16,13 +17,66 @@ from chatkit.types import (
     ThreadStreamEvent,
     UserMessageItem,
 )
-from openai.types.responses import ResponseInputTextParam
+from openai.types.responses import ResponseInputTextParam, ResponseInputImageParam
+from openai.types.responses.response_input_file_param import ResponseInputFileParam
 from openai.types.responses.response_input_item_param import Message
 import json
+import os
 
 
 class MarketingThreadItemConverter(ThreadItemConverter):
     """ThreadItem converter that is lenient to unknown item types (tool/workflow outputs)."""
+
+    async def attachment_to_message_content(self, attachment):
+        """Map uploaded attachments to Response content.
+
+        OpenAI Responses `input_file` currently supports PDFs only; images use `input_image`.
+        Other file types are exposed to Code Interpreter via container file_ids.
+        """
+        attachment_id = getattr(attachment, "id", None)
+        if not attachment_id:
+            raise ValueError("Attachment is missing id")
+
+        # Check if the ID is already an OpenAI File ID (starts with 'file-')
+        if attachment_id.startswith("file-"):
+            openai_file_id = attachment_id
+            logger.info(f"Attachment ID is already OpenAI file_id: {openai_file_id}")
+        else:
+            # Try to get file_id from attachment object
+            openai_file_id = getattr(attachment, "file_id", None)
+
+            # If not available, this is an error - upload should have set file_id
+            if not openai_file_id:
+                raise ValueError(
+                    f"Attachment {attachment_id} missing file_id. "
+                    "This indicates the upload did not complete successfully."
+                )
+
+            logger.info(f"Using OpenAI file_id={openai_file_id} for attachment {attachment_id}")
+
+        mime_type = (getattr(attachment, "mime_type", None) or "").lower()
+        name = getattr(attachment, "name", None) or attachment_id
+        ext = os.path.splitext(name)[1].lower()
+
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        if mime_type.startswith("image/") or ext in image_exts:
+            return ResponseInputImageParam(
+                type="input_image",
+                file_id=openai_file_id,
+                detail="auto",
+            )
+
+        if mime_type == "application/pdf" or ext == ".pdf":
+            return ResponseInputFileParam(
+                type="input_file",
+                file_id=openai_file_id,
+            )
+
+        # Non-vision attachments: include a short textual note only.
+        return ResponseInputTextParam(
+            type="input_text",
+            text=f"添付ファイル「{name}」を受け取りました。必要に応じて Code Interpreter で参照できます。",
+        )
 
     async def hidden_context_to_input(self, item):
         """Convert hidden context items (including tool calls and outputs) to model input."""
@@ -169,6 +223,7 @@ from app.infrastructure.chatkit.seo_agent_factory import (
     MarketingAgentFactory,
 )
 from app.infrastructure.chatkit.supabase_store import SupabaseChatStore
+from app.infrastructure.chatkit.attachment_store import SupabaseAttachmentStore
 from app.infrastructure.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -180,13 +235,45 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
     def __init__(
         self,
         store: Store[MarketingRequestContext],
+        attachment_store: SupabaseAttachmentStore,
         agent_factory: MarketingAgentFactory,
         workflow_id: str,
     ):
-        super().__init__(store=store, attachment_store=None)
+        super().__init__(store=store, attachment_store=attachment_store)
         self._agent_factory = agent_factory
         self._workflow_id = workflow_id or MARKETING_WORKFLOW_ID
         self._converter = MarketingThreadItemConverter()
+
+    @staticmethod
+    def _collect_code_interpreter_file_ids(items: List[ThreadItem]) -> list[str]:
+        """Collect non-image attachment OpenAI file_ids for Code Interpreter."""
+        file_ids: list[str] = []
+        seen: set[str] = set()
+
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+        for item in items:
+            attachments = getattr(item, "attachments", None) or []
+            for att in attachments:
+                att_id = getattr(att, "id", "") or ""
+                if att_id.startswith("file-"):
+                    openai_id = att_id
+                else:
+                    openai_id = getattr(att, "file_id", None)
+                if not openai_id or openai_id in seen:
+                    continue
+
+                mime = (getattr(att, "mime_type", None) or "").lower()
+                name = getattr(att, "name", None) or att_id
+                ext = os.path.splitext(name)[1].lower()
+                if mime.startswith("image/") or ext in image_exts:
+                    continue
+
+                seen.add(openai_id)
+                file_ids.append(openai_id)
+
+        return file_ids
+
     async def respond(
         self,
         thread: ThreadMetadata,
@@ -202,6 +289,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         logger.info(f"Item types: {', '.join(item_types)}")
 
         agent_input = await self._converter.to_agent_input(history_items)
+        ci_file_ids = self._collect_code_interpreter_file_ids(history_items)
         metadata = thread.metadata or {}
         asset_id = context.model_asset_id or metadata.get("model_asset_id") or "standard"
         if context.model_asset_id and context.model_asset_id != metadata.get("model_asset_id"):
@@ -215,6 +303,24 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             logger.warning("model asset %s not found; falling back to standard", asset_id)
             asset = get_model_asset("standard", context=context)
         agent = self._agent_factory.build_agent(asset=asset)
+
+        if ci_file_ids:
+            applied = False
+            for tool in getattr(agent, "tools", []) or []:
+                if getattr(tool, "name", None) == "code_interpreter":
+                    container = tool.tool_config.get("container")
+                    if isinstance(container, dict) and container.get("type") == "auto":
+                        container["file_ids"] = ci_file_ids
+                    else:
+                        tool.tool_config["container"] = {"type": "auto", "file_ids": ci_file_ids}
+                    applied = True
+            if applied:
+                logger.info("Mounted %d file(s) into Code Interpreter container", len(ci_file_ids))
+            else:
+                logger.warning(
+                    "Code Interpreter is disabled but %d attachment file(s) were uploaded",
+                    len(ci_file_ids),
+                )
         run_config = RunConfig(
             trace_metadata={
                 "__trace_source__": "marketing-chatkit",
@@ -244,6 +350,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
 
         try:
             async for event in stream_agent_response(context_wrapper, monitored):
+                # sandbox リンク書き換えは ToolUsageTracker が DB を直接更新するので、ここではそのまま流す
                 yield event
         except APIError as exc:
             logger.exception("Marketing agent streaming failed")
@@ -308,6 +415,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
 def get_marketing_chat_server() -> MarketingChatKitServer:
     settings = get_settings()
     store = SupabaseChatStore()
+    attachment_store = SupabaseAttachmentStore()
     agent_factory = MarketingAgentFactory(settings)
     if settings.openai_api_key:
         # Runner respects OPENAI_API_KEY env; set proactively when settings change
@@ -316,6 +424,7 @@ def get_marketing_chat_server() -> MarketingChatKitServer:
         os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
     return MarketingChatKitServer(
         store=store,
+        attachment_store=attachment_store,
         agent_factory=agent_factory,
         workflow_id=settings.marketing_workflow_id,
     )
