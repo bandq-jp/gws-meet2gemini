@@ -505,7 +505,7 @@ async def download_openai_file(
         bucket.upload(
             path=storage_path,
             file=file_bytes,
-            file_options={"content-type": "application/octet-stream", "upsert": True},
+            file_options={"content-type": "application/octet-stream", "x-upsert": "true"},
         )
     except Exception:
         logger.exception("Failed to cache OpenAI file %s", file_id)
