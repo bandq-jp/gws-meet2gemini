@@ -72,11 +72,13 @@ class SupabaseAttachmentStore(AttachmentStore[MarketingRequestContext]):
         settings = get_settings()
         base = (settings.marketing_upload_base_url or "").strip()
 
-        if base:
-            upload_url = f"{base.rstrip('/')}/api/v1/marketing/attachments/{attachment_id}/upload?token={signed}"
-        else:
-            # pydantic の許容する「ベースなし相対URL」に合わせて先頭スラッシュを外す
-            upload_url = f"api/v1/marketing/attachments/{attachment_id}/upload?token={signed}"
+        if not base:
+            raise ValueError(
+                "MARKETING_UPLOAD_BASE_URL must be set to an absolute URL "
+                "(e.g. https://your-frontend.vercel.app or backend public URL)"
+            )
+
+        upload_url = f"{base.rstrip('/')}/api/v1/marketing/attachments/{attachment_id}/upload?token={signed}"
 
         logger.info(
             "Issued attachment upload URL",
