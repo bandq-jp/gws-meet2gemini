@@ -318,6 +318,7 @@ async def upload_marketing_attachment(
     storage_metadata = {
         "id": attachment_id,
         "openai_file_id": getattr(openai_file, "id", None),
+        "openai_file_name": safe_name,
         "name": safe_name,
         "mime_type": mime_type,
         "size": len(body),

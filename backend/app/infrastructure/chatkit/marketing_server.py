@@ -17,17 +17,22 @@ from chatkit.types import (
     ThreadStreamEvent,
     UserMessageItem,
 )
-from openai.types.responses import ResponseInputTextParam
+from openai.types.responses import ResponseInputTextParam, ResponseInputImageParam
 from openai.types.responses.response_input_file_param import ResponseInputFileParam
 from openai.types.responses.response_input_item_param import Message
 import json
+import os
 
 
 class MarketingThreadItemConverter(ThreadItemConverter):
     """ThreadItem converter that is lenient to unknown item types (tool/workflow outputs)."""
 
     async def attachment_to_message_content(self, attachment):
-        """Map uploaded attachments to Response input files for the model."""
+        """Map uploaded attachments to Response content.
+
+        OpenAI Responses `input_file` currently supports PDFs only; images use `input_image`.
+        Other file types are exposed to Code Interpreter via container file_ids.
+        """
         attachment_id = getattr(attachment, "id", None)
         if not attachment_id:
             raise ValueError("Attachment is missing id")
@@ -49,9 +54,28 @@ class MarketingThreadItemConverter(ThreadItemConverter):
 
             logger.info(f"Using OpenAI file_id={openai_file_id} for attachment {attachment_id}")
 
-        return ResponseInputFileParam(
-            type="input_file",
-            file_id=openai_file_id,
+        mime_type = (getattr(attachment, "mime_type", None) or "").lower()
+        name = getattr(attachment, "name", None) or attachment_id
+        ext = os.path.splitext(name)[1].lower()
+
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        if mime_type.startswith("image/") or ext in image_exts:
+            return ResponseInputImageParam(
+                type="input_image",
+                file_id=openai_file_id,
+                detail="auto",
+            )
+
+        if mime_type == "application/pdf" or ext == ".pdf":
+            return ResponseInputFileParam(
+                type="input_file",
+                file_id=openai_file_id,
+            )
+
+        # Non-vision attachments: include a short textual note only.
+        return ResponseInputTextParam(
+            type="input_text",
+            text=f"添付ファイル「{name}」を受け取りました。必要に応じて Code Interpreter で参照できます。",
         )
 
     async def hidden_context_to_input(self, item):
@@ -220,6 +244,36 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         self._workflow_id = workflow_id or MARKETING_WORKFLOW_ID
         self._converter = MarketingThreadItemConverter()
 
+    @staticmethod
+    def _collect_code_interpreter_file_ids(items: List[ThreadItem]) -> list[str]:
+        """Collect non-image attachment OpenAI file_ids for Code Interpreter."""
+        file_ids: list[str] = []
+        seen: set[str] = set()
+
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+
+        for item in items:
+            attachments = getattr(item, "attachments", None) or []
+            for att in attachments:
+                att_id = getattr(att, "id", "") or ""
+                if att_id.startswith("file-"):
+                    openai_id = att_id
+                else:
+                    openai_id = getattr(att, "file_id", None)
+                if not openai_id or openai_id in seen:
+                    continue
+
+                mime = (getattr(att, "mime_type", None) or "").lower()
+                name = getattr(att, "name", None) or att_id
+                ext = os.path.splitext(name)[1].lower()
+                if mime.startswith("image/") or ext in image_exts:
+                    continue
+
+                seen.add(openai_id)
+                file_ids.append(openai_id)
+
+        return file_ids
+
     async def respond(
         self,
         thread: ThreadMetadata,
@@ -235,6 +289,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         logger.info(f"Item types: {', '.join(item_types)}")
 
         agent_input = await self._converter.to_agent_input(history_items)
+        ci_file_ids = self._collect_code_interpreter_file_ids(history_items)
         metadata = thread.metadata or {}
         asset_id = context.model_asset_id or metadata.get("model_asset_id") or "standard"
         if context.model_asset_id and context.model_asset_id != metadata.get("model_asset_id"):
@@ -248,6 +303,24 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             logger.warning("model asset %s not found; falling back to standard", asset_id)
             asset = get_model_asset("standard", context=context)
         agent = self._agent_factory.build_agent(asset=asset)
+
+        if ci_file_ids:
+            applied = False
+            for tool in getattr(agent, "tools", []) or []:
+                if getattr(tool, "name", None) == "code_interpreter":
+                    container = tool.tool_config.get("container")
+                    if isinstance(container, dict) and container.get("type") == "auto":
+                        container["file_ids"] = ci_file_ids
+                    else:
+                        tool.tool_config["container"] = {"type": "auto", "file_ids": ci_file_ids}
+                    applied = True
+            if applied:
+                logger.info("Mounted %d file(s) into Code Interpreter container", len(ci_file_ids))
+            else:
+                logger.warning(
+                    "Code Interpreter is disabled but %d attachment file(s) were uploaded",
+                    len(ci_file_ids),
+                )
         run_config = RunConfig(
             trace_metadata={
                 "__trace_source__": "marketing-chatkit",
