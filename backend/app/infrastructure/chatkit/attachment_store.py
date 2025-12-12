@@ -78,7 +78,8 @@ class SupabaseAttachmentStore(AttachmentStore[MarketingRequestContext]):
                 "(e.g. https://your-frontend.vercel.app or backend public URL)"
             )
 
-        upload_url = f"{base.rstrip('/')}/api/v1/marketing/attachments/{attachment_id}/upload?token={signed}"
+        # Point browser uploads at the frontend BFF endpoint, which proxies to Cloud Run with ID token.
+        upload_url = f"{base.rstrip('/')}/api/marketing/attachments/{attachment_id}/upload?token={signed}"
 
         logger.info(
             "Issued attachment upload URL",
