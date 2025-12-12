@@ -95,7 +95,7 @@ uvicorn app.main:app --reload
   - 議事録タブ: 会議一覧/詳細、構造化出力（表形式/JSON）の表示と実行
   - ZohoCRMタブ: 求職者名で検索 → 結果リスト → クリックで詳細（2カラム表）
   - ベースURLに `http://localhost:8000` を指定
-  - 必要に応じて `.env` で `CORS_ALLOW_ORIGINS` を設定（未設定時は全許可）
+  - 必要に応じて `.env` で `CORS_ALLOW_ORIGINS` を設定（ローカル未設定時は `http://localhost:3000` のみ許可 / 本番では必須）
 
 ---
 

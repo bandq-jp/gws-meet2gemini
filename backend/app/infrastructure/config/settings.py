@@ -6,6 +6,15 @@ import dotenv
 # Load environment from .env if present (local dev)
 dotenv.load_dotenv()
 
+def _default_marketing_upload_base_url() -> str:
+    explicit = os.getenv("MARKETING_UPLOAD_BASE_URL")
+    if explicit is not None:
+        return explicit
+    env = os.getenv("ENV", os.getenv("ENVIRONMENT", "local")).lower()
+    if env == "local":
+        return "http://localhost:3000"
+    return ""
+
 class Settings:
     # OpenAI
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
@@ -86,7 +95,7 @@ class Settings:
     marketing_chatkit_token_ttl: int = int(os.getenv("MARKETING_CHATKIT_TOKEN_TTL", "900"))
     marketing_chatkit_api_base: str = os.getenv("MARKETING_CHATKIT_API_BASE", "/api/v1/marketing/chatkit")
     # ブラウザがアップロード先にアクセスするときのベースURL（必須: スキーム/ホスト付き）
-    marketing_upload_base_url: str = os.getenv("MARKETING_UPLOAD_BASE_URL", "http://localhost:3000")
+    marketing_upload_base_url: str = _default_marketing_upload_base_url()
 
     ga4_mcp_server_url: str = os.getenv("GA4_MCP_SERVER_URL", "")
     ga4_mcp_authorization: str = os.getenv("GA4_MCP_AUTHORIZATION", "")
