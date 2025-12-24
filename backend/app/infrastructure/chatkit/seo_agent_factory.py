@@ -191,7 +191,11 @@ class MarketingAgentFactory:
     def __init__(self, settings: Settings):
         self._settings = settings
 
-    def build_agent(self, asset: dict[str, Any] | None = None) -> Agent:
+    def build_agent(
+        self,
+        asset: dict[str, Any] | None = None,
+        disabled_mcp_servers: set[str] | None = None,
+    ) -> Agent:
         tools: List[Any] = []
 
         enable_web_search = self._settings.marketing_enable_web_search and (
@@ -227,7 +231,7 @@ class MarketingAgentFactory:
                 )
             )
 
-        tools.extend(self._hosted_tools(asset))
+        tools.extend(self._hosted_tools(asset, disabled_mcp_servers))
 
         canvas_tools = [
             create_seo_article,
@@ -303,8 +307,16 @@ class MarketingAgentFactory:
             return value
         return "medium"
 
-    def _hosted_tools(self, asset: dict[str, Any] | None) -> list[HostedMCPTool]:
+    def _hosted_tools(
+        self,
+        asset: dict[str, Any] | None,
+        disabled_mcp_servers: set[str] | None = None,
+    ) -> list[HostedMCPTool]:
         hosted: list[HostedMCPTool] = []
+        disabled = {item.lower() for item in (disabled_mcp_servers or set())}
+
+        def is_disabled(label: str) -> bool:
+            return label.lower() in disabled
 
         allow_ga4 = asset is None or asset.get("enable_ga4", True)
         allow_ahrefs = asset is None or asset.get("enable_ahrefs", True)
@@ -315,6 +327,7 @@ class MarketingAgentFactory:
             self._settings.ga4_mcp_server_url
             and self._settings.ga4_mcp_authorization
             and allow_ga4
+            and not is_disabled("ga4")
         ):
             hosted.append(
                 HostedMCPTool(
@@ -334,6 +347,7 @@ class MarketingAgentFactory:
             self._settings.ahrefs_mcp_server_url
             and self._settings.ahrefs_mcp_authorization
             and allow_ahrefs
+            and not is_disabled("ahrefs")
         ):
             hosted.append(
                 HostedMCPTool(
@@ -351,6 +365,7 @@ class MarketingAgentFactory:
             self._settings.gsc_mcp_server_url
             and self._settings.gsc_mcp_api_key
             and allow_gsc
+            and not is_disabled("gsc")
         ):
             hosted.append(
                 HostedMCPTool(
@@ -370,6 +385,7 @@ class MarketingAgentFactory:
             self._settings.wordpress_mcp_server_url
             and self._settings.wordpress_mcp_authorization
             and allow_wordpress
+            and not is_disabled("wordpress")
         ):
             hosted.append(
                 HostedMCPTool(
@@ -389,6 +405,7 @@ class MarketingAgentFactory:
             self._settings.wordpress_achieve_mcp_server_url
             and self._settings.wordpress_achieve_mcp_authorization
             and allow_wordpress
+            and not is_disabled("achieve")
         ):
             hosted.append(
                 HostedMCPTool(

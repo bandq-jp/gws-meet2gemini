@@ -304,9 +304,11 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             asset = get_model_asset("standard", context=context)
         agent = self._agent_factory.build_agent(asset=asset)
 
-        if ci_file_ids:
+        def mount_ci_files(target_agent) -> None:
+            if not ci_file_ids:
+                return
             applied = False
-            for tool in getattr(agent, "tools", []) or []:
+            for tool in getattr(target_agent, "tools", []) or []:
                 if getattr(tool, "name", None) == "code_interpreter":
                     container = tool.tool_config.get("container")
                     if isinstance(container, dict) and container.get("type") == "auto":
@@ -321,6 +323,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                     "Code Interpreter is disabled but %d attachment file(s) were uploaded",
                     len(ci_file_ids),
                 )
+
+        mount_ci_files(agent)
         run_config = RunConfig(
             trace_metadata={
                 "__trace_source__": "marketing-chatkit",
@@ -354,17 +358,40 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                 yield event
         except APIError as exc:
             logger.exception("Marketing agent streaming failed")
-            error_source = self._infer_mcp_source(str(exc))
-            hint = (
-                "GA4連携の認証情報を再設定してください。"
-                if error_source == "ga4"
-                else "GSC連携の認証情報を再設定してください。"
-                if error_source == "gsc"
-                else "ツール連携の認証情報を確認してください。"
-            )
-            yield ProgressUpdateEvent(
-                text=f"⚠️ {error_source.upper() if error_source else '外部ツール'}の初期化に失敗しました。{hint}"
-            )
+            message = str(exc)
+            error_source = self._infer_mcp_source(message)
+            if error_source and self._is_mcp_toollist_error(message):
+                label = self._format_mcp_label(error_source)
+                yield ProgressUpdateEvent(
+                    text=f"⚠️ {label}の初期化に失敗しました。該当ツールをスキップして続行します。"
+                )
+                fallback_agent = self._agent_factory.build_agent(
+                    asset=asset, disabled_mcp_servers={error_source}
+                )
+                mount_ci_files(fallback_agent)
+                fallback_result = Runner.run_streamed(
+                    fallback_agent,
+                    agent_input,
+                    context=context_wrapper,
+                    run_config=run_config,
+                )
+                fallback_monitored = instrument_run_result(fallback_result, tracker)
+                async for event in stream_agent_response(context_wrapper, fallback_monitored):
+                    yield event
+            else:
+                hint = (
+                    "GA4連携の認証情報を再設定してください。"
+                    if error_source == "ga4"
+                    else "GSC連携の認証情報を再設定してください。"
+                    if error_source == "gsc"
+                    else "ツール連携の認証情報を確認してください。"
+                )
+                yield ProgressUpdateEvent(
+                    text=(
+                        f"⚠️ {error_source.upper() if error_source else '外部ツール'}"
+                        f"の初期化に失敗しました。{hint}"
+                    )
+                )
         except Exception:
             logger.exception("Unexpected marketing agent failure")
             yield ProgressUpdateEvent(
@@ -377,6 +404,9 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
     def _infer_mcp_source(message: str | None) -> str | None:
         if not message:
             return None
+        server = MarketingChatKitServer._extract_mcp_server(message)
+        if server:
+            return server
         lowered = message.lower()
         if "ga4" in lowered:
             return "ga4"
@@ -384,7 +414,41 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             return "gsc"
         if "ahrefs" in lowered:
             return "ahrefs"
+        if "wordpress" in lowered:
+            return "wordpress"
+        if "achieve" in lowered:
+            return "achieve"
         return None
+
+    @staticmethod
+    def _extract_mcp_server(message: str | None) -> str | None:
+        if not message:
+            return None
+        match = re.search(r"mcp server: '([^']+)'", message, re.IGNORECASE)
+        if not match:
+            return None
+        return match.group(1).strip().lower()
+
+    @staticmethod
+    def _is_mcp_toollist_error(message: str | None) -> bool:
+        if not message:
+            return False
+        return "error retrieving tool list from mcp server" in message.lower()
+
+    @staticmethod
+    def _format_mcp_label(source: str) -> str:
+        label = source.lower()
+        if label == "ga4":
+            return "GA4"
+        if label == "gsc":
+            return "GSC"
+        if label == "ahrefs":
+            return "Ahrefs"
+        if label == "achieve":
+            return "WordPress(achieve)"
+        if label == "wordpress":
+            return "WordPress"
+        return source.upper()
 
     async def _load_full_history(
         self, thread_id: str, context: MarketingRequestContext
