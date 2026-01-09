@@ -99,6 +99,8 @@ class Settings:
 
     ga4_mcp_server_url: str = os.getenv("GA4_MCP_SERVER_URL", "")
     ga4_mcp_authorization: str = os.getenv("GA4_MCP_AUTHORIZATION", "")
+    meta_ads_mcp_server_url: str = os.getenv("META_ADS_MCP_SERVER_URL", "")
+    meta_ads_mcp_authorization: str = os.getenv("META_ADS_MCP_AUTHORIZATION", "")
     ahrefs_mcp_server_url: str = os.getenv("AHREFS_MCP_SERVER_URL", "")
     ahrefs_mcp_authorization: str = os.getenv("AHREFS_MCP_AUTHORIZATION", "")
     gsc_mcp_server_url: str = os.getenv("GSC_MCP_SERVER_URL", "")

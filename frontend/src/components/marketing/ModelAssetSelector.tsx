@@ -29,6 +29,7 @@ import {
   ExternalLink,
   FileText,
   LayoutTemplate,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +43,7 @@ export type ModelAsset = {
   enable_web_search?: boolean;
   enable_code_interpreter?: boolean;
   enable_ga4?: boolean;
+  enable_meta_ads?: boolean;
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
@@ -65,6 +67,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   enable_web_search: <Globe className="h-3 w-3" />,
   enable_code_interpreter: <Code2 className="h-3 w-3" />,
   enable_ga4: <BarChart3 className="h-3 w-3" />,
+  enable_meta_ads: <Megaphone className="h-3 w-3" />,
   enable_gsc: <Search className="h-3 w-3" />,
   enable_ahrefs: <ExternalLink className="h-3 w-3" />,
   enable_wordpress: <FileText className="h-3 w-3" />,
@@ -75,6 +78,7 @@ const TOOL_LABELS: Record<string, string> = {
   enable_web_search: "Web",
   enable_code_interpreter: "Code",
   enable_ga4: "GA4",
+  enable_meta_ads: "Meta",
   enable_gsc: "GSC",
   enable_ahrefs: "Ahrefs",
   enable_wordpress: "WP",

@@ -15,7 +15,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Globe, Code2, BarChart3, Search, ExternalLink, FileText, LayoutTemplate } from "lucide-react";
+import { Globe, Code2, BarChart3, Search, ExternalLink, FileText, LayoutTemplate, Megaphone } from "lucide-react";
 
 export type ModelAsset = {
   id: string;
@@ -26,6 +26,7 @@ export type ModelAsset = {
   enable_web_search?: boolean;
   enable_code_interpreter?: boolean;
   enable_ga4?: boolean;
+  enable_meta_ads?: boolean;
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
@@ -62,6 +63,12 @@ const TOOL_CONFIG = [
     label: "Google Analytics 4",
     description: "GA4データの取得と分析",
     icon: <BarChart3 className="h-4 w-4" />,
+  },
+  {
+    key: "enable_meta_ads",
+    label: "Meta広告",
+    description: "Meta広告（Facebook/Instagram）の分析・管理",
+    icon: <Megaphone className="h-4 w-4" />,
   },
   {
     key: "enable_gsc",
@@ -113,6 +120,7 @@ export function ModelAssetForm({
     enable_web_search: initialValues?.enable_web_search ?? true,
     enable_code_interpreter: initialValues?.enable_code_interpreter ?? true,
     enable_ga4: initialValues?.enable_ga4 ?? true,
+    enable_meta_ads: initialValues?.enable_meta_ads ?? true,
     enable_gsc: initialValues?.enable_gsc ?? true,
     enable_ahrefs: initialValues?.enable_ahrefs ?? true,
     enable_wordpress: initialValues?.enable_wordpress ?? true,

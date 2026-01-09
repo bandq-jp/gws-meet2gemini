@@ -35,6 +35,7 @@ import {
   ExternalLink,
   FileText,
   LayoutTemplate,
+  Megaphone,
 } from "lucide-react";
 import { ModelAssetForm } from "./ModelAssetForm";
 
@@ -47,6 +48,7 @@ export type ModelAsset = {
   enable_web_search?: boolean;
   enable_code_interpreter?: boolean;
   enable_ga4?: boolean;
+  enable_meta_ads?: boolean;
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
@@ -68,6 +70,7 @@ const TOOL_ICONS: Record<string, { icon: React.ReactNode; label: string }> = {
   enable_web_search: { icon: <Globe className="h-3.5 w-3.5" />, label: "Web" },
   enable_code_interpreter: { icon: <Code2 className="h-3.5 w-3.5" />, label: "Code" },
   enable_ga4: { icon: <BarChart3 className="h-3.5 w-3.5" />, label: "GA4" },
+  enable_meta_ads: { icon: <Megaphone className="h-3.5 w-3.5" />, label: "Meta" },
   enable_gsc: { icon: <SearchIcon className="h-3.5 w-3.5" />, label: "GSC" },
   enable_ahrefs: { icon: <ExternalLink className="h-3.5 w-3.5" />, label: "Ahrefs" },
   enable_wordpress: { icon: <FileText className="h-3.5 w-3.5" />, label: "WP" },

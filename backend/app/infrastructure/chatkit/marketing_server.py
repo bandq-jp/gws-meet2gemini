@@ -384,6 +384,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                     if error_source == "ga4"
                     else "GSC連携の認証情報を再設定してください。"
                     if error_source == "gsc"
+                    else "Meta広告連携の認証情報を再設定してください。"
+                    if error_source == "meta_ads"
                     else "ツール連携の認証情報を確認してください。"
                 )
                 yield ProgressUpdateEvent(
@@ -412,6 +414,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             return "ga4"
         if "gsc" in lowered:
             return "gsc"
+        if "meta_ads" in lowered or "meta-ads" in lowered or "meta ads" in lowered:
+            return "meta_ads"
         if "ahrefs" in lowered:
             return "ahrefs"
         if "wordpress" in lowered:
@@ -442,6 +446,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             return "GA4"
         if label == "gsc":
             return "GSC"
+        if label == "meta_ads":
+            return "Meta広告"
         if label == "ahrefs":
             return "Ahrefs"
         if label == "achieve":

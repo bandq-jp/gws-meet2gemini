@@ -37,7 +37,7 @@ MARKETING_INSTRUCTIONS = """
 
 ## デフォルトは閲覧・分析モード
 - ユーザーが明示的に「作成する」「更新する」「キャンバスを開く/保存する」「差分修正する」と指示した場合にのみ、以下の書き込み系ツールを呼ぶこと。また、キャンバスを開いた場合は最後に必ず本文を書くこと。: `create_seo_article`, `seo_open_canvas`, `seo_update_canvas`, `save_seo_article`, `save_seo_article_body`, `apply_patch_to_article`.
-- 「確認だけ」「内容を見たい」「分析して」のような依頼では、書き込み系ツールを呼ばず、読み取り系 (`get_seo_article`, Web Search, GA4/GSC/Ahrefs/WordPress の閲覧系アビリティ) のみに限定する。
+- 「確認だけ」「内容を見たい」「分析して」のような依頼では、書き込み系ツールを呼ばず、読み取り系 (`get_seo_article`, Web Search, GA4/GSC/Meta広告/Ahrefs/WordPress の閲覧系アビリティ) のみに限定する。
 
 ## ツールの使い方（必要なときだけ使う）
 - 新規作成が必要なら: `create_seo_article` → 直後に `seo_open_canvas` で右ペインを開く。
@@ -45,7 +45,7 @@ MARKETING_INSTRUCTIONS = """
 - 本文初稿を保存するとき: `save_seo_article_body`（apply_patch は使わない）。
 - 最新状態の取得が必要なら: `get_seo_article`。
 - 既存本文があり、ユーザーが本文修正を指示したときだけ `apply_patch_to_article` を使う。必要に応じて複数回呼んでよいが、1回ごとに小さな差分にとどめる。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
-- 指示が合った場合や、あなたが必要な情報がほしいとき、柔軟に Web Search / GA4 / GSC / Ahrefs / WordPress MCP を呼ぶ。
+- 指示が合った場合や、あなたが必要な情報がほしいとき、柔軟に Web Search / GA4 / GSC / Meta広告 / Ahrefs / WordPress MCP を呼ぶ。
 - 自社サイトの投稿・公開情報が必要なときだけ WordPress MCP を呼ぶ（閲覧系アビリティのみ）。
 - ステータス更新が必要な場合のみ `save_seo_article` を呼ぶ。`status` は `draft` / `in_progress` / `published` / `archived` のいずれかを使い、その他の値は使わない（公式の許可リスト）。
 
@@ -70,10 +70,10 @@ MARKETING_INSTRUCTIONS = """
 - **チャット欄には本文全文を貼らない。** アウトラインとステータス更新は `seo_update_canvas` / `save_seo_article` でキャンバスへ送り、本文の変更は `apply_patch_to_article` だけで行う。チャット側は進捗と変更概要のみ。
 - 本文は **常にHTMLで生成** し、差分適用は `apply_patch_to_article` の V4A diff で行う。`seo_update_canvas` / `save_seo_article` に本文を渡さない。
 
-## SEO計測・調査タスク（Ahrefs / GSC / GA4 / WordPress を使う場合。用途はこれに限らない。）
+## SEO計測・調査タスク（Ahrefs / GSC / GA4 / Meta広告 / WordPress を使う場合。用途はこれに限らない。）
 - Ahrefs を使って現状のSEO指標を初期分析し、着目ポイントを理由付きで示すなど。
 - 追加で深掘りすべき項目を明示し、理由を説明することもできる。
-- GSC / GA4 でどのデータを確認するかを示し、それで何が分かるかを説明し、得られた結果をまとめることもできる。
+- GSC / GA4 / Meta広告 でどのデータを確認するかを示し、それで何が分かるかを説明し、得られた結果をまとめることもできる。
 - 全体を総括し、課題と次アクションを分かりやすく提示する（専門用語には簡単な補足を）。
 - 必要に応じて WordPress MCP で記事やメタ情報の現状を確認し、改善案の根拠にする（公開/下書きなど状態確認のみ行う）。
 
@@ -178,6 +178,38 @@ GSC_ALLOWED_TOOLS = [
     "delete_sitemap",
     "manage_sitemaps",
     "get_creator_info",
+]
+
+META_ADS_ALLOWED_TOOLS = [
+    "mcp_meta_ads_get_ad_accounts",
+    "mcp_meta_ads_get_account_info",
+    "mcp_meta_ads_get_account_pages",
+    "mcp_meta_ads_get_campaigns",
+    "mcp_meta_ads_get_campaign_details",
+    "mcp_meta_ads_create_campaign",
+    "mcp_meta_ads_get_adsets",
+    "mcp_meta_ads_get_adset_details",
+    "mcp_meta_ads_create_adset",
+    "mcp_meta_ads_get_ads",
+    "mcp_meta_ads_create_ad",
+    "mcp_meta_ads_get_ad_details",
+    "mcp_meta_ads_get_ad_creatives",
+    "mcp_meta_ads_create_ad_creative",
+    "mcp_meta_ads_update_ad_creative",
+    "mcp_meta_ads_upload_ad_image",
+    "mcp_meta_ads_get_ad_image",
+    "mcp_meta_ads_update_ad",
+    "mcp_meta_ads_update_adset",
+    "mcp_meta_ads_get_insights",
+    "mcp_meta_ads_get_login_link",
+    "mcp_meta_ads_create_budget_schedule",
+    "mcp_meta_ads_search_interests",
+    "mcp_meta_ads_get_interest_suggestions",
+    "mcp_meta_ads_validate_interests",
+    "mcp_meta_ads_search_behaviors",
+    "mcp_meta_ads_search_demographics",
+    "mcp_meta_ads_search_geo_locations",
+    "mcp_meta_ads_search",
 ]
 
 WORDPRESS_ALLOWED_TOOLS = [
@@ -319,6 +351,7 @@ class MarketingAgentFactory:
             return label.lower() in disabled
 
         allow_ga4 = asset is None or asset.get("enable_ga4", True)
+        allow_meta_ads = asset is None or asset.get("enable_meta_ads", True)
         allow_ahrefs = asset is None or asset.get("enable_ahrefs", True)
         allow_gsc = asset is None or asset.get("enable_gsc", True)
         allow_wordpress = asset is None or asset.get("enable_wordpress", True)
@@ -339,6 +372,26 @@ class MarketingAgentFactory:
                         "require_approval": "never",
                         "headers": {
                             "Authorization": self._settings.ga4_mcp_authorization
+                        },
+                    }
+                )
+            )
+        if (
+            self._settings.meta_ads_mcp_server_url
+            and self._settings.meta_ads_mcp_authorization
+            and allow_meta_ads
+            and not is_disabled("meta_ads")
+        ):
+            hosted.append(
+                HostedMCPTool(
+                    tool_config={
+                        "type": "mcp",
+                        "server_label": "meta_ads",
+                        "server_url": self._settings.meta_ads_mcp_server_url,
+                        "allowed_tools": META_ADS_ALLOWED_TOOLS,
+                        "require_approval": "never",
+                        "headers": {
+                            "Authorization": self._settings.meta_ads_mcp_authorization
                         },
                     }
                 )

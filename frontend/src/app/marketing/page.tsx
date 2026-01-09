@@ -298,6 +298,7 @@ export type ModelAsset = {
   enable_web_search?: boolean;
   enable_code_interpreter?: boolean;
   enable_ga4?: boolean;
+  enable_meta_ads?: boolean;
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
@@ -857,6 +858,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         const list: ModelAsset[] = (data?.data ?? []).map((a: ModelAsset) => ({
           ...a,
           enable_canvas: a.enable_canvas ?? true,
+          enable_meta_ads: a.enable_meta_ads ?? true,
         }));
         const withDefault =
           list.length && list.find((a) => a.id === "standard")
@@ -867,6 +869,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
                   name: "スタンダード",
                   visibility: "public",
                   enable_canvas: true,
+                  enable_meta_ads: true,
                 } as ModelAsset,
                 ...list,
               ];
@@ -911,6 +914,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         const saved: ModelAsset = {
           ...(data?.data || {}),
           enable_canvas: (data?.data || {}).enable_canvas ?? true,
+          enable_meta_ads: (data?.data || {}).enable_meta_ads ?? true,
         };
         setAssets((prev) => {
           const filtered = prev.filter((a) => a.id !== saved.id);

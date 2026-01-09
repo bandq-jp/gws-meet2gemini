@@ -199,7 +199,7 @@ gcloud run deploy meet2gemini \
 ---
 
 ## マーケティング部門
-SEO/集客向けの ChatKit ベース「マーケティング分析アシスタント」を提供します。Supabase に会話・添付・記事ドラフトを保存し、GA4/GSC/Ahrefs/WordPress などの外部データも統合できます。
+SEO/集客向けの ChatKit ベース「マーケティング分析アシスタント」を提供します。Supabase に会話・添付・記事ドラフトを保存し、GA4/GSC/Meta広告/Ahrefs/WordPress などの外部データも統合できます。
 
 ### 主な機能
 - ChatKit 経由のマーケティング対話（GPT-5.1、高推論、Web検索・コード実行・各種 MCP を利用可）
@@ -223,7 +223,7 @@ SEO/集客向けの ChatKit ベース「マーケティング分析アシスタ�
 - `MARKETING_ENABLE_WEB_SEARCH`, `MARKETING_ENABLE_CODE_INTERPRETER`, `MARKETING_ENABLE_CANVAS`（各 true/false）
 - `MARKETING_SEARCH_COUNTRY`（デフォルト `JP`）
 - `MARKETING_WORKFLOW_ID`, `MARKETING_CHATKIT_API_BASE`, `MARKETING_UPLOAD_BASE_URL`
-- 外部 MCP 連携: `GA4_MCP_SERVER_URL`, `GA4_MCP_AUTHORIZATION`, `AHREFS_MCP_SERVER_URL`, `AHREFS_MCP_AUTHORIZATION`, `GSC_MCP_SERVER_URL`, `GSC_MCP_API_KEY`, `WORDPRESS_MCP_SERVER_URL`, `WORDPRESS_MCP_AUTHORIZATION`, `WORDPRESS_ACHIEVE_MCP_SERVER_URL`, `WORDPRESS_ACHIEVE_MCP_AUTHORIZATION`
+- 外部 MCP 連携: `GA4_MCP_SERVER_URL`, `GA4_MCP_AUTHORIZATION`, `META_ADS_MCP_SERVER_URL`, `META_ADS_MCP_AUTHORIZATION`, `AHREFS_MCP_SERVER_URL`, `AHREFS_MCP_AUTHORIZATION`, `GSC_MCP_SERVER_URL`, `GSC_MCP_API_KEY`, `WORDPRESS_MCP_SERVER_URL`, `WORDPRESS_MCP_AUTHORIZATION`, `WORDPRESS_ACHIEVE_MCP_SERVER_URL`, `WORDPRESS_ACHIEVE_MCP_AUTHORIZATION`
 
 ### Supabase テーブル/ストレージ
 - テーブル: `marketing_conversations`, `marketing_messages`, `marketing_attachments`, `marketing_articles`, `marketing_model_assets`
