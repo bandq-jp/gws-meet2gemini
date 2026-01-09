@@ -184,9 +184,11 @@ META_ADS_ALLOWED_TOOLS = [
     "get_ad_accounts",
     "get_account_info",
     "get_account_pages",
+    "search_pages_by_name",
     "get_campaigns",
     "get_campaign_details",
     "create_campaign",
+    "update_campaign",
     "get_adsets",
     "get_adset_details",
     "create_adset",
@@ -205,11 +207,14 @@ META_ADS_ALLOWED_TOOLS = [
     "create_budget_schedule",
     "search_interests",
     "get_interest_suggestions",
+    "estimate_audience_size",
     "validate_interests",
     "search_behaviors",
     "search_demographics",
     "search_geo_locations",
+    "search_ads_archive",
     "search",
+    "fetch",
 ]
 
 WORDPRESS_ALLOWED_TOOLS = [
