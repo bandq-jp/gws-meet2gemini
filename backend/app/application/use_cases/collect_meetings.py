@@ -5,6 +5,8 @@ import asyncio
 from app.infrastructure.background.job_tracker import JobTracker
 
 from app.infrastructure.google.drive_docs_collector import DriveDocsCollector
+from app.infrastructure.notta.drive_xlsx_collector import NottaDriveXlsxCollector
+from app.infrastructure.config.settings import get_settings
 from app.infrastructure.supabase.repositories.meeting_repository_impl import MeetingRepositoryImpl
 
 logger = logging.getLogger(__name__)
@@ -25,12 +27,26 @@ class CollectMeetingsUseCase:
             force_update,
         )
         try:
-            collector = DriveDocsCollector()
+            settings = get_settings()
+            source = (settings.meeting_source or "google_docs").strip().lower()
+            collectors = []
+            if source in ("google_docs", "google", "docs", "drive"):
+                collectors.append(DriveDocsCollector())
+            elif source in ("notta",):
+                collectors.append(NottaDriveXlsxCollector())
+            elif source in ("both", "all"):
+                collectors.extend([DriveDocsCollector(), NottaDriveXlsxCollector()])
+            else:
+                raise RuntimeError(f"Unknown MEETING_SOURCE: {settings.meeting_source}")
             repo = MeetingRepositoryImpl()
 
-            collected = await collector.collect_meeting_docs(
-                accounts, include_structure=include_structure
-            )
+            collected = []
+            for collector in collectors:
+                collected.extend(
+                    await collector.collect_meeting_docs(
+                        accounts, include_structure=include_structure
+                    )
+                )
             logger.info("Collected meetings from Drive: %d", len(collected))
             if job_id:
                 JobTracker.update(job_id, collected=len(collected))
