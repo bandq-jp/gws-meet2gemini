@@ -22,6 +22,7 @@ from app.infrastructure.chatkit.seo_article_tools import (
     seo_open_canvas,
     seo_update_canvas,
 )
+from app.infrastructure.chatkit.zoho_crm_tools import ZOHO_CRM_TOOLS
 
 MARKETING_WORKFLOW_ID = (
     "wf_690a1d2e1ce881908e92b6826428f3af060621f24cf1b2bb"
@@ -88,6 +89,57 @@ MARKETING_INSTRUCTIONS = """
 - GA4: hitocareer.com (ID: 423714093) / achievehr.jp (ID: 502875325)
 - WordPress MCP: ラベル `wordpress` = hitocareer.com（閲覧専用）、ラベル `achieve` = achievehr.jp（閲覧専用）。サイトを取り違えないこと。
 - Analyticsアカウント: hitocareer.com (ID: 299317813) / achievehr.jp (ID: 366605478)
+
+## Zoho CRM（APP-hc: 求職者データ）利用ガイド
+
+### 利用可能なツール
+- `search_job_seekers`: 流入経路・ステータス等で顧客検索
+- `get_job_seeker_detail`: 特定顧客の詳細取得
+- `aggregate_by_channel`: 流入経路別の集計
+- `count_job_seekers_by_status`: ステータス別の集計（ファネル分析）
+- `get_channel_definitions`: 流入経路・ステータスの定義一覧
+
+### 流入経路の種類
+**有料広告系**:
+- `paid_meta`: Meta広告経由（Facebook/Instagram）
+- `paid_google`: Googleリスティング広告経由
+- `paid_affiliate`: アフィリエイト広告経由
+
+**スカウト系**:
+- `sco_bizreach`: BizReachスカウト
+- `sco_dodaX`: dodaXスカウト
+- `sco_ambi`: Ambiスカウト
+- `sco_rikunavi`: リクナビスカウト
+- `sco_nikkei`: 日経転職版スカウト
+- `sco_liiga`: 外資就活ネクストスカウト
+- `sco_openwork`: OpenWorkスカウト
+- `sco_carinar`: Carinarスカウト
+- `sco_dodaX_D&P`: dodaXダイヤモンド/プラチナスカウト
+
+**自然流入系**:
+- `org_hitocareer`: SEOメディア（hitocareer）経由
+- `org_jobs`: 自社求人サイト経由
+
+**その他**:
+- `feed_indeed`: Indeed経由
+- `referral`: 紹介経由
+- `other`: その他
+
+### 顧客ステータス（番号とステータスの間にスペースあり）
+- `1. リード`: 初期獲得状態
+- `2. コンタクト`: 連絡済み
+- `3. 面談待ち`: 面談予約済み
+- `4. 面談済み`: 面談完了
+- `5. 選考中`: 企業選考中
+- `6. 内定`: 内定獲得
+- `7. 入社`: 入社決定
+- `16. クローズ`: 案件終了
+
+### 横断分析の例
+1. **広告効果分析**: Meta広告のパフォーマンス（Meta Ads MCP）→ `paid_meta` 流入顧客のステータス分布（Zoho）
+2. **ROAS分析**: 広告費（Meta Ads MCP）÷ 成約数（Zoho）= CPA算出
+3. **流入経路比較**: スカウト系 vs 広告系の成約率比較
+4. **ファネル分析**: 特定流入経路のリード→面談→入社の転換率確認
 """
 
 
@@ -281,6 +333,11 @@ class MarketingAgentFactory:
         ]
         if enable_canvas:
             tools.extend(canvas_tools)
+
+        # Zoho CRM ツールを追加（顧客検索・集計用）
+        enable_zoho_crm = asset is None or asset.get("enable_zoho_crm", True)
+        if enable_zoho_crm and self._settings.zoho_refresh_token:
+            tools.extend(ZOHO_CRM_TOOLS)
 
         reasoning_effort = (
             asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort

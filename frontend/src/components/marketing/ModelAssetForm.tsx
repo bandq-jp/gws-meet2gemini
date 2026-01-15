@@ -15,7 +15,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Globe, Code2, BarChart3, Search, ExternalLink, FileText, LayoutTemplate, Megaphone } from "lucide-react";
+import { Globe, Code2, BarChart3, Search, ExternalLink, FileText, LayoutTemplate, Megaphone, Users } from "lucide-react";
 
 export type ModelAsset = {
   id: string;
@@ -31,6 +31,7 @@ export type ModelAsset = {
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
   enable_canvas?: boolean;
+  enable_zoho_crm?: boolean;
   system_prompt_addition?: string | null;
   visibility?: "public" | "private";
   created_by?: string | null;
@@ -94,6 +95,12 @@ const TOOL_CONFIG = [
     description: "キャンバスでのSEO記事編集",
     icon: <LayoutTemplate className="h-4 w-4" />,
   },
+  {
+    key: "enable_zoho_crm",
+    label: "Zoho CRM",
+    description: "求職者データの検索・集計（流入経路分析）",
+    icon: <Users className="h-4 w-4" />,
+  },
 ] as const;
 
 export function ModelAssetForm({
@@ -125,6 +132,7 @@ export function ModelAssetForm({
     enable_ahrefs: initialValues?.enable_ahrefs ?? true,
     enable_wordpress: initialValues?.enable_wordpress ?? true,
     enable_canvas: initialValues?.enable_canvas ?? true,
+    enable_zoho_crm: initialValues?.enable_zoho_crm ?? true,
   });
 
   const toggleFlag = (key: keyof typeof toolFlags) => {

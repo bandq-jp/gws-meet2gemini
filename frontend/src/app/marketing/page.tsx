@@ -303,6 +303,7 @@ export type ModelAsset = {
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
   enable_canvas?: boolean;
+  enable_zoho_crm?: boolean;
   system_prompt_addition?: string | null;
   visibility?: "public" | "private";
   created_by?: string | null;
