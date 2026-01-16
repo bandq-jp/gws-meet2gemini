@@ -22,6 +22,15 @@ class Settings:
     # Google Auth
     service_account_json: str = os.getenv("SERVICE_ACCOUNT_JSON", "service_account.json")
     impersonate_subjects: list[str] = [s.strip() for s in os.getenv("GOOGLE_SUBJECT_EMAILS", "").split(",") if s.strip()]
+    # Meeting source switch (google_docs / notta / both)
+    meeting_source: str = os.getenv("MEETING_SOURCE", "google_docs")
+
+    # Notta (shared drive xlsx)
+    notta_drive_id: str = os.getenv("NOTTA_DRIVE_ID", "")
+    notta_folder_id: str = os.getenv("NOTTA_FOLDER_ID", "")
+    notta_folder_name: str = os.getenv("NOTTA_FOLDER_NAME", "")
+    notta_impersonate_subject: str = os.getenv("NOTTA_IMPERSONATE_SUBJECT", "")
+    notta_organizer_email: str = os.getenv("NOTTA_ORGANIZER_EMAIL", "notta_shared_drive")
 
     # Supabase
     supabase_url: str = os.getenv("SUPABASE_URL", "")

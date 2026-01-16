@@ -287,6 +287,215 @@ class ZohoClient:
             )
         logger.info("[zoho] search exact results: count=%s", len(records))
         return records
+
+    # --- 流入経路検索・集計メソッド (Marketing ChatKit用) ---
+
+    # Zoho CRM APP-hc フィールドのAPIマッピング
+    # 実際のZohoフィールド名（field14, customer_status等）を使用
+    CHANNEL_FIELD_API = "field14"  # 流入経路
+    STATUS_FIELD_API = "customer_status"  # 顧客ステータス
+    NAME_FIELD_API = "Name"  # 求職者名（デフォルト）
+
+    def search_by_criteria(
+        self,
+        channel: Optional[str] = None,
+        status: Optional[str] = None,
+        name: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """条件指定で求職者（APP-hc）を検索
+
+        Args:
+            channel: 流入経路（例: paid_meta, sco_bizreach, org_hitocareer）
+            status: 顧客ステータス（例: 1. リード, 3. 面談待ち）
+            name: 求職者名（部分一致）
+            date_from: 登録日開始（YYYY-MM-DD）
+            date_to: 登録日終了（YYYY-MM-DD）
+            limit: 取得件数（最大200）
+
+        Returns:
+            検索結果のリスト
+        """
+        module_api = self.settings.zoho_app_hc_module
+
+        # 検索条件を構築
+        criteria_parts: List[str] = []
+
+        if channel:
+            # 流入経路フィールド: field14
+            criteria_parts.append(f"({self.CHANNEL_FIELD_API}:equals:{channel})")
+
+        if status:
+            # 顧客ステータスフィールド: customer_status
+            criteria_parts.append(f"({self.STATUS_FIELD_API}:equals:{status})")
+
+        if name:
+            name_field = self.settings.zoho_app_hc_name_field_api or self.NAME_FIELD_API
+            criteria_parts.append(f"({name_field}:contains:{name})")
+
+        if date_from:
+            criteria_parts.append(f"(Created_Time:greater_equal:{date_from}T00:00:00+09:00)")
+
+        if date_to:
+            criteria_parts.append(f"(Created_Time:less_equal:{date_to}T23:59:59+09:00)")
+
+        # 条件がない場合は全件取得（limitで制限）
+        if not criteria_parts:
+            # 全件取得はSearch APIでは不可のため、Records APIを使用
+            params: Dict[str, Any] = {"per_page": min(limit, 200)}
+            try:
+                result = self._get(f"/crm/v2/{module_api}", params) or {}
+                data = result.get("data", []) or []
+            except Exception as e:
+                logger.warning("[zoho] search_by_criteria (all) failed: %s", e)
+                data = []
+        else:
+            # 検索条件を AND で結合
+            criteria = "(" + "and".join(criteria_parts) + ")"
+            params = {"criteria": criteria, "per_page": min(limit, 200)}
+
+            logger.info("[zoho] search_by_criteria: criteria=%s", criteria)
+            try:
+                result = self._get(f"/crm/v2/{module_api}/search", params) or {}
+                data = result.get("data", []) or []
+            except Exception as e:
+                logger.warning("[zoho] search_by_criteria failed: %s", e)
+                data = []
+
+        # 結果を整形（APIフィールド名を使用して取得）
+        records = []
+        for r in data:
+            # Owner情報の取得
+            owner = r.get("Owner")
+            pic = None
+            if isinstance(owner, dict):
+                pic = owner.get("name")
+            elif owner:
+                pic = owner
+
+            records.append({
+                "record_id": r.get("id"),
+                "求職者名": r.get("Name") or r.get("求職者名"),
+                "流入経路": r.get(self.CHANNEL_FIELD_API),
+                "顧客ステータス": r.get(self.STATUS_FIELD_API),
+                "PIC": pic,
+                "登録日": r.get("Created_Time"),
+                "更新日": r.get("Modified_Time"),
+            })
+
+        logger.info("[zoho] search_by_criteria results: count=%s", len(records))
+        return records
+
+    def count_by_channel(
+        self,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """流入経路ごとの求職者数を集計
+
+        Args:
+            date_from: 集計期間開始（YYYY-MM-DD）
+            date_to: 集計期間終了（YYYY-MM-DD）
+
+        Returns:
+            流入経路ごとの件数辞書
+        """
+        # 流入経路マスタ
+        channels = [
+            "sco_bizreach", "sco_dodaX", "sco_ambi", "sco_rikunavi",
+            "sco_nikkei", "sco_liiga", "sco_openwork", "sco_carinar", "sco_dodaX_D&P",
+            "paid_google", "paid_meta", "paid_affiliate",
+            "org_hitocareer", "org_jobs",
+            "feed_indeed", "referral", "other",
+        ]
+
+        results: Dict[str, int] = {}
+
+        for channel in channels:
+            try:
+                records = self.search_by_criteria(
+                    channel=channel,
+                    date_from=date_from,
+                    date_to=date_to,
+                    limit=200,
+                )
+                results[channel] = len(records)
+            except Exception as e:
+                logger.warning("[zoho] count_by_channel failed for %s: %s", channel, e)
+                results[channel] = 0
+
+        logger.info("[zoho] count_by_channel results: total=%s", sum(results.values()))
+        return results
+
+    def count_by_status(
+        self,
+        channel: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """ステータスごとの求職者数を集計（ファネル分析用）
+
+        Args:
+            channel: 流入経路でフィルタ（省略時は全体）
+            date_from: 集計期間開始（YYYY-MM-DD）
+            date_to: 集計期間終了（YYYY-MM-DD）
+
+        Returns:
+            ステータスごとの件数辞書
+        """
+        # ステータスマスタ（実際のZoho設定に合わせる - 番号とステータスの間にスペースあり）
+        statuses = [
+            "1. リード", "2. コンタクト", "3. 面談待ち", "4. 面談済み",
+            "5. 提案中", "6. 応募意思獲得", "7. 打診済み",
+            "8. 一次面接待ち", "9. 一次面接済み",
+            "10. 最終面接待ち", "11. 最終面接済み",
+            "12. 内定", "13. 内定承諾", "14. 入社",
+            "15. 入社後退職（入社前退職含む）", "16. クローズ",
+            "17. 連絡禁止", "18. 中長期対応", "19. 他社送客",
+        ]
+
+        results: Dict[str, int] = {}
+
+        for status in statuses:
+            try:
+                records = self.search_by_criteria(
+                    channel=channel,
+                    status=status,
+                    date_from=date_from,
+                    date_to=date_to,
+                    limit=200,
+                )
+                results[status] = len(records)
+            except Exception as e:
+                logger.warning("[zoho] count_by_status failed for %s: %s", status, e)
+                results[status] = 0
+
+        logger.info("[zoho] count_by_status results: total=%s", sum(results.values()))
+        return results
+
+    def get_channel_definitions(self) -> Dict[str, str]:
+        """流入経路の定義一覧を返す"""
+        return {
+            "sco_bizreach": "BizReachスカウト経由で獲得したリード",
+            "sco_dodaX": "dodaXスカウト経由で獲得したリード",
+            "sco_ambi": "Ambiスカウト経由で獲得したリード",
+            "sco_rikunavi": "リクナビスカウト経由で獲得したリード",
+            "sco_nikkei": "日経転職版スカウト経由で獲得したリード",
+            "sco_liiga": "外資就活ネクストスカウト経由で獲得したリード",
+            "sco_openwork": "OpenWorkスカウト経由で獲得したリード",
+            "sco_carinar": "Carinarスカウト経由で獲得したリード",
+            "sco_dodaX_D&P": "dodaXダイヤモンド/プラチナスカウト経由で獲得したリード",
+            "paid_google": "Googleリスティング広告経由で獲得したリード",
+            "paid_meta": "Meta広告経由で獲得したリード",
+            "paid_affiliate": "アフィリエイト広告経由で獲得したリード",
+            "org_hitocareer": "SEOメディア（hitocareer）経由で獲得したリード",
+            "org_jobs": "自社求人サイト経由で獲得したリード",
+            "feed_indeed": "Indeed経由で獲得したリード",
+            "referral": "紹介経由で獲得したリード",
+            "other": "その他",
+        }
     
 
 # class ZohoBaseClient:

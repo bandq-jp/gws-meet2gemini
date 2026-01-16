@@ -4,6 +4,10 @@ Meet2Gemini FastAPI (Cloud Run)
 - Cloud Run: workload identity (no key) + env GOOGLE_SUBJECT_EMAILS
 - Supabase: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 - Gemini: set GEMINI_API_KEY
+ - Optional (Notta xlsx in shared drive):
+   - MEETING_SOURCE=notta (or both)
+   - NOTTA_FOLDER_ID (or NOTTA_FOLDER_NAME)
+   - NOTTA_ORGANIZER_EMAIL (fixed value used for filtering)
  - Optional (Zoho write): ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_API_BASE_URL, ZOHO_ACCOUNTS_BASE_URL
  - Optional (Auto process):
    - CANDIDATE_TITLE_REGEX: regex to extract candidate name from Docs title (use group 'name' or group(1)). If empty, the whole title is used.

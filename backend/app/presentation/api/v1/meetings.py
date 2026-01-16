@@ -14,6 +14,7 @@ from app.application.use_cases.get_meeting_detail import GetMeetingDetailUseCase
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.gcp.tasks import enqueue_collect_meetings_task
 from app.application.use_cases.update_meeting_transcript import UpdateMeetingTranscriptUseCase
+from app.infrastructure.notta.drive_xlsx_collector import NottaDriveXlsxCollector
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -106,6 +107,36 @@ async def get_available_accounts():
     """Get available accounts for filtering"""
     settings = get_settings()
     return {"accounts": settings.impersonate_subjects}
+
+@router.get("/notta/drives", response_model=dict)
+async def list_notta_shared_drives():
+    """List accessible shared drives (for NOTTA_DRIVE_ID discovery)."""
+    collector = NottaDriveXlsxCollector()
+    import asyncio
+    drives = await asyncio.to_thread(collector.list_shared_drives)
+    items = [{"id": d.get("id"), "name": d.get("name")} for d in drives]
+    return {"drives": items}
+
+@router.get("/notta/folders", response_model=dict)
+async def list_notta_folders(
+    drive_id: Optional[str] = Query(default=None, description="共有ドライブID（任意）"),
+    name: Optional[str] = Query(default=None, description="フォルダ名でフィルタ（任意）"),
+    limit: int = Query(default=200, ge=1, le=1000, description="最大取得件数"),
+):
+    """List folders for NOTTA_FOLDER_ID discovery (optionally filtered by name)."""
+    collector = NottaDriveXlsxCollector()
+    import asyncio
+    folders = await asyncio.to_thread(collector.list_folders, drive_id, name, limit)
+    items = [
+        {
+            "id": f.get("id"),
+            "name": f.get("name"),
+            "drive_id": f.get("driveId"),
+            "parents": f.get("parents"),
+        }
+        for f in folders
+    ]
+    return {"folders": items}
 
 @router.get("/{meeting_id}", response_model=MeetingOut)
 async def get_meeting_detail(meeting_id: str):

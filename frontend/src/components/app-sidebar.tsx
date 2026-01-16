@@ -182,7 +182,7 @@ export function AppSidebar() {
       case 'marketing':
         return [
           {
-            title: "SEOチャット",
+            title: "Chat-MKT",
             icon: PieChart,
             href: "/marketing",
             id: "marketing-chat",

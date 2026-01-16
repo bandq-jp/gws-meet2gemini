@@ -11,6 +11,11 @@
 必要環境変数（抜粋）:
 - `SERVICE_ACCOUNT_JSON`: サービスアカウントJSONのパス or JSON文字列
 - `GOOGLE_SUBJECT_EMAILS`: 収集対象のアカウント(カンマ区切り)
+- `MEETING_SOURCE`: 収集ソース（`google_docs` / `notta` / `both`）
+- `NOTTA_FOLDER_ID`: NottaのExcelが格納された共有ドライブフォルダID
+- `NOTTA_FOLDER_NAME`: フォルダ名で自動検索する場合（IDが不明なとき）
+- `NOTTA_DRIVE_ID`: 共有ドライブID（任意、検索を絞る場合）
+- `NOTTA_ORGANIZER_EMAIL`: Notta収集分の固定 organizer_email
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
 - `GEMINI_API_KEY` または `GOOGLE_API_KEY`
 
@@ -41,6 +46,12 @@
   - 指定ユーザーで収集: `POST /api/v1/meetings/collect?accounts=a@ex.com&accounts=b@ex.com`
   - すべて（環境変数の既定）: `POST /api/v1/meetings/collect`
 - 成功レスポンス: `{ "stored": <保存・更新した件数> }`
+
+### 1.1) Notta共有ドライブの探索（フォルダID調査用）
+- 共有ドライブ一覧: `GET /api/v1/meetings/notta/drives`
+- フォルダ一覧: `GET /api/v1/meetings/notta/folders?drive_id=<id>&name=<folder>`
+  - `drive_id` は任意（指定するとその共有ドライブ内だけ検索）
+  - `name` は任意（フォルダ名フィルタ）
 
 ### 2) 一覧取得
 - `GET /api/v1/meetings`

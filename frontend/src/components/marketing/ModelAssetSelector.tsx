@@ -30,6 +30,7 @@ import {
   FileText,
   LayoutTemplate,
   Megaphone,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +49,7 @@ export type ModelAsset = {
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
   enable_canvas?: boolean;
+  enable_zoho_crm?: boolean;
   system_prompt_addition?: string | null;
   visibility?: "public" | "private";
   created_by?: string | null;
@@ -72,6 +74,7 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   enable_ahrefs: <ExternalLink className="h-3 w-3" />,
   enable_wordpress: <FileText className="h-3 w-3" />,
   enable_canvas: <LayoutTemplate className="h-3 w-3" />,
+  enable_zoho_crm: <Users className="h-3 w-3" />,
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -83,6 +86,7 @@ const TOOL_LABELS: Record<string, string> = {
   enable_ahrefs: "Ahrefs",
   enable_wordpress: "WP",
   enable_canvas: "Canvas",
+  enable_zoho_crm: "Zoho",
 };
 
 export function ModelAssetSelector({
