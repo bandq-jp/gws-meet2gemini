@@ -9,7 +9,11 @@ import {
   useState,
 } from "react";
 import { ChatKit } from "@openai/chatkit-react";
-import { useMarketingChatKit } from "@/hooks/use-marketing-chatkit";
+import {
+  useMarketingChatKit,
+  type ModelAsset,
+  type ShareInfo,
+} from "@/hooks/use-marketing-chatkit";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -30,7 +34,6 @@ import {
   Code2,
   Sparkles,
   RefreshCw,
-  PlusCircle,
   Copy,
   Download,
 } from "lucide-react";
@@ -38,17 +41,10 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
-  DialogFooter,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { ModelAssetSelector } from "@/components/marketing/ModelAssetSelector";
 import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
 import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
-import { ShareButton, type ShareInfo } from "@/components/marketing/ShareButton";
 
 type Attachment = {
   file_id: string;
@@ -277,27 +273,8 @@ type CanvasState = {
   primaryKeyword?: string;
 };
 
-export type ModelAsset = {
-  id: string;
-  name: string;
-  description?: string;
-  reasoning_effort?: "low" | "medium" | "high";
-  verbosity?: "low" | "medium" | "high";
-  enable_web_search?: boolean;
-  enable_code_interpreter?: boolean;
-  enable_ga4?: boolean;
-  enable_meta_ads?: boolean;
-  enable_gsc?: boolean;
-  enable_ahrefs?: boolean;
-  enable_wordpress?: boolean;
-  enable_canvas?: boolean;
-  enable_zoho_crm?: boolean;
-  system_prompt_addition?: string | null;
-  visibility?: "public" | "private";
-  created_by?: string | null;
-  created_by_email?: string | null;
-  created_by_name?: string | null;
-};
+// ModelAsset type is imported from use-marketing-chatkit hook
+export type { ModelAsset } from "@/hooks/use-marketing-chatkit";
 
 const SeoCanvas = memo(function SeoCanvas({ state, isResponding, onApply }: {
   state: CanvasState;
@@ -614,6 +591,17 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     }
   }, []);
 
+  // Asset selection handler (must be defined before hook)
+  const handleSelectAsset = useCallback((id: string) => {
+    setSelectedAssetId(id);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("marketing:model_asset_id", id);
+    }
+  }, []);
+
+  // Stable callback refs for hook (to avoid circular dependency)
+  const shareToggleRef = useRef<(isShared: boolean) => void>(() => {});
+
   // Use the custom ChatKit hook
   const {
     control,
@@ -622,7 +610,9 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     ensureClientSecret,
   } = useMarketingChatKit({
     initialThreadId,
+    assets,
     selectedAssetId,
+    onAssetSelect: handleSelectAsset,
     canvasEnabled,
     onCanvasOpen: handleCanvasOpen,
     onCanvasUpdate: handleCanvasUpdate,
@@ -637,6 +627,13 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       loadAttachments(currentThreadIdRef.current);
     },
     marketingPrompts,
+    // Share functionality
+    currentThreadId,
+    shareInfo,
+    isResponding,
+    onShareToggle: (isShared) => shareToggleRef.current(isShared),
+    // Header actions
+    onSettingsClick: () => setShowManageDialog(true),
   });
 
   const loadAttachments = useCallback(
@@ -724,6 +721,11 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     [ensureClientSecret, loadShareStatus]
   );
 
+  // Update shareToggleRef to point to actual handler (fixes circular dependency)
+  useEffect(() => {
+    shareToggleRef.current = handleToggleShare;
+  }, [handleToggleShare]);
+
   const handleApplyLocal = useCallback(
     (body: string) => {
       if (!canvasEnabled) return;
@@ -732,13 +734,6 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     },
     [canvas.articleId, canvasEnabled, sendUserMessage]
   );
-
-  const handleSelectAsset = useCallback((id: string) => {
-    setSelectedAssetId(id);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("marketing:model_asset_id", id);
-    }
-  }, []);
 
   // Load model assets once token is available
   useEffect(() => {
@@ -897,31 +892,14 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         }
       `}</style>
       <div className="h-full w-full overflow-hidden bg-background relative">
-        {/* モデルアセットセレクター & 共有ボタン */}
-        <div className="absolute top-4 left-4 z-40 flex items-center gap-3">
-          <ModelAssetSelector
-            assets={assets}
-            selectedId={selectedAssetId}
-            onSelect={handleSelectAsset}
-            onManageClick={() => setShowManageDialog(true)}
-            onCreateClick={() => setShowAssetDialog(true)}
-          />
-          {currentThreadId && (
-            <>
-              <ShareButton
-                threadId={currentThreadId}
-                shareInfo={shareInfo}
-                onToggle={handleToggleShare}
-                disabled={isResponding}
-              />
-              {isReadOnly && (
-                <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200">
-                  閲覧専用
-                </Badge>
-              )}
-            </>
-          )}
-        </div>
+        {/* 閲覧専用バッジ（共有されたスレッドを閲覧中の場合） */}
+        {isReadOnly && (
+          <div className="absolute top-4 right-4 z-40">
+            <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200">
+              閲覧専用
+            </Badge>
+          </div>
+        )}
 
         {/* 管理画面Dialog */}
         <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>

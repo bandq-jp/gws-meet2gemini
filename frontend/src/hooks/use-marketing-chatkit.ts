@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useRef, useState, useEffect } from "react";
+import { useCallback, useRef, useState, useEffect, useMemo } from "react";
 import { useChatKit, type UseChatKitOptions } from "@openai/chatkit-react";
+import type { ModelOption, HeaderIcon } from "@openai/chatkit";
 
 const CHATKIT_URL = "/api/marketing/chatkit/server";
 const CHATKIT_DOMAIN_KEY =
@@ -17,9 +18,41 @@ type MarketingPrompt = {
   prompt: string;
 };
 
+export type ModelAsset = {
+  id: string;
+  name: string;
+  description?: string;
+  reasoning_effort?: "low" | "medium" | "high";
+  verbosity?: "low" | "medium" | "high";
+  enable_web_search?: boolean;
+  enable_code_interpreter?: boolean;
+  enable_ga4?: boolean;
+  enable_meta_ads?: boolean;
+  enable_gsc?: boolean;
+  enable_ahrefs?: boolean;
+  enable_wordpress?: boolean;
+  enable_canvas?: boolean;
+  enable_zoho_crm?: boolean;
+  system_prompt_addition?: string | null;
+  visibility?: "public" | "private";
+  created_by?: string | null;
+  created_by_email?: string | null;
+  created_by_name?: string | null;
+};
+
+export type ShareInfo = {
+  thread_id: string;
+  is_shared: boolean;
+  share_url: string | null;
+  owner_email: string;
+  is_owner: boolean;
+};
+
 export type UseMarketingChatKitOptions = {
   initialThreadId?: string | null;
+  assets: ModelAsset[];
   selectedAssetId: string;
+  onAssetSelect: (assetId: string) => void;
   canvasEnabled: boolean;
   onCanvasOpen: (params: Record<string, unknown>) => void;
   onCanvasUpdate: (params: Record<string, unknown>) => void;
@@ -27,7 +60,29 @@ export type UseMarketingChatKitOptions = {
   onResponseStart: () => void;
   onResponseEnd: () => void;
   marketingPrompts: MarketingPrompt[];
+  // Share functionality
+  currentThreadId: string | null;
+  shareInfo: ShareInfo | null;
+  isResponding: boolean;
+  onShareToggle: (isShared: boolean) => void;
+  // Header actions
+  onSettingsClick: () => void;
 };
+
+// Helper to count enabled tools for an asset
+function countEnabledTools(asset: ModelAsset): number {
+  let count = 0;
+  if (asset.enable_web_search) count++;
+  if (asset.enable_code_interpreter) count++;
+  if (asset.enable_ga4) count++;
+  if (asset.enable_meta_ads) count++;
+  if (asset.enable_gsc) count++;
+  if (asset.enable_ahrefs) count++;
+  if (asset.enable_wordpress) count++;
+  if (asset.enable_canvas) count++;
+  if (asset.enable_zoho_crm) count++;
+  return count;
+}
 
 export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
   const tokenRef = useRef<TokenState>({ secret: null, expiresAt: 0 });
@@ -38,6 +93,40 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
   useEffect(() => {
     currentAssetIdRef.current = options.selectedAssetId;
   }, [options.selectedAssetId]);
+
+  // Convert assets to ModelOption[] for ChatKit's composer.models
+  const modelOptions: ModelOption[] = useMemo(() => {
+    return options.assets.map((asset) => ({
+      id: asset.id,
+      label: asset.name,
+      description: `${countEnabledTools(asset)}ツール${asset.description ? ` · ${asset.description}` : ""}`,
+      default: asset.id === options.selectedAssetId,
+    }));
+  }, [options.assets, options.selectedAssetId]);
+
+  // Store refs for header action callbacks
+  const onSettingsClickRef = useRef(options.onSettingsClick);
+  const onShareToggleRef = useRef(options.onShareToggle);
+  const shareInfoRef = useRef(options.shareInfo);
+  const currentThreadIdRef = useRef(options.currentThreadId);
+  const isRespondingRef = useRef(options.isResponding);
+  const onAssetSelectRef = useRef(options.onAssetSelect);
+
+  useEffect(() => {
+    onSettingsClickRef.current = options.onSettingsClick;
+    onShareToggleRef.current = options.onShareToggle;
+    shareInfoRef.current = options.shareInfo;
+    currentThreadIdRef.current = options.currentThreadId;
+    isRespondingRef.current = options.isResponding;
+    onAssetSelectRef.current = options.onAssetSelect;
+  }, [
+    options.onSettingsClick,
+    options.onShareToggle,
+    options.shareInfo,
+    options.currentThreadId,
+    options.isResponding,
+    options.onAssetSelect,
+  ]);
 
   const ensureClientSecret = useCallback(async () => {
     const now = Date.now();
@@ -122,6 +211,25 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
     options.canvasEnabled,
   ]);
 
+  // Determine share button icon based on share state
+  const getShareIcon = (): HeaderIcon => {
+    if (!currentThreadIdRef.current) return "star"; // No thread yet
+    if (shareInfoRef.current?.is_shared) return "star-filled";
+    return "star";
+  };
+
+  // Handle share button click
+  const handleShareClick = useCallback(() => {
+    if (!currentThreadIdRef.current || isRespondingRef.current) return;
+    const currentlyShared = shareInfoRef.current?.is_shared ?? false;
+    onShareToggleRef.current(!currentlyShared);
+  }, []);
+
+  // Handle settings button click
+  const handleSettingsClick = useCallback(() => {
+    onSettingsClickRef.current();
+  }, []);
+
   const chatkitOptions: UseChatKitOptions = {
     api: {
       url: CHATKIT_URL,
@@ -136,6 +244,16 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
     header: {
       enabled: true,
       title: { enabled: true, text: "マーケティング分析アシスタント" },
+      leftAction: {
+        icon: "settings-cog" as HeaderIcon,
+        onClick: handleSettingsClick,
+      },
+      rightAction: options.currentThreadId
+        ? {
+            icon: getShareIcon(),
+            onClick: handleShareClick,
+          }
+        : undefined,
     },
     history: { enabled: true, showDelete: false, showRename: true },
     initialThread: options.initialThreadId ?? null,
@@ -161,6 +279,8 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
           "application/vnd.ms-excel": [".xls", ".xlsx"],
         },
       },
+      // Model selector inside ChatKit's composer
+      models: modelOptions.length > 0 ? modelOptions : undefined,
     },
     disclaimer: {
       text: "生成されたインサイトは社内共有前に必ず確認してください。",
