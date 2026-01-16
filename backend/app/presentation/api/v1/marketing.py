@@ -36,6 +36,7 @@ from app.infrastructure.chatkit.model_assets import (
     delete_model_asset,
 )
 from app.infrastructure.chatkit.marketing_server import get_marketing_chat_server
+from app.infrastructure.chatkit.supabase_store import SupabaseChatStore, PermissionDeniedError
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.supabase.client import get_supabase
 from app.infrastructure.security.marketing_token_service import (
@@ -817,3 +818,52 @@ def _normalize_verbosity_to_client(value: str | None) -> str | None:
     if value == "long":
         return "high"
     return value
+
+
+# --- Thread Sharing Endpoints ---
+
+
+@router.post("/threads/{thread_id}/share")
+async def toggle_thread_share(
+    thread_id: str,
+    payload: dict,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Toggle sharing for a thread. Only the owner can change sharing status.
+
+    Body: { "is_shared": bool }
+    Returns: { "thread_id", "is_shared", "share_url" }
+    """
+    is_shared = payload.get("is_shared")
+    if is_shared is None:
+        raise HTTPException(status_code=400, detail="is_shared is required")
+
+    store = SupabaseChatStore()
+    try:
+        result = await store.toggle_share(thread_id, bool(is_shared), context)
+        return result
+    except PermissionDeniedError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Failed to toggle share for thread %s", thread_id)
+        raise HTTPException(status_code=404, detail="Thread not found") from exc
+
+
+@router.get("/threads/{thread_id}/share")
+async def get_thread_share_status(
+    thread_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Get current sharing status for a thread.
+
+    Returns: { "thread_id", "is_shared", "shared_at", "is_owner", "can_toggle", "share_url" }
+    """
+    store = SupabaseChatStore()
+    try:
+        result = await store.get_share_status(thread_id, context)
+        return result
+    except Exception as exc:
+        logger.exception("Failed to get share status for thread %s", thread_id)
+        raise HTTPException(status_code=404, detail="Thread not found") from exc

@@ -48,6 +48,7 @@ import { Switch } from "@/components/ui/switch";
 import { ModelAssetSelector } from "@/components/marketing/ModelAssetSelector";
 import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
 import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
+import { ShareButton, type ShareInfo } from "@/components/marketing/ShareButton";
 
 type Attachment = {
   file_id: string;
@@ -561,6 +562,9 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
   const [isResponding, setIsResponding] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showAttachments, setShowAttachments] = useState(false);
+  const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
+  const [isReadOnly, setIsReadOnly] = useState(false);
+  const [currentThreadId, setCurrentThreadId] = useState<string | null>(initialThreadId ?? null);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
   const currentAssetIdRef = useRef<string>(selectedAssetId);
   const canvasEnabled = useMemo(() => {
@@ -657,6 +661,69 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       }
     },
     [ensureClientSecret]
+  );
+
+  const loadShareStatus = useCallback(
+    async (threadId: string | null) => {
+      if (!threadId) {
+        setShareInfo(null);
+        setIsReadOnly(false);
+        return;
+      }
+      try {
+        const secret = await ensureClientSecret();
+        const res = await fetch(`/api/marketing/threads/${threadId}/share`, {
+          headers: { "x-marketing-client-secret": secret },
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          // 404 means no access or thread not found
+          if (res.status === 404) {
+            setShareInfo(null);
+            setIsReadOnly(false);
+            return;
+          }
+          throw new Error(`failed to fetch share status: ${res.status}`);
+        }
+        const data: ShareInfo = await res.json();
+        setShareInfo(data);
+        // If not owner but can view (shared), set read-only mode
+        setIsReadOnly(!data.is_owner && data.is_shared);
+      } catch (err) {
+        console.error("loadShareStatus failed", err);
+        setShareInfo(null);
+        setIsReadOnly(false);
+      }
+    },
+    [ensureClientSecret]
+  );
+
+  const handleToggleShare = useCallback(
+    async (isShared: boolean) => {
+      const threadId = currentThreadIdRef.current;
+      if (!threadId) return;
+      try {
+        const secret = await ensureClientSecret();
+        const res = await fetch(`/api/marketing/threads/${threadId}/share`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-marketing-client-secret": secret,
+          },
+          body: JSON.stringify({ is_shared: isShared }),
+        });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail?.detail || "共有設定の更新に失敗しました");
+        }
+        // Refresh share status after toggle
+        await loadShareStatus(threadId);
+      } catch (err) {
+        console.error("handleToggleShare failed", err);
+        alert(err instanceof Error ? err.message : "共有設定の更新に失敗しました");
+      }
+    },
+    [ensureClientSecret, loadShareStatus]
   );
 
   // Set options once ChatKit custom element is ready
@@ -793,6 +860,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     };
     const handleThread = (threadId: string | null) => {
       currentThreadIdRef.current = threadId;
+      setCurrentThreadId(threadId);
       const stored = loadStoredCanvas(threadId);
       setCanvas(stored ?? { visible: false, version: 0 });
       // Update URL without remounting the page (avoid interrupting in-flight sends)
@@ -801,6 +869,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         window.history.replaceState({}, "", target);
       }
       loadAttachments(threadId);
+      loadShareStatus(threadId);
     };
     const onThreadChange = (event: Event) => {
       const detail = (event as CustomEvent<{ threadId: string | null }>).detail;
@@ -821,7 +890,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
       el.removeEventListener("chatkit.thread.change", onThreadChange);
       el.removeEventListener("chatkit.thread.load.end", onThreadLoadEnd);
     };
-  }, [router]);
+  }, [router, loadShareStatus]);
 
   const handleApplyLocal = useCallback(
     (body: string) => {
@@ -887,7 +956,8 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
 
   useEffect(() => {
     loadAttachments(initialThreadId ?? null);
-  }, [initialThreadId, loadAttachments]);
+    loadShareStatus(initialThreadId ?? null);
+  }, [initialThreadId, loadAttachments, loadShareStatus]);
 
   const handleSaveAsset = useCallback(
     async (form: Partial<ModelAsset>, assetId?: string) => {
@@ -1006,7 +1076,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         }
       `}</style>
       <div className="h-full w-full overflow-hidden bg-background relative">
-        {/* モデルアセットセレクター */}
+        {/* モデルアセットセレクター & 共有ボタン */}
         <div className="absolute top-4 left-4 z-40 flex items-center gap-3">
           <ModelAssetSelector
             assets={assets}
@@ -1015,6 +1085,21 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
             onManageClick={() => setShowManageDialog(true)}
             onCreateClick={() => setShowAssetDialog(true)}
           />
+          {currentThreadId && (
+            <>
+              <ShareButton
+                threadId={currentThreadId}
+                shareInfo={shareInfo}
+                onToggle={handleToggleShare}
+                disabled={isResponding}
+              />
+              {isReadOnly && (
+                <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200">
+                  閲覧専用
+                </Badge>
+              )}
+            </>
+          )}
         </div>
 
         {/* 管理画面Dialog */}
@@ -1061,6 +1146,16 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
               }}
               style={{ width: "100%", height: "100%", display: "block" }}
             />
+            {/* Read-only overlay for shared viewers */}
+            {isReadOnly && (
+              <div className="absolute bottom-0 left-0 right-0 h-32 z-20 pointer-events-auto bg-gradient-to-t from-white via-white/95 to-transparent flex items-end justify-center pb-4">
+                <div className="text-center px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg shadow-sm">
+                  <p className="text-sm text-amber-800">
+                    この会話は共有されています。閲覧のみ可能です。
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Attachment panel toggle & list (floats above ChatKit but avoids composer) */}
             {attachments.length > 0 && (

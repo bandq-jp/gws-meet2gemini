@@ -15,6 +15,11 @@ from app.infrastructure.supabase.client import get_supabase
 logger = logging.getLogger(__name__)
 
 
+class PermissionDeniedError(Exception):
+    """Raised when a user lacks permission to perform an action."""
+    pass
+
+
 _thread_adapter = TypeAdapter(ThreadMetadata)
 _item_adapter = TypeAdapter(ThreadItem)
 _attachment_adapter = TypeAdapter(Attachment)
@@ -126,7 +131,22 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         if not data:
             raise NotFoundError(f"Thread {thread_id} not found")
         row = data[0]
+
+        # Access control: owner OR shared
+        is_owner = row.get("owner_clerk_id") == context.user_id
+        is_shared = row.get("is_shared", False)
+
+        if not is_owner and not is_shared:
+            raise NotFoundError(f"Thread {thread_id} not found")  # 404 for security
+
         metadata = row.get("metadata") or {}
+        # Inject sharing info into metadata for frontend
+        metadata["is_shared"] = is_shared
+        metadata["is_owner"] = is_owner
+        metadata["can_edit"] = is_owner  # Only owner can send messages
+        metadata["shared_at"] = row.get("shared_at")
+        metadata["shared_by_email"] = row.get("shared_by_email") if is_owner else None
+
         try:
             thread = self._thread_adapter.validate_python(
                 {
@@ -433,3 +453,96 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         if item.type in ("progress", "event"):
             return item.type
         return item.type
+
+    # --- Sharing methods ---
+
+    async def _is_owner(self, thread_id: str, context: MarketingRequestContext) -> bool:
+        """Check if the current user owns the thread."""
+        sb = self._client()
+        res = (
+            sb.table(self.THREAD_TABLE)
+            .select("owner_clerk_id")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return False
+        return res.data[0].get("owner_clerk_id") == context.user_id
+
+    async def toggle_share(
+        self, thread_id: str, is_shared: bool, context: MarketingRequestContext
+    ) -> dict[str, Any]:
+        """Toggle sharing status. Only owner can do this."""
+        sb = self._client()
+
+        # Verify ownership
+        res = (
+            sb.table(self.THREAD_TABLE)
+            .select("owner_clerk_id, is_shared")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            raise NotFoundError(f"Thread {thread_id} not found")
+        if res.data[0].get("owner_clerk_id") != context.user_id:
+            raise PermissionDeniedError("Only the owner can share this thread")
+
+        # Update sharing status
+        update_payload: dict[str, Any] = {
+            "is_shared": is_shared,
+        }
+        if is_shared and not res.data[0].get("is_shared"):
+            # First time sharing - record who and when
+            update_payload["shared_at"] = datetime.utcnow().isoformat()
+            update_payload["shared_by_email"] = context.user_email
+            update_payload["shared_by_clerk_id"] = context.user_id
+
+        sb.table(self.THREAD_TABLE).update(update_payload).eq("id", thread_id).execute()
+        logger.info(
+            "Thread %s sharing toggled to %s by %s",
+            thread_id,
+            is_shared,
+            context.user_email,
+        )
+
+        return {
+            "thread_id": thread_id,
+            "is_shared": is_shared,
+            "share_url": f"/marketing/{thread_id}" if is_shared else None,
+        }
+
+    async def get_share_status(
+        self, thread_id: str, context: MarketingRequestContext
+    ) -> dict[str, Any]:
+        """Get current sharing status for a thread."""
+        sb = self._client()
+        res = (
+            sb.table(self.THREAD_TABLE)
+            .select("id, is_shared, shared_at, shared_by_email, owner_clerk_id")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not res.data:
+            raise NotFoundError(f"Thread {thread_id} not found")
+
+        row = res.data[0]
+        is_owner = row.get("owner_clerk_id") == context.user_id
+        is_shared = row.get("is_shared", False)
+
+        # Non-owners can only see shared threads
+        if not is_owner and not is_shared:
+            raise NotFoundError(f"Thread {thread_id} not found")
+
+        return {
+            "thread_id": thread_id,
+            "is_shared": is_shared,
+            "shared_at": row.get("shared_at"),
+            "shared_by_email": row.get("shared_by_email") if is_owner else None,
+            "is_owner": is_owner,
+            "can_toggle": is_owner,
+            "share_url": f"/marketing/{thread_id}" if is_shared else None,
+        }
