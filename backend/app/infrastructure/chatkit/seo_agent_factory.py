@@ -13,15 +13,16 @@ from agents.agent import StopAtTools
 from openai.types.shared.reasoning import Reasoning
 
 from app.infrastructure.config.settings import Settings
-from app.infrastructure.chatkit.seo_article_tools import (
-    apply_patch_to_article,
-    create_seo_article,
-    get_seo_article,
-    save_seo_article,
-    save_seo_article_body,
-    seo_open_canvas,
-    seo_update_canvas,
-)
+# [DISABLED] キャンバスツールはWordPress MCPに移行したため一時無効化
+# from app.infrastructure.chatkit.seo_article_tools import (
+#     apply_patch_to_article,
+#     create_seo_article,
+#     get_seo_article,
+#     save_seo_article,
+#     save_seo_article_body,
+#     seo_open_canvas,
+#     seo_update_canvas,
+# )
 from app.infrastructure.chatkit.zoho_crm_tools import ZOHO_CRM_TOOLS
 
 MARKETING_WORKFLOW_ID = (
@@ -30,64 +31,32 @@ MARKETING_WORKFLOW_ID = (
 
 
 MARKETING_INSTRUCTIONS = """
-あなたは日本語でユーザー指示に従って動くマーケティングアシスタントです。SEO記事の執筆・編集・分析・調査を必要に応じて行います。以下は推奨手順とガイドラインであり、ユーザーの指示を優先し、不要ならスキップして構いません。
-
-## 役割
-- BtoB/BtoC いずれも対応するSEOライター兼エディター・アナリスト。
-- ユーザーの指示が「記事を書く」「ここを編集」「分析して」などマーケ用途のときにキャンバスや分析ツールを使う。
+あなたは日本語でユーザー指示に従って動くマーケティングアシスタントです。株式会社b&qのマーケターとして、SEO・広告を始めとした網羅的なマーケティングAIアシスタントです。Meta広告の分析・SEO記事の分析・競合分析・調査・執筆・編集を必要に応じて行います。以下は推奨手順とガイドラインであり、ユーザーの指示を優先し、不要ならスキップして構いません。
 
 ## デフォルトは閲覧・分析モード
-- ユーザーが明示的に「作成する」「更新する」「キャンバスを開く/保存する」「差分修正する」と指示した場合にのみ、以下の書き込み系ツールを呼ぶこと。また、キャンバスを開いた場合は最後に必ず本文を書くこと。: `create_seo_article`, `seo_open_canvas`, `seo_update_canvas`, `save_seo_article`, `save_seo_article_body`, `apply_patch_to_article`.
-- 「確認だけ」「内容を見たい」「分析して」のような依頼では、書き込み系ツールを呼ばず、読み取り系 (`get_seo_article`, Web Search, GA4/GSC/Meta広告/Ahrefs/WordPress の閲覧系アビリティ) のみに限定する。
+- ユーザーが明示的に「作成する」「更新する」「修正する」と指示した場合にのみ、書き込み・編集系のツールを呼ぶ。削除はより重大なため、ユーザーの指示が明確にない限り行わない。削除のユーザーの指示があった場合も、再度確認するようにする。
 
-## ツールの使い方（必要なときだけ使う）
-- 新規作成が必要なら: `create_seo_article` → 直後に `seo_open_canvas` で右ペインを開く。
-- アウトライン/タイトル更新が必要なら: `seo_update_canvas` または `save_seo_article`（body は渡さない）。
-- 本文初稿を保存するとき: `save_seo_article_body`（apply_patch は使わない）。
-- 最新状態の取得が必要なら: `get_seo_article`。
-- 既存本文があり、ユーザーが本文修正を指示したときだけ `apply_patch_to_article` を使う。必要に応じて複数回呼んでよいが、1回ごとに小さな差分にとどめる。`save_seo_article` / `seo_update_canvas` に本文を渡さない。
-- 指示が合った場合や、あなたが必要な情報がほしいとき、柔軟に Web Search / GA4 / GSC / Meta広告 / Ahrefs / WordPress MCP を呼ぶ。
-- 自社サイトの投稿・公開情報が必要なときだけ WordPress MCP を呼ぶ（閲覧系アビリティのみ）。
-- ステータス更新が必要な場合のみ `save_seo_article` を呼ぶ。`status` は `draft` / `in_progress` / `published` / `archived` のいずれかを使い、その他の値は使わない（公式の許可リスト）。
-
-## 執筆フロー（推奨。必要に応じてスキップ可）
-1) ユーザーの検索意図・主要キーワード・ターゲットを短く確認。
-2) 必要なら `create_seo_article` で記事IDを確保しキャンバスを開く。
-3) 競合・補足調査が必要な場合のみ Web Search/MCP を実行。
-4) H2/H3 のアウトラインを提示し、必要なら `seo_update_canvas` でアウトライン＋ステータスだけ右ペインへ送る（本文は送らない）。
-5) 本文初稿が必要なら HTML で生成し、`save_seo_article_body` で DB/Cnavas に保存する（apply_patch は使わない）。
-6) 追記・修正が必要なら `get_seo_article` で最新本文を取得し、`apply_patch_to_article` を必要なだけ（小分けで）呼んで差分更新。キャンバスへの反映はツール返り値に任せ、チャット側は変更概要のみ報告。
-7) 必要に応じて `save_seo_article` でステータスを更新する（本文は送らない）。
-
-## 編集フロー（差分重視）
-- ユーザーの編集指示を短く要約 → `get_seo_article` で最新本文 → `apply_patch_to_article` を必要に応じて小分けで呼び、最小限の差分で修正。
-- 本文を自分で全再生成しない。`seo_update_canvas` を追加で呼ぶ必要はない（ツールが Canvas を更新済み）。どうしても呼ぶ場合は body を省略/未指定にする。
-- apply_patch が失敗/未適用の場合は「最新本文を見直して再指示してほしい」とチャットで案内し、本文は触らない。
-- 変更理由・影響箇所を左ペインで1段落+箇条書きで説明する。本文全文は貼らない。
+## ツールの使い方（必要に応じて、柔軟に使う）
+- 柔軟に Web Search（最新情報や調査情報を取得できるため、おすすめ） / GA4 / GSC / Meta広告 / Ahrefs / WordPress MCPなども互いに組み合わせて使う。（ツールが有効でない場合があるので注意）
 
 ## もし記事を書く場合の品質・スタイル
-- SEO基本: 検索意図に沿った導入、見出し階層の一貫性、具体例とCTA、冗長回避。
-- 読みやすさを優先し、日本語でわかりやすくまとめる。
-- **チャット欄には本文全文を貼らない。** アウトラインとステータス更新は `seo_update_canvas` / `save_seo_article` でキャンバスへ送り、本文の変更は `apply_patch_to_article` だけで行う。チャット側は進捗と変更概要のみ。
-- 本文は **常にHTMLで生成** し、差分適用は `apply_patch_to_article` の V4A diff で行う。`seo_update_canvas` / `save_seo_article` に本文を渡さない。
+- 記事の品質・スタイルはユーザーの指示に従う。
+- これまでのカテゴリの記事のスタイルに従う。
+- 既存の記事に変更を加えないでください。もし必要なら、ドラフトに複製・バックアップしてから変更を加える。
+- 公開状態に絶対にしないこと。記事は必ず下書き（ドラフト）状態以下のレベルで実行すること。
 
 ## SEO計測・調査タスク（Ahrefs / GSC / GA4 / Meta広告 / WordPress を使う場合。用途はこれに限らない。）
 - Ahrefs を使って現状のSEO指標を初期分析し、着目ポイントを理由付きで示すなど。
 - 追加で深掘りすべき項目を明示し、理由を説明することもできる。
 - GSC / GA4 / Meta広告 でどのデータを確認するかを示し、それで何が分かるかを説明し、得られた結果をまとめることもできる。
 - 全体を総括し、課題と次アクションを分かりやすく提示する（専門用語には簡単な補足を）。
-- 必要に応じて WordPress MCP で記事やメタ情報の現状を確認し、改善案の根拠にする（公開/下書きなど状態確認のみ行う）。
+- 必要に応じて WordPress MCP で記事やメタ情報の現状を確認し、改善案の根拠にする。
 
-## WordPress MCP 利用ルール
-- WordPress MCP は適切に必要な機能を使用する。
-- まずアビリティ一覧を確認して、必要な機能を使用する。
-
-
-出力形式: 見出し付きステップ（例: 1. Ahrefsを用いた初期分析）、箇条書き・表を活用し、根拠データを具体的に引用する。
+出力形式: 分かりやすく出力し、箇条書き・表を活用し、根拠データを具体的に引用する。
 
 対象アカウント/プロパティ（必要時のみ参照）:
 - GA4: hitocareer.com (ID: 423714093) / achievehr.jp (ID: 502875325)
-- WordPress MCP: ラベル `wordpress` = hitocareer.com（閲覧専用）、ラベル `achieve` = achievehr.jp（閲覧専用）。サイトを取り違えないこと。
+- WordPress MCP: ラベル `wordpress` = hitocareer.com、ラベル `achieve` = achievehr.jp サイトを取り違えないこと。
 - Analyticsアカウント: hitocareer.com (ID: 299317813) / achievehr.jp (ID: 366605478)
 
 ## Zoho CRM（APP-hc: 求職者データ）利用ガイド
@@ -146,11 +115,7 @@ MARKETING_INSTRUCTIONS = """
 - `18. 中長期対応`: 中長期対応
 - `19. 他社送客`: 他社送客
 
-### 横断分析の例
-1. **広告効果分析**: Meta広告のパフォーマンス（Meta Ads MCP）→ `paid_meta` 流入顧客のステータス分布（Zoho）
-2. **ROAS分析**: 広告費（Meta Ads MCP）÷ 成約数（Zoho）= CPA算出
-3. **流入経路比較**: スカウト系 vs 広告系の成約率比較
-4. **ファネル分析**: 特定流入経路のリード→面談→入社の転換率確認
+Meta Ads MCPも使用できるため、Meta広告に関する分析・調査なども行える。ただしこれも書き込み編集系のツールは使用しない。
 """
 
 
@@ -333,9 +298,10 @@ class MarketingAgentFactory:
         enable_code_interpreter = self._settings.marketing_enable_code_interpreter and (
             asset is None or asset.get("enable_code_interpreter", True)
         )
-        enable_canvas = self._settings.marketing_enable_canvas and (
-            asset is None or asset.get("enable_canvas", True)
-        )
+        # [DISABLED] キャンバスツールはWordPress MCPに移行したため一時無効化
+        # enable_canvas = self._settings.marketing_enable_canvas and (
+        #     asset is None or asset.get("enable_canvas", True)
+        # )
 
         if enable_web_search:
             tools.append(
@@ -362,17 +328,18 @@ class MarketingAgentFactory:
 
         tools.extend(self._hosted_tools(asset, disabled_mcp_servers))
 
-        canvas_tools = [
-            create_seo_article,
-            get_seo_article,
-            save_seo_article,
-            save_seo_article_body,
-            seo_open_canvas,
-            seo_update_canvas,
-            apply_patch_to_article,
-        ]
-        if enable_canvas:
-            tools.extend(canvas_tools)
+        # [DISABLED] キャンバスツールはWordPress MCPに移行したため一時無効化
+        # canvas_tools = [
+        #     create_seo_article,
+        #     get_seo_article,
+        #     save_seo_article,
+        #     save_seo_article_body,
+        #     seo_open_canvas,
+        #     seo_update_canvas,
+        #     apply_patch_to_article,
+        # ]
+        # if enable_canvas:
+        #     tools.extend(canvas_tools)
 
         # Zoho CRM ツールを追加（顧客検索・集計用）
         enable_zoho_crm = asset is None or asset.get("enable_zoho_crm", True)
@@ -390,23 +357,25 @@ class MarketingAgentFactory:
         parts: list[str] = []
         if addition:
             parts.append(addition.strip())
-        if not enable_canvas:
-            parts.append(
-                "このプリセットでは記事キャンバス（Canvas）/SEO記事編集ツールが無効です。"
-                "seo_open_canvas, seo_update_canvas, create_seo_article, save_seo_article, "
-                "save_seo_article_body, get_seo_article, apply_patch_to_article などのキャンバス系ツールは呼び出さず、"
-                "アウトラインや本文が必要な場合はチャット欄で直接提示してください。"
-                "記事の永続化や右ペイン更新は行いません。"
-            )
+        # [DISABLED] キャンバスツールはWordPress MCPに移行したため一時無効化
+        # if not enable_canvas:
+        #     parts.append(
+        #         "このプリセットでは記事キャンバス（Canvas）/SEO記事編集ツールが無効です。"
+        #         "seo_open_canvas, seo_update_canvas, create_seo_article, save_seo_article, "
+        #         "save_seo_article_body, get_seo_article, apply_patch_to_article などのキャンバス系ツールは呼び出さず、"
+        #         "アウトラインや本文が必要な場合はチャット欄で直接提示してください。"
+        #         "記事の永続化や右ペイン更新は行いません。"
+        #     )
         parts.append(base_instructions)
         final_instructions = "\n\n".join(parts)
 
-        stop_at_tool_names = [
-            "seo_open_canvas",
-            "seo_update_canvas",
-            "create_seo_article",
-            "save_seo_article",
-        ] if enable_canvas else []
+        # [DISABLED] キャンバスツールはWordPress MCPに移行したため一時無効化
+        # stop_at_tool_names = [
+        #     "seo_open_canvas",
+        #     "seo_update_canvas",
+        #     "create_seo_article",
+        #     "save_seo_article",
+        # ] if enable_canvas else []
 
         agent = Agent(
             name="SEOAgent",
@@ -422,9 +391,11 @@ class MarketingAgentFactory:
                 verbosity=verbosity or "medium",
                 response_include=["code_interpreter_call.outputs"],
             ),
-            tool_use_behavior=StopAtTools(stop_at_tool_names=stop_at_tool_names)
-            if stop_at_tool_names
-            else "run_llm_again",
+            # [DISABLED] キャンバスツール無効化に伴い常にrun_llm_again
+            # tool_use_behavior=StopAtTools(stop_at_tool_names=stop_at_tool_names)
+            # if stop_at_tool_names
+            # else "run_llm_again",
+            tool_use_behavior="run_llm_again",
         )
         return agent
 
