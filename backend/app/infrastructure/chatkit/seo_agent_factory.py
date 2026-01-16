@@ -286,6 +286,35 @@ WORDPRESS_ALLOWED_TOOLS = [
     "mcp-adapter-execute-ability",
 ]
 
+# hitocareer.com 専用の新WordPress MCPツール
+WORDPRESS_HITOCAREER_ALLOWED_TOOLS = [
+    "wp-mcp-get-posts-by-category",
+    "wp-mcp-get-post-block-structure",
+    "wp-mcp-analyze-category-format-patterns",
+    "wp-mcp-get-post-raw-content",
+    "wp-mcp-extract-used-blocks",
+    "wp-mcp-get-theme-styles",
+    "wp-mcp-get-block-patterns",
+    "wp-mcp-get-reusable-blocks",
+    "wp-mcp-get-article-regulations",
+    "wp-mcp-create-draft-post",
+    "wp-mcp-update-post-content",
+    "wp-mcp-update-post-meta",
+    "wp-mcp-publish-post",
+    "wp-mcp-delete-post",
+    "wp-mcp-validate-block-content",
+    "wp-mcp-check-regulation-compliance",
+    "wp-mcp-check-seo-requirements",
+    "wp-mcp-get-media-library",
+    "wp-mcp-upload-media",
+    "wp-mcp-set-featured-image",
+    "wp-mcp-get-categories",
+    "wp-mcp-get-tags",
+    "wp-mcp-create-term",
+    "wp-mcp-get-site-info",
+    "wp-mcp-get-post-types",
+]
+
 
 class MarketingAgentFactory:
     def __init__(self, settings: Settings):
@@ -519,7 +548,7 @@ class MarketingAgentFactory:
                         "type": "mcp",
                         "server_label": "wordpress",
                         "server_url": self._settings.wordpress_mcp_server_url,
-                        "allowed_tools": WORDPRESS_ALLOWED_TOOLS,
+                        "allowed_tools": WORDPRESS_HITOCAREER_ALLOWED_TOOLS,
                         "require_approval": "never",
                         "headers": {
                             "Authorization": self._settings.wordpress_mcp_authorization
