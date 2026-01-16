@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { jaJP } from "@clerk/localizations";
-import Script from "next/script";
 import { Toaster } from "react-hot-toast";
+import Script from "next/script";
 import { SidebarLayout } from "@/components/sidebar-layout";
 import "./globals.css";
 
@@ -60,7 +60,7 @@ export default function RootLayout({
           <Script
             src="https://cdn.platform.openai.com/deployments/chatkit/chatkit.js"
             strategy="beforeInteractive"
-            data-domain-key={process.env.NEXT_PUBLIC_MARKETING_CHATKIT_DOMAIN_KEY}
+            crossOrigin="anonymous"
           />
         </head>
         <body

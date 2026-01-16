@@ -1,15 +1,15 @@
 "use client";
 
-import Script from "next/script";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import type { DetailedHTMLProps, HTMLAttributes } from "react";
-import { useRouter } from "next/navigation";
+import { ChatKit } from "@openai/chatkit-react";
+import { useMarketingChatKit } from "@/hooks/use-marketing-chatkit";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
@@ -59,9 +59,6 @@ type Attachment = {
   created_at?: string | null;
 };
 
-const CHATKIT_URL = "/api/marketing/chatkit/server";
-const CHATKIT_DOMAIN_KEY =
-  process.env.NEXT_PUBLIC_MARKETING_CHATKIT_DOMAIN_KEY ?? "bnq-marketing";
 // Pattern to match OpenAI file IDs (file-xxx, cfile-xxx) and sandbox URLs
 const FILE_ID_PATTERN = /(file|cfile)-[A-Za-z0-9_-]+/;
 const SANDBOX_URL_PATTERN = /sandbox:\/[^\s\)\]"'<>]+/;
@@ -268,11 +265,6 @@ const markdownComponents: Components = {
   },
 };
 
-type TokenState = {
-  secret: string | null;
-  expiresAt: number;
-};
-
 type CanvasState = {
   visible: boolean;
   articleId?: string;
@@ -283,11 +275,6 @@ type CanvasState = {
   status?: string;
   topic?: string;
   primaryKeyword?: string;
-};
-
-type ChatKitElement = HTMLElement & {
-  setOptions: (opts: Record<string, unknown>) => void;
-  addEventListener: typeof window.addEventListener;
 };
 
 export type ModelAsset = {
@@ -312,7 +299,7 @@ export type ModelAsset = {
   created_by_name?: string | null;
 };
 
-function SeoCanvas({ state, isResponding, onApply }: {
+const SeoCanvas = memo(function SeoCanvas({ state, isResponding, onApply }: {
   state: CanvasState;
   isResponding: boolean;
   onApply: (body: string) => void;
@@ -507,7 +494,7 @@ function SeoCanvas({ state, isResponding, onApply }: {
       </div>
     </div>
   );
-}
+});
 
 export type MarketingPageProps = {
   initialThreadId?: string | null;
@@ -541,17 +528,8 @@ function persistCanvas(threadId: string | null, state: CanvasState) {
 }
 
 export default function MarketingPage({ initialThreadId = null }: MarketingPageProps) {
-  const router = useRouter();
-  const tokenRef = useRef<TokenState>({ secret: null, expiresAt: 0 });
-  const chatkitRef = useRef<ChatKitElement | null>(null);
-  const [tokenError, setTokenError] = useState<string | null>(null);
   const [assets, setAssets] = useState<ModelAsset[]>([]);
-  const [selectedAssetId, setSelectedAssetId] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("marketing:model_asset_id") || "standard";
-    }
-    return "standard";
-  });
+  const [selectedAssetId, setSelectedAssetId] = useState<string>("standard");
   const [showAssetDialog, setShowAssetDialog] = useState(false);
   const [showManageDialog, setShowManageDialog] = useState(false);
   const [savingAsset, setSavingAsset] = useState(false);
@@ -566,7 +544,13 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(initialThreadId ?? null);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
-  const currentAssetIdRef = useRef<string>(selectedAssetId);
+
+  // Load selectedAssetId from localStorage on mount (rerender-defer-reads pattern)
+  useEffect(() => {
+    const stored = localStorage.getItem("marketing:model_asset_id");
+    if (stored) setSelectedAssetId(stored);
+  }, []);
+
   const canvasEnabled = useMemo(() => {
     const asset = assets.find((a) => a.id === selectedAssetId);
     if (!asset) return true;
@@ -575,71 +559,85 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
 
   const marketingPrompts = useMemo(
     () => [
-      "hitocareer.com の自然検索トラフィックが落ち込んでいる理由を洗い出して改善案を提案して",
-      "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて",
-      "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して",
-      "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて",
-      "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて",
+      { label: "hitocareer.com の自然検索トラフィックが落ち込んでいる理由を洗い出して改善案を提案して", prompt: "hitocareer.com の自然検索トラフィックが落ち込んでいる理由を洗い出して改善案を提案して" },
+      { label: "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて", prompt: "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて" },
+      { label: "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して", prompt: "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して" },
+      { label: "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて", prompt: "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて" },
+      { label: "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて", prompt: "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて" },
     ],
     []
   );
 
-  const ensureClientSecret = useCallback(async () => {
-    const now = Date.now();
-    if (tokenRef.current.secret && tokenRef.current.expiresAt - 5_000 > now) {
-      return tokenRef.current.secret;
-    }
-    const hasSecret = Boolean(tokenRef.current.secret);
-    const endpoint = hasSecret
-      ? "/api/marketing/chatkit/refresh"
-      : "/api/marketing/chatkit/start";
-    const response = await fetch(endpoint, {
-      method: "POST",
-      body: hasSecret
-        ? JSON.stringify({ currentClientSecret: tokenRef.current.secret })
-        : undefined,
-      headers: hasSecret ? { "Content-Type": "application/json" } : undefined,
+  // Canvas event handlers for the hook
+  const handleCanvasOpen = useCallback((params: Record<string, unknown>) => {
+    setCanvas((prev) => {
+      const next: CanvasState = {
+        ...prev,
+        visible: true,
+        articleId: typeof params.articleId === "string" ? params.articleId : prev.articleId,
+        topic: typeof params.topic === "string" ? params.topic : prev.topic,
+        primaryKeyword: typeof params.primaryKeyword === "string" ? params.primaryKeyword : prev.primaryKeyword,
+        outline: typeof params.outline === "string" ? params.outline : prev.outline,
+      };
+      persistCanvas(currentThreadIdRef.current, next);
+      return next;
     });
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      throw new Error(detail?.error || "Failed to fetch client secret");
-    }
-    const data = await response.json();
-    tokenRef.current = {
-      secret: data.client_secret,
-      expiresAt: now + (data.expires_in ?? 900) * 1000,
-    };
-
-    // Persist for download proxy so <a> links can forward credentials
-    try {
-      const maxAge = Math.max((data.expires_in ?? 900) - 5, 60); // guard against very small TTLs
-      const secure = typeof window !== "undefined" && window.location.protocol === "https:";
-      document.cookie = `marketing_client_secret=${data.client_secret}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? "; Secure" : ""}`;
-    } catch (err) {
-      console.warn("Failed to set marketing_client_secret cookie", err);
-    }
-
-    return tokenRef.current.secret!;
   }, []);
 
-  const customFetch = useCallback(
-    async (input: RequestInfo | URL, init?: RequestInit) => {
-      try {
-        const secret = await ensureClientSecret();
-        const original = new Request(input, init);
-        const headers = new Headers(original.headers);
-        headers.set("x-marketing-client-secret", secret);
-        headers.set("x-model-asset-id", currentAssetIdRef.current);
-        setTokenError(null);
-        return fetch(new Request(original, { headers }));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Token refresh failed";
-        setTokenError(message);
-        throw error;
-      }
+  const handleCanvasUpdate = useCallback((params: Record<string, unknown>) => {
+    setCanvas((prev) => {
+      const next: CanvasState = {
+        ...prev,
+        visible: true,
+        articleId: typeof params.articleId === "string" ? params.articleId : prev.articleId,
+        title: typeof params.title === "string" ? params.title : prev.title,
+        outline: typeof params.outline === "string" ? params.outline : prev.outline,
+        body: typeof params.body === "string" ? params.body : prev.body,
+        version: typeof params.version === "number" ? params.version : (prev.version ?? 0) + 1,
+        status: typeof params.status === "string" ? params.status : prev.status,
+      };
+      persistCanvas(currentThreadIdRef.current, next);
+      return next;
+    });
+  }, []);
+
+  // Thread change handler
+  const handleThread = useCallback((threadId: string | null) => {
+    currentThreadIdRef.current = threadId;
+    setCurrentThreadId(threadId);
+    const stored = loadStoredCanvas(threadId);
+    setCanvas(stored ?? { visible: false, version: 0 });
+    // Update URL without remounting the page (avoid interrupting in-flight sends)
+    const target = threadId ? `/marketing/${threadId}` : "/marketing";
+    if (typeof window !== "undefined" && window.location.pathname !== target) {
+      window.history.replaceState({}, "", target);
+    }
+  }, []);
+
+  // Use the custom ChatKit hook
+  const {
+    control,
+    sendUserMessage,
+    tokenError,
+    ensureClientSecret,
+  } = useMarketingChatKit({
+    initialThreadId,
+    selectedAssetId,
+    canvasEnabled,
+    onCanvasOpen: handleCanvasOpen,
+    onCanvasUpdate: handleCanvasUpdate,
+    onThreadChange: (threadId) => {
+      handleThread(threadId);
+      loadAttachments(threadId);
+      loadShareStatus(threadId);
     },
-    [ensureClientSecret]
-  );
+    onResponseStart: () => setIsResponding(true),
+    onResponseEnd: () => {
+      setIsResponding(false);
+      loadAttachments(currentThreadIdRef.current);
+    },
+    marketingPrompts,
+  });
 
   const loadAttachments = useCallback(
     async (threadId: string | null) => {
@@ -726,189 +724,17 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     [ensureClientSecret, loadShareStatus]
   );
 
-  // Set options once ChatKit custom element is ready
-  useEffect(() => {
-    const el = chatkitRef.current;
-    if (!el) return;
-
-    const options = {
-      api: {
-        url: CHATKIT_URL,
-        domainKey: CHATKIT_DOMAIN_KEY,
-        fetch: customFetch,
-        uploadStrategy: {
-          type: "two_phase",
-        },
-      },
-      locale: "ja",
-      theme: "light",
-      header: {
-        enabled: true,
-           title: { enabled: true, text: "マーケティング分析アシスタント" },
-      },
-      history: { enabled: true, showDelete: false, showRename: true },
-      initialThread: initialThreadId ?? null,
-      startScreen: {
-        greeting: "SEOや集客課題を入力すると分析フローが自動で走ります。記事生成指示で右ペインが開きます。",
-        prompts: marketingPrompts.map((p) => ({ label: p, prompt: p })),
-      },
-      composer: {
-        placeholder: "例: WordPressの過去記事を参考に『エンジニア 転職 失敗』記事を書いて",
-        attachments: {
-          enabled: true,
-          maxSize: 20 * 1024 * 1024,
-          maxCount: 5,
-          accept: {
-            "text/csv": [".csv"],
-            "application/pdf": [".pdf"],
-            "text/plain": [".txt", ".md"],
-            "application/vnd.ms-excel": [".xls", ".xlsx"],
-          },
-        },
-      },
-      disclaimer: {
-        text: "生成されたインサイトは社内共有前に必ず確認してください。",
-        highContrast: true,
-      },
-      onClientTool: async ({
-        name,
-        params,
-      }: {
-        name: string;
-        params: Record<string, unknown>;
-      }) => {
-        if (!canvasEnabled) {
-          return { ok: false, disabled: true };
-        }
-        if (name === "seo_open_canvas") {
-          setCanvas((prev) => {
-            const next: CanvasState = {
-              ...prev,
-              visible: true,
-              articleId:
-                typeof params.articleId === "string"
-                  ? params.articleId
-                  : prev.articleId,
-              topic:
-                typeof params.topic === "string" ? params.topic : prev.topic,
-              primaryKeyword:
-                typeof params.primaryKeyword === "string"
-                  ? params.primaryKeyword
-                  : prev.primaryKeyword,
-              outline:
-                typeof params.outline === "string"
-                  ? params.outline
-                  : prev.outline,
-            };
-            persistCanvas(currentThreadIdRef.current, next);
-            return next;
-          });
-          return { opened: true };
-        }
-        if (name === "seo_update_canvas") {
-          setCanvas((prev) => {
-            const next: CanvasState = {
-              ...prev,
-              visible: true,
-              articleId:
-                typeof params.articleId === "string"
-                  ? params.articleId
-                  : prev.articleId,
-              title:
-                typeof params.title === "string" ? params.title : prev.title,
-              outline:
-                typeof params.outline === "string"
-                  ? params.outline
-                  : prev.outline,
-              body: typeof params.body === "string" ? params.body : prev.body,
-              version:
-                typeof params.version === "number"
-                  ? params.version
-                  : (prev.version ?? 0) + 1,
-              status:
-                typeof params.status === "string" ? params.status : prev.status,
-            };
-            persistCanvas(currentThreadIdRef.current, next);
-            return next;
-          });
-          return { ok: true };
-        }
-        return { ok: true };
-      },
-    };
-
-    // Ensure custom element is defined then set options
-    const setup = async () => {
-      if (customElements.get("openai-chatkit")) {
-        el.setOptions(options);
-      } else {
-        await customElements.whenDefined("openai-chatkit");
-        el.setOptions(options);
-      }
-    };
-    setup();
-  }, [customFetch, marketingPrompts, initialThreadId, canvasEnabled]);
-
-  // Listen for response start/end to toggle spinner (from ChatKit custom events)
-  useEffect(() => {
-    const el = chatkitRef.current;
-    if (!el) return;
-    const onStart = () => setIsResponding(true);
-    const onEnd = () => {
-      setIsResponding(false);
-      loadAttachments(currentThreadIdRef.current);
-    };
-    const handleThread = (threadId: string | null) => {
-      currentThreadIdRef.current = threadId;
-      setCurrentThreadId(threadId);
-      const stored = loadStoredCanvas(threadId);
-      setCanvas(stored ?? { visible: false, version: 0 });
-      // Update URL without remounting the page (avoid interrupting in-flight sends)
-      const target = threadId ? `/marketing/${threadId}` : "/marketing";
-      if (typeof window !== "undefined" && window.location.pathname !== target) {
-        window.history.replaceState({}, "", target);
-      }
-      loadAttachments(threadId);
-      loadShareStatus(threadId);
-    };
-    const onThreadChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ threadId: string | null }>).detail;
-      handleThread(detail?.threadId ?? null);
-    };
-    const onThreadLoadEnd = (event: Event) => {
-      const detail = (event as CustomEvent<{ threadId: string }>)?.detail;
-      handleThread(detail?.threadId ?? null);
-    };
-
-    el.addEventListener("chatkit.response.start", onStart);
-    el.addEventListener("chatkit.response.end", onEnd);
-    el.addEventListener("chatkit.thread.change", onThreadChange);
-    el.addEventListener("chatkit.thread.load.end", onThreadLoadEnd);
-    return () => {
-      el.removeEventListener("chatkit.response.start", onStart);
-      el.removeEventListener("chatkit.response.end", onEnd);
-      el.removeEventListener("chatkit.thread.change", onThreadChange);
-      el.removeEventListener("chatkit.thread.load.end", onThreadLoadEnd);
-    };
-  }, [router, loadShareStatus]);
-
   const handleApplyLocal = useCallback(
     (body: string) => {
       if (!canvasEnabled) return;
       const text = `Canvasで直接編集しました。最新本文を適用してください。articleId: ${canvas.articleId ?? "(not set)"}\n\n=== 新しい本文 ===\n${body}`;
-      const el = chatkitRef.current as ChatKitElement | null;
-      type SenderCapable = { sendUserMessage?: (msg: { content: string }) => void };
-      const sender = el && (el as unknown as SenderCapable).sendUserMessage;
-      if (sender) {
-        sender({ content: text });
-      }
+      sendUserMessage({ text });
     },
-    [canvas.articleId, canvasEnabled]
+    [canvas.articleId, canvasEnabled, sendUserMessage]
   );
 
   const handleSelectAsset = useCallback((id: string) => {
     setSelectedAssetId(id);
-    currentAssetIdRef.current = id;
     if (typeof window !== "undefined") {
       localStorage.setItem("marketing:model_asset_id", id);
     }
@@ -944,7 +770,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
                 ...list,
               ];
         setAssets(withDefault);
-        if (withDefault.length && !withDefault.find((a) => a.id === currentAssetIdRef.current)) {
+        if (withDefault.length && !withDefault.find((a) => a.id === selectedAssetId)) {
           handleSelectAsset(withDefault[0].id);
         }
       } catch (err) {
@@ -1044,11 +870,6 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
 
   return (
     <>
-      <Script
-        src="https://cdn.platform.openai.com/deployments/chatkit/chatkit.js"
-        strategy="beforeInteractive"
-        crossOrigin="anonymous"
-      />
       {/* Make CI download links look like buttons even inside ChatKit messages */}
       <style jsx global>{`
         openai-chatkit a[href^="/api/marketing/files/"] {
@@ -1140,10 +961,8 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
               showCanvasPane ? "w-[45%]" : "w-full"
             }`}
           >
-            <openai-chatkit
-              ref={(el) => {
-                chatkitRef.current = el as ChatKitElement | null;
-              }}
+            <ChatKit
+              control={control}
               style={{ width: "100%", height: "100%", display: "block" }}
             />
             {/* Read-only overlay for shared viewers */}
