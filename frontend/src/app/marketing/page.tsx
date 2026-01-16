@@ -536,11 +536,11 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
 
   const marketingPrompts = useMemo(
     () => [
-      { label: "hitocareer.com の自然検索トラフィックが落ち込んでいる理由を洗い出して改善案を提案して", prompt: "hitocareer.com の自然検索トラフィックが落ち込んでいる理由を洗い出して改善案を提案して" },
-      { label: "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて", prompt: "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて" },
-      { label: "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して", prompt: "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して" },
-      { label: "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて", prompt: "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて" },
-      { label: "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて", prompt: "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて" },
+      { label: "hitocareer.com の自然検索トラフィックが落ち込んでいる理由を洗い出して改善案を提案して", prompt: "hitocareer.com の自然検索トラフィックが落ち込んでいる理由を洗い出して改善案を提案して", icon: "analytics" as const },
+      { label: "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて", prompt: "SEO観点で『転職 コンサルタント』の競合比較と勝ち筋をまとめて", icon: "search" as const },
+      { label: "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して", prompt: "GA4で直帰率が跳ねたページを見つけて、改善するための仮説を提示して", icon: "chart" as const },
+      { label: "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて", prompt: "Ahrefsの被リンクデータとGSCクエリを突き合わせてリライト優先度を教えて", icon: "document" as const },
+      { label: "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて", prompt: "WordPress上の過去記事を踏まえて『エンジニア 転職 失敗』に関する新規記事のアウトラインと本文を書いて", icon: "write" as const },
     ],
     []
   );
