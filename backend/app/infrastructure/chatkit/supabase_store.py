@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -7,12 +8,69 @@ from typing import Any, Iterable, Optional
 
 from chatkit.store import NotFoundError, Store
 from chatkit.types import Attachment, FileAttachment, Page, ThreadItem, ThreadMetadata
+from openai import AsyncOpenAI
 from pydantic import TypeAdapter
 
 from app.infrastructure.chatkit.context import MarketingRequestContext
+from app.infrastructure.config.settings import get_settings
 from app.infrastructure.supabase.client import get_supabase
 
 logger = logging.getLogger(__name__)
+
+# Title generation model (lightweight, fast)
+TITLE_GENERATION_MODEL = "gpt-4.1-mini"
+
+
+async def generate_thread_title(user_message: str) -> str | None:
+    """
+    Generate a concise Japanese thread title from the first user message.
+    Uses a lightweight model for cost efficiency.
+    """
+    settings = get_settings()
+    if not settings.openai_api_key:
+        logger.warning("OpenAI API key not configured, skipping title generation")
+        return None
+
+    try:
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        # Truncate very long messages
+        truncated_message = user_message[:500] if len(user_message) > 500 else user_message
+
+        response = await client.chat.completions.create(
+            model=TITLE_GENERATION_MODEL,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "ユーザーの最初のメッセージから、チャットのタイトルを生成してください。\n"
+                        "ルール:\n"
+                        "- 日本語で15文字以内\n"
+                        "- 内容を端的に表す\n"
+                        "- 絵文字は使わない\n"
+                        "- タイトルのみを出力（説明不要）"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": truncated_message,
+                },
+            ],
+            max_tokens=50,
+            temperature=0.3,
+        )
+
+        title = response.choices[0].message.content
+        if title:
+            # Clean up and truncate if needed
+            title = title.strip().strip('"\'')
+            if len(title) > 30:
+                title = title[:27] + "..."
+            return title
+        return None
+    except Exception as e:
+        logger.warning("Failed to generate thread title: %s", e)
+        return None
 
 
 class PermissionDeniedError(Exception):
@@ -377,12 +435,13 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         self, thread_id: str, item: ThreadItem, context: MarketingRequestContext
     ) -> None:
         sb = self._client()
+        plain_text = _plain_text_from_item(item)
         payload = {
             "id": item.id,
             "conversation_id": thread_id,
             "role": self._infer_role(item),
             "message_type": item.type,
-            "plain_text": _plain_text_from_item(item),
+            "plain_text": plain_text,
             "content": item.model_dump(mode="json"),
             "created_by": context.user_email,
             "created_at": getattr(item, "created_at", datetime.utcnow()).isoformat(),
@@ -395,6 +454,12 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
                 "last_message_at": payload["created_at"],
             }
         ).eq("id", thread_id).execute()
+
+        # Generate title for first user message if thread has default title
+        if item.type == "user_message" and plain_text:
+            asyncio.create_task(
+                self._maybe_generate_title(thread_id, plain_text, context)
+            )
 
     async def save_item(
         self, thread_id: str, item: ThreadItem, context: MarketingRequestContext
@@ -433,6 +498,46 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
     ) -> None:
         sb = self._client()
         sb.table(self.ITEM_TABLE).delete().eq("id", item_id).execute()
+
+    async def _maybe_generate_title(
+        self, thread_id: str, user_message: str, context: MarketingRequestContext
+    ) -> None:
+        """Generate a title for the thread if it still has the default title."""
+        try:
+            sb = self._client()
+            # Check current title
+            res = (
+                sb.table(self.THREAD_TABLE)
+                .select("title")
+                .eq("id", thread_id)
+                .limit(1)
+                .execute()
+            )
+            if not res.data:
+                return
+
+            current_title = res.data[0].get("title") or ""
+            # Check if title is default pattern (ends with "のチャット")
+            if not current_title.endswith("のチャット"):
+                logger.debug(
+                    "Thread %s already has custom title: %s", thread_id[:8], current_title
+                )
+                return
+
+            # Generate new title
+            logger.info("Generating title for thread %s from message: %s...", thread_id[:8], user_message[:50])
+            new_title = await generate_thread_title(user_message)
+            if not new_title:
+                logger.info("Title generation returned empty for thread %s", thread_id[:8])
+                return
+
+            # Update thread title
+            sb.table(self.THREAD_TABLE).update({"title": new_title}).eq("id", thread_id).execute()
+            logger.info("Updated thread %s title to: %s", thread_id[:8], new_title)
+
+        except Exception as e:
+            # Don't fail the main flow if title generation fails
+            logger.warning("Failed to generate/update title for thread %s: %s", thread_id[:8], e)
 
     def _infer_role(self, item: ThreadItem) -> str:
         if item.type == "assistant_message":
