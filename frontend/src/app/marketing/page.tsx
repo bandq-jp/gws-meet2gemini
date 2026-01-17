@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/dialog";
 import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
 import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
+import { ShareDialog } from "@/components/marketing/share-dialog";
 
 type Attachment = {
   file_id: string;
@@ -518,6 +519,8 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [showAttachments, setShowAttachments] = useState(false);
   const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
+  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [currentThreadId, setCurrentThreadId] = useState<string | null>(initialThreadId ?? null);
   const currentThreadIdRef = useRef<string | null>(initialThreadId ?? null);
@@ -599,8 +602,6 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     }
   }, []);
 
-  // Stable callback refs for hook (to avoid circular dependency)
-  const shareToggleRef = useRef<(isShared: boolean) => void>(() => {});
 
   // Use the custom ChatKit hook
   const {
@@ -631,7 +632,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     currentThreadId,
     shareInfo,
     isResponding,
-    onShareToggle: (isShared) => shareToggleRef.current(isShared),
+    onShareClick: () => setShowShareDialog(true),
     // Header actions
     onSettingsClick: () => setShowManageDialog(true),
   });
@@ -665,6 +666,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         setIsReadOnly(false);
         return;
       }
+      setShareLoading(true);
       try {
         const secret = await ensureClientSecret();
         const res = await fetch(`/api/marketing/threads/${threadId}/share`, {
@@ -688,6 +690,8 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         console.error("loadShareStatus failed", err);
         setShareInfo(null);
         setIsReadOnly(false);
+      } finally {
+        setShareLoading(false);
       }
     },
     [ensureClientSecret]
@@ -720,11 +724,6 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
     },
     [ensureClientSecret, loadShareStatus]
   );
-
-  // Update shareToggleRef to point to actual handler (fixes circular dependency)
-  useEffect(() => {
-    shareToggleRef.current = handleToggleShare;
-  }, [handleToggleShare]);
 
   const handleApplyLocal = useCallback(
     (body: string) => {
@@ -927,6 +926,15 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
             <ModelAssetForm onSubmit={handleSaveAsset} loading={savingAsset} submitLabel="作成" />
           </DialogContent>
         </Dialog>
+
+        {/* 共有ダイアログ */}
+        <ShareDialog
+          open={showShareDialog}
+          onOpenChange={setShowShareDialog}
+          shareInfo={shareInfo}
+          isLoading={shareLoading}
+          onToggleShare={handleToggleShare}
+        />
 
         {tokenError && (
           <div className="absolute top-20 left-4 right-4 z-50 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-sm">

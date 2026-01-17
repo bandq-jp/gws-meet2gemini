@@ -71,7 +71,7 @@ export type UseMarketingChatKitOptions = {
   currentThreadId: string | null;
   shareInfo: ShareInfo | null;
   isResponding: boolean;
-  onShareToggle: (isShared: boolean) => void;
+  onShareClick: () => void;
   // Header actions
   onSettingsClick: () => void;
   // Theme customization
@@ -148,7 +148,7 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
 
   // Store refs for header action callbacks
   const onSettingsClickRef = useRef(options.onSettingsClick);
-  const onShareToggleRef = useRef(options.onShareToggle);
+  const onShareClickRef = useRef(options.onShareClick);
   const shareInfoRef = useRef(options.shareInfo);
   const currentThreadIdRef = useRef(options.currentThreadId);
   const isRespondingRef = useRef(options.isResponding);
@@ -156,14 +156,14 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
 
   useEffect(() => {
     onSettingsClickRef.current = options.onSettingsClick;
-    onShareToggleRef.current = options.onShareToggle;
+    onShareClickRef.current = options.onShareClick;
     shareInfoRef.current = options.shareInfo;
     currentThreadIdRef.current = options.currentThreadId;
     isRespondingRef.current = options.isResponding;
     onAssetSelectRef.current = options.onAssetSelect;
   }, [
     options.onSettingsClick,
-    options.onShareToggle,
+    options.onShareClick,
     options.shareInfo,
     options.currentThreadId,
     options.isResponding,
@@ -254,17 +254,17 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
   ]);
 
   // Determine share button icon based on share state
+  // Using "book-open" as ChatKit doesn't have a share icon
   const getShareIcon = (): HeaderIcon => {
-    if (!currentThreadIdRef.current) return "star"; // No thread yet
-    if (shareInfoRef.current?.is_shared) return "star-filled";
-    return "star";
+    if (!currentThreadIdRef.current) return "book-open";
+    if (shareInfoRef.current?.is_shared) return "compose"; // "compose" suggests active/shared
+    return "book-open";
   };
 
-  // Handle share button click
+  // Handle share button click - opens dialog
   const handleShareClick = useCallback(() => {
-    if (!currentThreadIdRef.current || isRespondingRef.current) return;
-    const currentlyShared = shareInfoRef.current?.is_shared ?? false;
-    onShareToggleRef.current(!currentlyShared);
+    if (!currentThreadIdRef.current) return;
+    onShareClickRef.current();
   }, []);
 
   // Handle settings button click
