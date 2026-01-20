@@ -505,8 +505,19 @@ function persistCanvas(threadId: string | null, state: CanvasState) {
   }
 }
 
+// Default asset to ensure model selector is always available
+const DEFAULT_ASSET: ModelAsset = {
+  id: "standard",
+  name: "スタンダード",
+  visibility: "public",
+  enable_canvas: true,
+  enable_meta_ads: true,
+};
+
 export default function MarketingPage({ initialThreadId = null }: MarketingPageProps) {
-  const [assets, setAssets] = useState<ModelAsset[]>([]);
+  // Initialize with default asset to ensure model selector shows immediately
+  const [assets, setAssets] = useState<ModelAsset[]>([DEFAULT_ASSET]);
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [selectedAssetId, setSelectedAssetId] = useState<string>("standard");
   const [showAssetDialog, setShowAssetDialog] = useState(false);
   const [showManageDialog, setShowManageDialog] = useState(false);
@@ -764,11 +775,13 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
                 ...list,
               ];
         setAssets(withDefault);
+        setAssetsLoaded(true);
         if (withDefault.length && !withDefault.find((a) => a.id === selectedAssetId)) {
           handleSelectAsset(withDefault[0].id);
         }
       } catch (err) {
         console.error(err);
+        setAssetsLoaded(true); // Mark as loaded even on error to allow ChatKit to render
       }
     };
     loadAssets();
@@ -948,6 +961,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
             }`}
           >
             <ChatKit
+              key={`chatkit-${assetsLoaded ? "loaded" : "init"}`}
               control={control}
               style={{ width: "100%", height: "100%", display: "block" }}
             />

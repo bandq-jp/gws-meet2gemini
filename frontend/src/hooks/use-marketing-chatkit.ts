@@ -209,16 +209,166 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
     return tokenRef.current.secret!;
   }, []);
 
+  const extractModelId = useCallback((payload: unknown): string | null => {
+    const normalize = (value: unknown): string | null => {
+      if (typeof value === "string") return value;
+      if (value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string") {
+        return (value as { id: string }).id;
+      }
+      return null;
+    };
+
+    const probe = (data: unknown): string | null => {
+      if (!data || typeof data !== "object") return null;
+      const obj = data as Record<string, unknown>;
+      return (
+        normalize((obj.params as any)?.input?.inference_options?.model) ||
+        normalize((obj.params as any)?.input?.model) ||
+        normalize((obj.params as any)?.inference_options?.model) ||
+        normalize((obj.params as any)?.model) ||
+        normalize((obj.input as any)?.inference_options?.model) ||
+        normalize((obj.input as any)?.model) ||
+        normalize((obj.inference_options as any)?.model) ||
+        normalize(obj.model)
+      );
+    };
+
+    if (Array.isArray(payload)) {
+      for (const entry of payload) {
+        const found = probe(entry);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    return probe(payload);
+  }, []);
+
+  const readBodyText = useCallback(
+    async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ): Promise<{ bodyText: string | null; nextInit?: RequestInit }> => {
+      if (init?.body === undefined) {
+        if (input instanceof Request) {
+          try {
+            return { bodyText: await input.clone().text() };
+          } catch {
+            return { bodyText: null };
+          }
+        }
+        return { bodyText: null };
+      }
+
+      const body = init.body;
+      if (body === null) {
+        return { bodyText: null, nextInit: init };
+      }
+
+      if (typeof body === "string") {
+        return { bodyText: body, nextInit: init };
+      }
+
+      if (body instanceof URLSearchParams) {
+        return { bodyText: body.toString(), nextInit: init };
+      }
+
+      if (body instanceof Blob) {
+        try {
+          return { bodyText: await body.text(), nextInit: init };
+        } catch {
+          return { bodyText: null, nextInit: init };
+        }
+      }
+
+      if (body instanceof ArrayBuffer) {
+        try {
+          return {
+            bodyText: new TextDecoder().decode(body),
+            nextInit: init,
+          };
+        } catch {
+          return { bodyText: null, nextInit: init };
+        }
+      }
+
+      if (ArrayBuffer.isView(body)) {
+        try {
+          const view = body as ArrayBufferView;
+          const slice = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+          return {
+            bodyText: new TextDecoder().decode(slice),
+            nextInit: init,
+          };
+        } catch {
+          return { bodyText: null, nextInit: init };
+        }
+      }
+
+      if (typeof ReadableStream !== "undefined" && body instanceof ReadableStream) {
+        try {
+          if (body.locked) {
+            return { bodyText: null, nextInit: init };
+          }
+          const [probeStream, forwardStream] = body.tee();
+          const bodyText = await new Response(probeStream).text();
+          return { bodyText, nextInit: { ...init, body: forwardStream } };
+        } catch {
+          return { bodyText: null, nextInit: init };
+        }
+      }
+
+      return { bodyText: null, nextInit: init };
+    },
+    []
+  );
+
   const customFetch = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       try {
         const secret = await ensureClientSecret();
-        const original = new Request(input, init);
-        const headers = new Headers(original.headers);
+        const headers = new Headers(
+          input instanceof Request ? input.headers : undefined
+        );
+        if (init?.headers) {
+          new Headers(init.headers).forEach((value, key) => {
+            headers.set(key, value);
+          });
+        }
         headers.set("x-marketing-client-secret", secret);
-        headers.set("x-model-asset-id", currentAssetIdRef.current);
+
+        // Try to extract model ID from request body (ChatKit includes it in inference_options)
+        let modelIdFromBody: string | null = null;
+        const { bodyText, nextInit } = await readBodyText(input, init);
+        let effectiveInit = nextInit ?? init;
+
+        if (bodyText) {
+          try {
+            const parsed = JSON.parse(bodyText);
+            // ChatKit sends model in params.input.inference_options.model for threads.add_user_message
+            // Full path: { type: "threads.add_user_message", params: { input: { inference_options: { model: "..." } } } }
+            modelIdFromBody = extractModelId(parsed);
+          } catch {
+            // Body parsing failed, continue with fallback
+          }
+        }
+
+        // Use model from request body if available, otherwise fallback to current ref
+        const modelId = modelIdFromBody || currentAssetIdRef.current;
+        headers.set("x-model-asset-id", modelId);
+
+        if (modelIdFromBody && modelIdFromBody !== currentAssetIdRef.current) {
+          currentAssetIdRef.current = modelIdFromBody;
+          onAssetSelectRef.current(modelIdFromBody);
+        }
+
         setTokenError(null);
-        return fetch(new Request(original, { headers }));
+
+        // Pass through original init with updated headers
+        return fetch(input, {
+          ...effectiveInit,
+          headers,
+        });
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Token refresh failed";
@@ -226,7 +376,7 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
         throw error;
       }
     },
-    [ensureClientSecret]
+    [ensureClientSecret, extractModelId, readBodyText]
   );
 
   // Store callbacks in refs to avoid recreation
