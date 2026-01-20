@@ -44,7 +44,7 @@ export type ModelAsset = {
   id: string;
   name: string;
   description?: string;
-  reasoning_effort?: "low" | "medium" | "high";
+  reasoning_effort?: "low" | "medium" | "high" | "xhigh";
   verbosity?: "low" | "medium" | "high";
   enable_web_search?: boolean;
   enable_code_interpreter?: boolean;

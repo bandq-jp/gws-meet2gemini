@@ -21,7 +21,7 @@ export type ModelAsset = {
   id: string;
   name: string;
   description?: string;
-  reasoning_effort?: "low" | "medium" | "high";
+  reasoning_effort?: "low" | "medium" | "high" | "xhigh";
   verbosity?: "low" | "medium" | "high";
   enable_web_search?: boolean;
   enable_code_interpreter?: boolean;
@@ -205,6 +205,7 @@ export function ModelAssetForm({
                 <SelectItem value="low">Low - 高速</SelectItem>
                 <SelectItem value="medium">Medium - バランス</SelectItem>
                 <SelectItem value="high">High - 深い思考</SelectItem>
+                <SelectItem value="xhigh">XHigh - 最大</SelectItem>
               </SelectContent>
             </Select>
           </div>
