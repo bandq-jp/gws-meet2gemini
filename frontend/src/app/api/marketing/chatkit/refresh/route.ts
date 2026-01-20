@@ -49,7 +49,9 @@ export async function POST(request: Request) {
   }
 
   try {
-    const payload = verifyMarketingToken(currentClientSecret, TOKEN_SECRET);
+    const payload = verifyMarketingToken(currentClientSecret, TOKEN_SECRET, {
+      ignoreExpiry: true,
+    });
     if (payload.sub !== userId) {
       return NextResponse.json(
         { error: "Client secret does not belong to this user" },
