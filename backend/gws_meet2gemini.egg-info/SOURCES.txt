@@ -13,6 +13,7 @@ app/application/use_cases/get_structured_data.py
 app/application/use_cases/manage_custom_schemas.py
 app/application/use_cases/process_structured_data.py
 app/application/use_cases/sync_structured_data_to_zoho.py
+app/application/use_cases/update_meeting_transcript.py
 app/domain/entities/__init__.py
 app/domain/entities/custom_schema.py
 app/domain/entities/marketing_chat.py
@@ -29,12 +30,16 @@ app/domain/value_objects/__init__.py
 app/infrastructure/__init__.py
 app/infrastructure/background/job_tracker.py
 app/infrastructure/chatkit/__init__.py
+app/infrastructure/chatkit/attachment_store.py
 app/infrastructure/chatkit/context.py
+app/infrastructure/chatkit/context_manager.py
 app/infrastructure/chatkit/marketing_server.py
+app/infrastructure/chatkit/model_assets.py
 app/infrastructure/chatkit/seo_agent_factory.py
 app/infrastructure/chatkit/seo_article_tools.py
 app/infrastructure/chatkit/supabase_store.py
 app/infrastructure/chatkit/tool_events.py
+app/infrastructure/chatkit/zoho_crm_tools.py
 app/infrastructure/config/__init__.py
 app/infrastructure/config/settings.py
 app/infrastructure/gcp/__init__.py
@@ -44,6 +49,9 @@ app/infrastructure/gemini/error_utils.py
 app/infrastructure/gemini/structured_extractor.py
 app/infrastructure/google/__init__.py
 app/infrastructure/google/drive_docs_collector.py
+app/infrastructure/notta/__init__.py
+app/infrastructure/notta/drive_xlsx_collector.py
+app/infrastructure/notta/xlsx_parser.py
 app/infrastructure/security/marketing_token_service.py
 app/infrastructure/supabase/__init__.py
 app/infrastructure/supabase/client.py

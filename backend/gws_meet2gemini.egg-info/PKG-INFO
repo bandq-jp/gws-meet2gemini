@@ -19,4 +19,4 @@ Requires-Dist: zohocrmsdk8-0>=3.0.0
 Requires-Dist: google-cloud-tasks>=2.19.3
 Requires-Dist: openai>=1.61.0
 Requires-Dist: openai-agents>=0.5.1
-Requires-Dist: openai-chatkit>=1.2.0
+Requires-Dist: openai-chatkit>=1.4.0
