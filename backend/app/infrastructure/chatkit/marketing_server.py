@@ -6,7 +6,7 @@ from functools import lru_cache
 from typing import AsyncIterator, List
 
 from agents import Runner, RunConfig
-from openai import APIError
+from openai import APIError, OpenAI
 from chatkit.agents import AgentContext, ThreadItemConverter, stream_agent_response
 from chatkit.server import ChatKitServer
 from chatkit.store import Store
@@ -224,13 +224,26 @@ from app.infrastructure.chatkit.seo_agent_factory import (
 )
 from app.infrastructure.chatkit.supabase_store import SupabaseChatStore
 from app.infrastructure.chatkit.attachment_store import SupabaseAttachmentStore
+from app.infrastructure.chatkit.context_manager import (
+    create_trimming_filter,
+    create_session_for_thread,
+    LLMSummarizer,
+    ContextBudget,
+)
 from app.infrastructure.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 
 class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
-    """ChatKit server wired to the SEO marketing agent runner."""
+    """ChatKit server wired to the SEO marketing agent runner.
+
+    Implements multi-level context window management:
+    - L1: ModelSettings.truncation="auto" (in agent factory)
+    - L2: call_model_input_filter for custom trimming
+    - L3: CompactionSessionWrapper for LLM-based compression
+    - L4: TrimmingSession / SummarizingSession patterns
+    """
 
     def __init__(
         self,
@@ -238,11 +251,68 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         attachment_store: SupabaseAttachmentStore,
         agent_factory: MarketingAgentFactory,
         workflow_id: str,
+        openai_client: OpenAI | None = None,
     ):
         super().__init__(store=store, attachment_store=attachment_store)
         self._agent_factory = agent_factory
         self._workflow_id = workflow_id or MARKETING_WORKFLOW_ID
         self._converter = MarketingThreadItemConverter()
+
+        # Initialize OpenAI client for context summarization (L3/L4)
+        settings = get_settings()
+        self._openai_client = openai_client
+        if self._openai_client is None and settings.openai_api_key:
+            self._openai_client = OpenAI(api_key=settings.openai_api_key)
+
+        # Initialize LLM summarizer for advanced context management
+        self._summarizer: LLMSummarizer | None = None
+        if self._openai_client and settings.context_session_type in ("summarizing", "compaction"):
+            self._summarizer = LLMSummarizer(
+                client=self._openai_client,
+                model=settings.context_summarizer_model,
+            )
+            logger.info(
+                f"LLM summarizer initialized with model={settings.context_summarizer_model}"
+            )
+
+        # Thread-local session cache for L3/L4 session-based management
+        self._sessions: dict[str, any] = {}
+
+    def _get_or_create_session(self, thread_id: str) -> any:
+        """Get or create a context management session for a thread.
+
+        This implements L3/L4 session-based context management.
+        Session type is determined by CONTEXT_SESSION_TYPE setting:
+        - "trimming": Fast, deterministic trimming (default)
+        - "summarizing": LLM-based summarization for long contexts
+        - "compaction": Hybrid approach with auto-compaction
+
+        Args:
+            thread_id: Thread/conversation ID
+
+        Returns:
+            Session instance (TrimmingSession, SummarizingSession, or CompactionSessionWrapper)
+        """
+        if thread_id in self._sessions:
+            return self._sessions[thread_id]
+
+        settings = get_settings()
+        session = create_session_for_thread(
+            thread_id=thread_id,
+            session_type=settings.context_session_type,
+            openai_client=self._openai_client,
+            max_turns=settings.context_max_turns,
+            max_items=settings.context_max_items,
+            keep_last_n_turns=settings.context_keep_last_n_turns,
+            context_limit=settings.context_summarization_trigger,
+            compaction_threshold=settings.context_compaction_threshold,
+            summarizer_model=settings.context_summarizer_model,
+        )
+        self._sessions[thread_id] = session
+        logger.info(
+            f"Created {settings.context_session_type} session for thread {thread_id}"
+        )
+        return session
 
     @staticmethod
     def _collect_code_interpreter_file_ids(items: List[ThreadItem]) -> list[str]:
@@ -325,13 +395,30 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                 )
 
         mount_ci_files(agent)
+
+        # L2: Create context-aware RunConfig with call_model_input_filter
+        settings = get_settings()
+        context_filter = None
+        if settings.context_management_enabled:
+            context_filter = create_trimming_filter(
+                max_turns=settings.context_max_turns,
+                max_items=settings.context_max_items,
+                clear_old_tool_results=settings.context_clear_old_tool_results,
+                keep_recent_tool_results=settings.context_keep_recent_tool_results,
+            )
+            logger.info(
+                f"Context management enabled: max_turns={settings.context_max_turns}, "
+                f"max_items={settings.context_max_items}"
+            )
+
         run_config = RunConfig(
             trace_metadata={
                 "__trace_source__": "marketing-chatkit",
                 "workflow_id": self._workflow_id,
                 "user": context.user_email,
                 "workflow_asset": asset_id,
-            }
+            },
+            call_model_input_filter=context_filter,  # L2: Apply context trimming filter
         )
 
         yield ProgressUpdateEvent(text="📊 考え中…")

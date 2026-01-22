@@ -384,6 +384,7 @@ class MarketingAgentFactory:
             model=self._settings.marketing_agent_model,
             model_settings=ModelSettings(
                 store=True,
+                truncation="auto",  # L1: 自動トランケーション - コンテキスト超過時に古いメッセージから削除
                 reasoning=Reasoning(
                     effort=reasoning_effort,
                     summary="detailed",

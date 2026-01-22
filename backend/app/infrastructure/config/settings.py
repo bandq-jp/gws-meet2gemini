@@ -106,6 +106,28 @@ class Settings:
     # ブラウザがアップロード先にアクセスするときのベースURL（必須: スキーム/ホスト付き）
     marketing_upload_base_url: str = _default_marketing_upload_base_url()
 
+    # Context Window Management (L2-L4)
+    # Session type: "trimming" (fast, deterministic), "summarizing" (LLM-based), "compaction" (hybrid)
+    context_session_type: str = os.getenv("CONTEXT_SESSION_TYPE", "trimming")
+    # Maximum user turns to keep in context
+    context_max_turns: int = int(os.getenv("CONTEXT_MAX_TURNS", "10"))
+    # Maximum total items in context
+    context_max_items: int = int(os.getenv("CONTEXT_MAX_ITEMS", "50"))
+    # Whether to clear old tool results (keep only recent ones detailed)
+    context_clear_old_tool_results: bool = os.getenv("CONTEXT_CLEAR_OLD_TOOL_RESULTS", "true").lower() != "false"
+    # Number of recent tool results to keep in full detail
+    context_keep_recent_tool_results: int = int(os.getenv("CONTEXT_KEEP_RECENT_TOOL_RESULTS", "5"))
+    # For SummarizingSession: number of recent turns to keep verbatim
+    context_keep_last_n_turns: int = int(os.getenv("CONTEXT_KEEP_LAST_N_TURNS", "3"))
+    # For SummarizingSession: turn count that triggers summarization
+    context_summarization_trigger: int = int(os.getenv("CONTEXT_SUMMARIZATION_TRIGGER", "5"))
+    # For CompactionSession: estimated token threshold for auto-compaction
+    context_compaction_threshold: int = int(os.getenv("CONTEXT_COMPACTION_THRESHOLD", "100000"))
+    # Model for summarization (should be fast/cheap)
+    context_summarizer_model: str = os.getenv("CONTEXT_SUMMARIZER_MODEL", "gpt-4o-mini")
+    # Whether to enable context management (can disable for debugging)
+    context_management_enabled: bool = os.getenv("CONTEXT_MANAGEMENT_ENABLED", "true").lower() != "false"
+
     ga4_mcp_server_url: str = os.getenv("GA4_MCP_SERVER_URL", "")
     ga4_mcp_authorization: str = os.getenv("GA4_MCP_AUTHORIZATION", "")
     meta_ads_mcp_server_url: str = os.getenv("META_ADS_MCP_SERVER_URL", "")
