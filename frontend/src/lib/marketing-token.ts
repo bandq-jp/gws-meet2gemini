@@ -40,9 +40,14 @@ export function signMarketingToken(
   return `${signingInput}.${signature}`;
 }
 
+type VerifyTokenOptions = {
+  ignoreExpiry?: boolean;
+};
+
 export function verifyMarketingToken(
   token: string,
-  secret: string
+  secret: string,
+  options: VerifyTokenOptions = {}
 ): TokenPayload {
   if (!secret) {
     throw new Error("MARKETING_CHATKIT_TOKEN_SECRET is not configured");
@@ -64,7 +69,7 @@ export function verifyMarketingToken(
   }
   const payload = base64UrlDecode<TokenPayload>(encodedPayload);
   const now = Math.floor(Date.now() / 1000);
-  if (payload.exp < now) {
+  if (!options.ignoreExpiry && payload.exp < now) {
     throw new Error("Client secret expired");
   }
   if (payload.iat > now + 60) {

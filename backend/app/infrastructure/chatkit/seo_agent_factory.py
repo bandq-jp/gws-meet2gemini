@@ -539,7 +539,7 @@ class MarketingAgentFactory:
                         "type": "mcp",
                         "server_label": "achieve",
                         "server_url": self._settings.wordpress_achieve_mcp_server_url,
-                        "allowed_tools": WORDPRESS_ALLOWED_TOOLS,
+                        "allowed_tools": WORDPRESS_HITOCAREER_ALLOWED_TOOLS,
                         "require_approval": "never",
                         "headers": {
                             "Authorization": self._settings.wordpress_achieve_mcp_authorization

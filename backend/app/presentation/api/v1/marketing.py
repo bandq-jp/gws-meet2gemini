@@ -703,8 +703,11 @@ async def create_or_update_model_asset(
     data["visibility"] = visibility
 
     reasoning = data.get("reasoning_effort")
-    if reasoning and reasoning not in ("low", "medium", "high"):
-        raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
+    if reasoning and reasoning not in ("low", "medium", "high", "xhigh"):
+        raise HTTPException(
+            status_code=400,
+            detail="reasoning_effort must be low|medium|high|xhigh",
+        )
 
     result = upsert_model_asset(data, context=context)
     result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
@@ -771,8 +774,11 @@ async def update_model_asset(
     data["visibility"] = visibility
 
     reasoning = data.get("reasoning_effort")
-    if reasoning and reasoning not in ("low", "medium", "high"):
-        raise HTTPException(status_code=400, detail="reasoning_effort must be low|medium|high")
+    if reasoning and reasoning not in ("low", "medium", "high", "xhigh"):
+        raise HTTPException(
+            status_code=400,
+            detail="reasoning_effort must be low|medium|high|xhigh",
+        )
 
     result = upsert_model_asset(data, context=context)
     result["verbosity"] = _normalize_verbosity_to_client(result.get("verbosity"))
