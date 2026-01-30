@@ -91,7 +91,8 @@ async function handleRequest(
     // リクエストボディとヘッダーの準備
     let body: ArrayBuffer | string | undefined = undefined;
     const contentType = request.headers.get('content-type');
-    const isFileUpload = path.includes('attachments') && path.includes('upload');
+    const isFileUpload = (path.includes('attachments') && path.includes('upload'))
+      || (contentType?.includes('multipart/form-data'));
 
     if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
       // ファイルアップロードの場合はバイナリとして処理
@@ -148,6 +149,16 @@ async function handleRequest(
           errorData = { detail: errorText || response.statusText };
         }
         return NextResponse.json(errorData, { status: response.status });
+      }
+
+      // Binary responses (images, files) should be streamed as-is
+      const responseContentType = response.headers.get('content-type') || '';
+      if (responseContentType.startsWith('image/') || responseContentType.startsWith('application/octet-stream')) {
+        const data = await response.arrayBuffer();
+        return new NextResponse(data, {
+          status: response.status,
+          headers: { 'Content-Type': responseContentType },
+        });
       }
 
       const responseData = await response.json();

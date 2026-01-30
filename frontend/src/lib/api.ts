@@ -99,6 +99,68 @@ export interface SettingsResponse {
   gemini: GeminiSettings;
 }
 
+// Image Generation interfaces
+export function getImageGenImageUrl(bucket: string, storagePath: string): string {
+  return `${API_BASE_URL}/image-gen/images/${bucket}/${storagePath}`;
+}
+
+export function getRefImageUrl(storagePath: string): string {
+  return getImageGenImageUrl('image-gen-references', storagePath);
+}
+
+export interface ImageGenReference {
+  id: string;
+  template_id: string;
+  filename: string;
+  storage_path: string;
+  mime_type?: string;
+  size_bytes?: number;
+  sort_order: number;
+  label: string;
+  created_at?: string;
+}
+
+export interface ImageGenTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  category?: string;
+  aspect_ratio: string;
+  image_size: string;
+  system_prompt?: string;
+  thumbnail_url?: string;
+  visibility: string;
+  created_by?: string;
+  created_by_email?: string;
+  image_gen_references?: ImageGenReference[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ImageGenMessage {
+  id: string;
+  session_id: string;
+  role: string;
+  text_content?: string;
+  image_url?: string;
+  storage_path?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+}
+
+export interface ImageGenSession {
+  id: string;
+  template_id?: string;
+  title?: string;
+  aspect_ratio: string;
+  image_size: string;
+  created_by?: string;
+  created_by_email?: string;
+  messages?: ImageGenMessage[];
+  created_at?: string;
+  updated_at?: string;
+}
+
 // Custom Schema interfaces
 export interface EnumOption {
   id?: string;
@@ -440,6 +502,101 @@ class ApiClient {
     return this.request<CustomSchema>(`/custom-schemas/${encodeURIComponent(schemaId)}/duplicate`, {
       method: 'POST',
       body: JSON.stringify({ new_name: newName }),
+    });
+  }
+
+  // ── Image Generation endpoints ──
+
+  async listImageGenTemplates(createdBy?: string): Promise<ImageGenTemplate[]> {
+    const params = new URLSearchParams();
+    if (createdBy) params.set('created_by', createdBy);
+    const qs = params.toString();
+    return this.request<ImageGenTemplate[]>(`/image-gen/templates${qs ? `?${qs}` : ''}`);
+  }
+
+  async getImageGenTemplate(id: string): Promise<ImageGenTemplate> {
+    return this.request<ImageGenTemplate>(`/image-gen/templates/${id}`);
+  }
+
+  async createImageGenTemplate(data: Omit<ImageGenTemplate, 'id' | 'created_at' | 'updated_at' | 'image_gen_references'>): Promise<ImageGenTemplate> {
+    return this.request<ImageGenTemplate>('/image-gen/templates', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateImageGenTemplate(id: string, data: Partial<ImageGenTemplate>): Promise<ImageGenTemplate> {
+    return this.request<ImageGenTemplate>(`/image-gen/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteImageGenTemplate(id: string): Promise<void> {
+    await this.request<void>(`/image-gen/templates/${id}`, { method: 'DELETE' });
+  }
+
+  async uploadImageGenReference(templateId: string, file: File, label: string = 'style'): Promise<ImageGenReference> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('label', label);
+    const url = `${API_BASE_URL}/image-gen/templates/${templateId}/references`;
+    const response = await fetch(url, {
+      method: 'POST',
+      body: formData,
+      // Do NOT set Content-Type header - let browser set it with boundary for multipart
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new ApiError(error.detail || response.statusText, response.status);
+    }
+    return response.json();
+  }
+
+  async deleteImageGenReference(id: string): Promise<void> {
+    await this.request<void>(`/image-gen/references/${id}`, { method: 'DELETE' });
+  }
+
+  async reorderImageGenReferences(templateId: string, referenceIds: string[]): Promise<void> {
+    await this.request<void>(`/image-gen/templates/${templateId}/references/order`, {
+      method: 'PUT',
+      body: JSON.stringify({ reference_ids: referenceIds }),
+    });
+  }
+
+  async listImageGenSessions(createdBy?: string): Promise<ImageGenSession[]> {
+    const params = new URLSearchParams();
+    if (createdBy) params.set('created_by', createdBy);
+    const qs = params.toString();
+    return this.request<ImageGenSession[]>(`/image-gen/sessions${qs ? `?${qs}` : ''}`);
+  }
+
+  async getImageGenSession(id: string): Promise<ImageGenSession> {
+    return this.request<ImageGenSession>(`/image-gen/sessions/${id}`);
+  }
+
+  async createImageGenSession(data: {
+    template_id?: string;
+    title?: string;
+    aspect_ratio?: string;
+    image_size?: string;
+    created_by?: string;
+    created_by_email?: string;
+  }): Promise<ImageGenSession> {
+    return this.request<ImageGenSession>('/image-gen/sessions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async generateImage(sessionId: string, data: {
+    prompt: string;
+    aspect_ratio?: string;
+    image_size?: string;
+  }): Promise<ImageGenMessage> {
+    return this.request<ImageGenMessage>(`/image-gen/sessions/${sessionId}/generate`, {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 

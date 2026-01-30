@@ -33,6 +33,7 @@ import {
   UserCheck,
   MessageSquare,
   PieChart,
+  ImageIcon,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -188,6 +189,14 @@ export function AppSidebar() {
             id: "marketing-chat",
             enabled: true,
             description: "Ahrefs/GSC/GA4を束ねたマーケティング分析チャット",
+          },
+          {
+            title: "画像生成",
+            icon: ImageIcon,
+            href: "/marketing/image-gen",
+            id: "marketing-image-gen",
+            enabled: true,
+            description: "ブランド画像のAI生成・テンプレート管理",
           },
           {
             title: "分析ダッシュボード（仮）",
