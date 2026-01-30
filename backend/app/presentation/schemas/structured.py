@@ -2,6 +2,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 from typing import Any, Dict, Optional, List
 from uuid import UUID
+from datetime import datetime
 
 class ZohoCandidateOut(BaseModel):
     candidate_id: Optional[str] = None
@@ -19,6 +20,13 @@ class ZohoWriteResult(BaseModel):
     error: Optional[str] = None
     attempted_data_count: Optional[int] = None
 
+class ZohoSyncStatus(BaseModel):
+    """Zoho同期ステータス（DB保存分）"""
+    status: Optional[str] = None  # success | failed | auth_error | field_mapping_error | error | NULL
+    error: Optional[str] = None
+    synced_at: Optional[datetime] = None
+    fields_count: Optional[int] = None
+
 class StructuredOut(BaseModel):
     meeting_id: str
     data: Dict[str, Any]
@@ -26,6 +34,7 @@ class StructuredOut(BaseModel):
     custom_schema_id: Optional[UUID] = None
     schema_version: Optional[str] = None
     zoho_write_result: Optional[ZohoWriteResult] = None
+    zoho_sync: Optional[ZohoSyncStatus] = None  # DB保存された同期ステータス
 
 class StructuredProcessRequest(BaseModel):
     zoho_candidate_id: Optional[str] = None

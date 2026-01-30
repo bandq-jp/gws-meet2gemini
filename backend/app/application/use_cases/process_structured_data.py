@@ -117,10 +117,17 @@ class ProcessStructuredDataUseCase:
             structured_data=data,
             candidate_name=zoho_candidate_name
         )
-        
+
+        # Update Zoho sync status in DB
+        self._update_zoho_sync_status(
+            structured_repo=structured_repo,
+            meeting_id=meeting_id,
+            zoho_result=zoho_result
+        )
+
         return {
-            "meeting_id": meeting_id, 
-            "data": data, 
+            "meeting_id": meeting_id,
+            "data": data,
             "zoho_candidate": zoho_candidate,
             "custom_schema_id": custom_schema_id,
             "schema_version": schema_version,
@@ -231,3 +238,25 @@ class ProcessStructuredDataUseCase:
                 "message": f"Zoho書き込みで予期しないエラーが発生しました: {str(e)}",
                 "error": str(e)
             }
+
+    def _update_zoho_sync_status(
+        self,
+        structured_repo: StructuredRepositoryImpl,
+        meeting_id: str,
+        zoho_result: Dict[str, Any]
+    ) -> None:
+        """Update Zoho sync status in DB based on write result"""
+        try:
+            status = zoho_result.get("status", "error")
+            error = zoho_result.get("error")
+            fields_count = zoho_result.get("updated_fields_count")
+
+            structured_repo.update_zoho_sync_status(
+                meeting_id=meeting_id,
+                status=status,
+                error=error,
+                fields_count=fields_count
+            )
+            logger.info(f"Zoho同期ステータスをDBに保存: meeting_id={meeting_id}, status={status}")
+        except Exception as e:
+            logger.warning(f"Zoho同期ステータスのDB保存に失敗: meeting_id={meeting_id}, error={str(e)}")

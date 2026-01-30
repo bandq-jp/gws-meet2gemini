@@ -20,6 +20,7 @@ class MeetingSummary(BaseModel):
     document_url: Optional[str]
     invited_emails: List[str] = Field(default_factory=list)
     is_structured: bool = Field(default=False, description="構造化済みかどうか")
+    zoho_sync_status: Optional[str] = Field(default=None, description="Zoho同期ステータス（success/failed/auth_error/field_mapping_error/error）")
     created_at: Optional[str]
     updated_at: Optional[str]
 

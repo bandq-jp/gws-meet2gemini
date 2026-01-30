@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,9 +21,13 @@ import {
   Sparkles,
   UserCheck,
   AlertCircle,
+  AlertTriangle,
   Search,
   Mail,
   Calendar,
+  CheckCircle,
+  Clock,
+  RefreshCw,
 } from "lucide-react";
 import { 
   apiClient, 
@@ -685,6 +690,65 @@ export default function MeetingDetailPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4 sm:space-y-6 p-4 sm:p-6">
+          {/* Zoho同期ステータス表示 */}
+          {data.zoho_sync && data.zoho_sync.status && data.zoho_sync.status !== 'success' && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>Zoho同期エラー</AlertTitle>
+              <AlertDescription className="space-y-2">
+                <p>{data.zoho_sync.error || 'Zohoへの同期に失敗しました'}</p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleSyncToZoho}
+                  disabled={!selectedCandidate || zohoSyncProcessing}
+                  className="mt-2"
+                >
+                  {zohoSyncProcessing ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      再同期中...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      再同期
+                    </>
+                  )}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {data.zoho_sync && data.zoho_sync.status === 'success' && (
+            <div className="flex items-center space-x-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              <div className="text-sm">
+                <span className="font-medium text-green-800">Zoho同期成功</span>
+                {data.zoho_sync.fields_count !== null && (
+                  <span className="text-green-700 ml-2">
+                    ({data.zoho_sync.fields_count}フィールド更新)
+                  </span>
+                )}
+                {data.zoho_sync.synced_at && (
+                  <span className="text-green-600 ml-2 text-xs">
+                    {new Date(data.zoho_sync.synced_at).toLocaleString('ja-JP')}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {data.zoho_candidate && !data.zoho_sync?.status && (
+            <div className="flex items-center space-x-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <Clock className="h-5 w-5 text-yellow-600" />
+              <div className="text-sm">
+                <span className="font-medium text-yellow-800">Zoho未同期</span>
+                <span className="text-yellow-700 ml-2">候補者は選択済みですが、Zohoへの同期が完了していません</span>
+              </div>
+            </div>
+          )}
+
           {/* Zoho候補者情報セクション */}
           {data.zoho_candidate && (
             <div className="space-y-3">

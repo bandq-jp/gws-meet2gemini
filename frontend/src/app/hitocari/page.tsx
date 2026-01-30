@@ -33,6 +33,7 @@ import {
   ChevronRight,
   Check,
   ChevronsUpDown,
+  AlertTriangle,
 } from "lucide-react";
 import { 
   apiClient, 
@@ -58,9 +59,10 @@ export default function HitocariListPage() {
   const [allPage, setAllPage] = useState(1);
   const [structuredPage, setStructuredPage] = useState(1);
   const [unstructuredPage, setUnstructuredPage] = useState(1);
-  
+  const [syncFailedPage, setSyncFailedPage] = useState(1);
+
   // Tab states
-  const [activeTab, setActiveTab] = useState<'all' | 'structured' | 'unstructured'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'structured' | 'unstructured' | 'sync_failed'>('all');
   
   // Combobox states
   const [open, setOpen] = useState(false);
@@ -133,7 +135,7 @@ export default function HitocariListPage() {
 
   // Define loadMeetings function for paginated data
   const loadMeetings = useCallback(async (
-    tab: 'all' | 'structured' | 'unstructured' = activeTab,
+    tab: 'all' | 'structured' | 'unstructured' | 'sync_failed' = activeTab,
     page: number = 1,
     resetPage: boolean = false,
     searchQuery: string = ""
@@ -142,18 +144,22 @@ export default function HitocariListPage() {
       setLoading(true);
 
       const accounts = showAllAccounts ? undefined : (currentUserEmail ? [currentUserEmail] : undefined);
-      const structured = tab === 'all' ? undefined : (tab === 'structured');
+      // structured filter: undefined for 'all' and 'sync_failed', true for 'structured', false for 'unstructured'
+      const structured = tab === 'all' || tab === 'sync_failed' ? undefined : (tab === 'structured');
+      // zohoSyncFailed filter: true only for 'sync_failed' tab
+      const zohoSyncFailed = tab === 'sync_failed' ? true : undefined;
 
-      const data = await apiClient.getMeetings(page, 40, accounts, structured, searchQuery || undefined);
+      const data = await apiClient.getMeetings(page, 40, accounts, structured, searchQuery || undefined, zohoSyncFailed);
       setMeetingsResponse(data);
-      
+
       // ページリセットが必要な場合
       if (resetPage) {
         setAllPage(1);
         setStructuredPage(1);
         setUnstructuredPage(1);
+        setSyncFailedPage(1);
       }
-      
+
     } catch (error: unknown) {
       console.error('Failed to load meetings:', error);
       const errorMessage = error instanceof Error ? error.message : '不明なエラー';
@@ -192,10 +198,12 @@ export default function HitocariListPage() {
         return structuredPage;
       case 'unstructured':
         return unstructuredPage;
+      case 'sync_failed':
+        return syncFailedPage;
       default:
         return allPage;
     }
-  }, [activeTab, allPage, structuredPage, unstructuredPage]);
+  }, [activeTab, allPage, structuredPage, unstructuredPage, syncFailedPage]);
 
   // ページ変更ハンドラ
   const handlePageChange = (newPage: number) => {
@@ -205,6 +213,9 @@ export default function HitocariListPage() {
         break;
       case 'unstructured':
         setUnstructuredPage(newPage);
+        break;
+      case 'sync_failed':
+        setSyncFailedPage(newPage);
         break;
       default:
         setAllPage(newPage);
@@ -364,12 +375,20 @@ export default function HitocariListPage() {
                       <h3 className="text-base sm:text-lg font-medium line-clamp-2 sm:truncate">
                         {meeting.title || '(無題)'}
                       </h3>
-                      <Badge 
-                        variant={meeting.is_structured ? "default" : "secondary"}
-                        className="self-start sm:self-auto text-xs px-2 py-0.5"
-                      >
-                        {meeting.is_structured ? "構造化済" : "未処理"}
-                      </Badge>
+                      <div className="flex items-center space-x-1 self-start sm:self-auto">
+                        <Badge
+                          variant={meeting.is_structured ? "default" : "secondary"}
+                          className="text-xs px-2 py-0.5"
+                        >
+                          {meeting.is_structured ? "構造化済" : "未処理"}
+                        </Badge>
+                        {meeting.zoho_sync_status && meeting.zoho_sync_status !== 'success' && (
+                          <Badge variant="destructive" className="text-xs px-2 py-0.5">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            Zoho同期失敗
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                     
                     <div className="space-y-1 sm:space-y-0 sm:flex sm:items-center sm:space-x-4 text-xs sm:text-sm text-muted-foreground">
@@ -528,7 +547,7 @@ export default function HitocariListPage() {
 
         {/* Meetings Tabs */}
         <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)} className="space-y-3 sm:space-y-4">
-          <TabsList className="grid w-full grid-cols-3 h-auto">
+          <TabsList className="grid w-full grid-cols-4 h-auto">
             <TabsTrigger value="all" className="text-xs sm:text-sm py-2 px-1 sm:px-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-1">
                 <span>全て</span>
@@ -553,6 +572,15 @@ export default function HitocariListPage() {
                 )}
               </div>
             </TabsTrigger>
+            <TabsTrigger value="sync_failed" className="text-xs sm:text-sm py-2 px-1 sm:px-3 text-destructive data-[state=active]:text-destructive">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-1">
+                <AlertTriangle className="h-3 w-3 sm:mr-1" />
+                <span>同期失敗</span>
+                {meetingsResponse && activeTab === 'sync_failed' && (
+                  <span className="text-xs sm:text-sm">({meetingsResponse.total})</span>
+                )}
+              </div>
+            </TabsTrigger>
           </TabsList>
           
           <TabsContent value="all" className="space-y-4">
@@ -566,6 +594,11 @@ export default function HitocariListPage() {
           </TabsContent>
 
           <TabsContent value="unstructured" className="space-y-4">
+            <MeetingsList meetings={meetingsResponse?.items || []} />
+            <PaginationControls />
+          </TabsContent>
+
+          <TabsContent value="sync_failed" className="space-y-4">
             <MeetingsList meetings={meetingsResponse?.items || []} />
             <PaginationControls />
           </TabsContent>

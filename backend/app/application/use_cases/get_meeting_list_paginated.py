@@ -5,14 +5,15 @@ from app.infrastructure.supabase.repositories.meeting_repository_impl import Mee
 
 class GetMeetingListPaginatedUseCase:
     """ページネーション付き議事録一覧取得ユースケース"""
-    
+
     async def execute(
         self,
         page: int = 1,
         page_size: int = 40,
         accounts: Optional[List[str]] = None,
         structured: Optional[bool] = None,
-        search_query: Optional[str] = None
+        search_query: Optional[str] = None,
+        zoho_sync_failed: Optional[bool] = None
     ) -> Dict[str, Any]:
         """
         軽量な議事録一覧をページネーション付きで取得
@@ -23,6 +24,7 @@ class GetMeetingListPaginatedUseCase:
             accounts: フィルタ対象のアカウント一覧
             structured: 構造化済みフィルタ（True: 構造化済みのみ, False: 未構造化のみ, None: すべて）
             search_query: 検索クエリ（title、organizer_email、organizer_nameで検索）
+            zoho_sync_failed: Zoho同期失敗フィルタ（True: 同期失敗のみ, None: すべて）
 
         Returns:
             ページネーション情報を含む議事録一覧
@@ -32,12 +34,13 @@ class GetMeetingListPaginatedUseCase:
             page_size = 40
         if page < 1:
             page = 1
-            
+
         repo = MeetingRepositoryImpl()
         return repo.list_meetings_paginated(
             page=page,
             page_size=page_size,
             accounts=accounts,
             structured=structured,
-            search_query=search_query
+            search_query=search_query,
+            zoho_sync_failed=zoho_sync_failed
         )

@@ -77,17 +77,18 @@ class MeetingRepositoryImpl:
         page_size: int = 40,
         accounts: Optional[List[str]] = None,
         structured: Optional[bool] = None,
-        search_query: Optional[str] = None
+        search_query: Optional[str] = None,
+        zoho_sync_failed: Optional[bool] = None
     ) -> Dict[str, Any]:
         """ページネーション付きの軽量な議事録一覧取得"""
         try:
             sb = get_supabase()
             start = (page - 1) * page_size
             end = start + page_size - 1
-            
+
             # text_contentを除いた軽量なフィールドのみ取得
             select_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,created_at,updated_at"
-            
+
             # 検索条件の適用関数
             def apply_filters(query):
                 if accounts:
@@ -107,60 +108,76 @@ class MeetingRepositoryImpl:
             count_q = apply_filters(count_q)
             count_res = count_q.execute()
             total = getattr(count_res, "count", None) or len(getattr(count_res, "data", []) or [])
-            
+
             # ページ分のみ取得
             page_q = sb.table(self.TABLE).select(select_fields).order("meeting_datetime", desc=True)
             page_q = apply_filters(page_q)
             page_res = page_q.range(start, end).execute()
             items = getattr(page_res, "data", []) or []
-            
-            # 構造化有無の付与（空配列は照会しない）。長いINクエリを避けるため分割。
+
+            # 構造化有無とZoho同期ステータスの付与（空配列は照会しない）
             page_ids = [it.get("id") for it in items if it.get("id")]
             structured_meetings: set = set()
+            zoho_sync_statuses: Dict[str, str] = {}  # meeting_id -> sync_status
             if page_ids:
                 chunk_size = 10
                 for i in range(0, len(page_ids), chunk_size):
                     sub = page_ids[i:i+chunk_size]
-                    s_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", sub).execute()
+                    s_res = sb.table("structured_outputs").select("meeting_id,zoho_sync_status").in_("meeting_id", sub).execute()
                     s_data = getattr(s_res, "data", []) or []
-                    structured_meetings.update({row["meeting_id"] for row in s_data})
-                
+                    for row in s_data:
+                        structured_meetings.add(row["meeting_id"])
+                        zoho_sync_statuses[row["meeting_id"]] = row.get("zoho_sync_status")
+
             for it in items:
-                it["is_structured"] = it.get("id") in structured_meetings
+                meeting_id = it.get("id")
+                it["is_structured"] = meeting_id in structured_meetings
+                it["zoho_sync_status"] = zoho_sync_statuses.get(meeting_id)
             
             # structuredフィルタが指定されていればページ内で間引く
             if structured is not None:
                 original_items = items
                 items = [it for it in items if it.get("is_structured", False) == structured]
-                
+
                 # フィルタした結果が空の場合、より多くのページを取得して再試行
                 if len(items) == 0 and len(original_items) > 0:
                     # より多くのデータを取得して再フィルタ
                     extended_size = page_size * 5  # 5倍のサイズで再取得
                     extended_end = start + extended_size - 1
-                    
+
                     extended_q = sb.table(self.TABLE).select(select_fields).order("meeting_datetime", desc=True)
                     extended_q = apply_filters(extended_q)
                     extended_res = extended_q.range(start, extended_end).execute()
                     extended_items = getattr(extended_res, "data", []) or []
-                    
-                    # 構造化有無の付与（INクエリ分割）
+
+                    # 構造化有無とZoho同期ステータスの付与（INクエリ分割）
                     extended_ids = [it.get("id") for it in extended_items if it.get("id")]
                     structured_meetings = set()
+                    zoho_sync_statuses = {}
                     if extended_ids:
                         chunk_size = 20
                         for i in range(0, len(extended_ids), chunk_size):
                             sub = extended_ids[i:i+chunk_size]
-                            s_res = sb.table("structured_outputs").select("meeting_id").in_("meeting_id", sub).execute()
+                            s_res = sb.table("structured_outputs").select("meeting_id,zoho_sync_status").in_("meeting_id", sub).execute()
                             s_data = getattr(s_res, "data", []) or []
-                            structured_meetings.update({row["meeting_id"] for row in s_data})
-                        
+                            for row in s_data:
+                                structured_meetings.add(row["meeting_id"])
+                                zoho_sync_statuses[row["meeting_id"]] = row.get("zoho_sync_status")
+
                         for it in extended_items:
-                            it["is_structured"] = it.get("id") in structured_meetings
-                        
+                            meeting_id = it.get("id")
+                            it["is_structured"] = meeting_id in structured_meetings
+                            it["zoho_sync_status"] = zoho_sync_statuses.get(meeting_id)
+
                         # フィルタして必要な分だけ取得
                         filtered_items = [it for it in extended_items if it.get("is_structured", False) == structured]
                         items = filtered_items[:page_size]
+
+            # zoho_sync_failedフィルタが指定されていれば同期失敗のみに絞り込む
+            if zoho_sync_failed is True:
+                # 同期失敗 = zoho_sync_statusが存在し、かつsuccessではない
+                failed_statuses = {'failed', 'auth_error', 'field_mapping_error', 'error'}
+                items = [it for it in items if it.get("zoho_sync_status") in failed_statuses]
             
             total_pages = max(1, (total + page_size - 1) // page_size)
             return {

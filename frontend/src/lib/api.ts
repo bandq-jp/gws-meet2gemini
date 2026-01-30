@@ -1,6 +1,13 @@
 // BFF プロキシ経由でバックエンドAPI接続
 const API_BASE_URL = '/api/proxy';
 
+export interface ZohoSyncStatus {
+  status: string | null;  // success | failed | auth_error | field_mapping_error | error | null
+  error: string | null;
+  synced_at: string | null;
+  fields_count: number | null;
+}
+
 export interface MeetingSummary {
   id: string;
   doc_id: string;
@@ -11,6 +18,7 @@ export interface MeetingSummary {
   document_url?: string;
   invited_emails: string[];
   is_structured?: boolean;
+  zoho_sync_status?: string | null;  // Zoho sync status from structured_outputs
   created_at: string;
   updated_at: string;
 }
@@ -39,6 +47,7 @@ export interface StructuredData {
     candidate_name?: string;
     candidate_email?: string;
   };
+  zoho_sync?: ZohoSyncStatus | null;  // DB保存された同期ステータス
   custom_schema_id?: string;
   schema_version?: string;
   created_at?: string;
@@ -200,22 +209,27 @@ class ApiClient {
     pageSize = 40,
     accounts?: string[],
     structured?: boolean,
-    search?: string
+    search?: string,
+    zohoSyncFailed?: boolean
   ): Promise<MeetingListResponse> {
     const params = new URLSearchParams();
     params.set('page', page.toString());
     params.set('page_size', pageSize.toString());
-    
+
     if (accounts && accounts.length > 0) {
       accounts.forEach(account => params.append('accounts', account));
     }
-    
+
     if (structured !== undefined) {
       params.set('structured', structured.toString());
     }
 
     if (search && search.trim()) {
       params.set('search', search.trim());
+    }
+
+    if (zohoSyncFailed !== undefined) {
+      params.set('zoho_sync_failed', zohoSyncFailed.toString());
     }
 
     return this.request<MeetingListResponse>(`/meetings/?${params.toString()}`);
