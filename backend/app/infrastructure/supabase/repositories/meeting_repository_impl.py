@@ -120,14 +120,12 @@ class MeetingRepositoryImpl:
             structured_meetings: set = set()
             zoho_sync_statuses: Dict[str, str] = {}  # meeting_id -> sync_status
             if page_ids:
-                chunk_size = 10
-                for i in range(0, len(page_ids), chunk_size):
-                    sub = page_ids[i:i+chunk_size]
-                    s_res = sb.table("structured_outputs").select("meeting_id,zoho_sync_status").in_("meeting_id", sub).execute()
-                    s_data = getattr(s_res, "data", []) or []
-                    for row in s_data:
-                        structured_meetings.add(row["meeting_id"])
-                        zoho_sync_statuses[row["meeting_id"]] = row.get("zoho_sync_status")
+                # page_size最大40なのでチャンク不要、一括取得
+                s_res = sb.table("structured_outputs").select("meeting_id,zoho_sync_status").in_("meeting_id", page_ids).execute()
+                s_data = getattr(s_res, "data", []) or []
+                for row in s_data:
+                    structured_meetings.add(row["meeting_id"])
+                    zoho_sync_statuses[row["meeting_id"]] = row.get("zoho_sync_status")
 
             for it in items:
                 meeting_id = it.get("id")
@@ -150,19 +148,17 @@ class MeetingRepositoryImpl:
                     extended_res = extended_q.range(start, extended_end).execute()
                     extended_items = getattr(extended_res, "data", []) or []
 
-                    # 構造化有無とZoho同期ステータスの付与（INクエリ分割）
+                    # 構造化有無とZoho同期ステータスの付与（一括取得）
                     extended_ids = [it.get("id") for it in extended_items if it.get("id")]
                     structured_meetings = set()
                     zoho_sync_statuses = {}
                     if extended_ids:
-                        chunk_size = 20
-                        for i in range(0, len(extended_ids), chunk_size):
-                            sub = extended_ids[i:i+chunk_size]
-                            s_res = sb.table("structured_outputs").select("meeting_id,zoho_sync_status").in_("meeting_id", sub).execute()
-                            s_data = getattr(s_res, "data", []) or []
-                            for row in s_data:
-                                structured_meetings.add(row["meeting_id"])
-                                zoho_sync_statuses[row["meeting_id"]] = row.get("zoho_sync_status")
+                        # 最大200件程度なので一括取得
+                        s_res = sb.table("structured_outputs").select("meeting_id,zoho_sync_status").in_("meeting_id", extended_ids).execute()
+                        s_data = getattr(s_res, "data", []) or []
+                        for row in s_data:
+                            structured_meetings.add(row["meeting_id"])
+                            zoho_sync_statuses[row["meeting_id"]] = row.get("zoho_sync_status")
 
                         for it in extended_items:
                             meeting_id = it.get("id")
@@ -193,6 +189,22 @@ class MeetingRepositoryImpl:
             logger.exception("list_meetings_paginated failed: %s", e)
             raise RuntimeError("failed to fetch meetings")  # API層で400へ変換
 
+    def get_meetings_core_batch(self, meeting_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        """複数会議のコアデータを一括取得（text_content含む）
+
+        Returns:
+            meeting_id -> meeting data の辞書
+        """
+        if not meeting_ids:
+            return {}
+        sb = get_supabase()
+        select_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,text_content,created_at,updated_at"
+        res = sb.table(self.TABLE).select(select_fields).in_("id", meeting_ids).execute()
+        data = getattr(res, "data", None)
+        if isinstance(data, list):
+            return {item["id"]: item for item in data if item.get("id")}
+        return {}
+
     def get_meeting_core(self, meeting_id: str) -> Dict[str, Any]:
         sb = get_supabase()
         select_fields = ("id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,text_content,created_at,updated_at")
@@ -209,21 +221,21 @@ class MeetingRepositoryImpl:
         # 会議データを取得
         res = sb.table(self.TABLE).select("*").eq("id", meeting_id).limit(1).execute()
         data = getattr(res, "data", None)
-        
+
+        item = None
         if isinstance(data, list) and data:
             item = data[0]
-            # 構造化データの存在をチェック
-            structured_res = sb.table("structured_outputs").select("meeting_id").eq("meeting_id", meeting_id).limit(1).execute()
-            structured_data = getattr(structured_res, "data", None)
-            item['is_structured'] = bool(structured_data and len(structured_data) > 0)
-            return item
         elif isinstance(data, dict):
-            # 構造化データの存在をチェック
-            structured_res = sb.table("structured_outputs").select("meeting_id").eq("meeting_id", meeting_id).limit(1).execute()
-            structured_data = getattr(structured_res, "data", None)
-            data['is_structured'] = bool(structured_data and len(structured_data) > 0)
-            return data
-        return {}
+            item = data
+
+        if not item:
+            return {}
+
+        # 構造化データの存在をチェック（1回のみ）
+        structured_res = sb.table("structured_outputs").select("meeting_id").eq("meeting_id", meeting_id).limit(1).execute()
+        structured_data = getattr(structured_res, "data", None)
+        item['is_structured'] = bool(structured_data and len(structured_data) > 0)
+        return item
 
     def update_transcript(
         self,
@@ -235,8 +247,11 @@ class MeetingRepositoryImpl:
         """議事録本文を上書きする。metadataにtranscript_providerを残す。"""
         sb = get_supabase()
 
-        # 既存metadataを取得してマージ
-        existing = self.get_meeting(meeting_id)
+        # 既存metadataのみ軽量取得（get_meeting()の重いstructuredチェックを回避）
+        meta_res = sb.table(self.TABLE).select("id,metadata").eq("id", meeting_id).limit(1).execute()
+        meta_data = getattr(meta_res, "data", None)
+        existing = (meta_data[0] if isinstance(meta_data, list) and meta_data
+                    else meta_data if isinstance(meta_data, dict) else None)
         if not existing:
             return {}
 
@@ -255,5 +270,5 @@ class MeetingRepositoryImpl:
             return data[0]
         if isinstance(data, dict):
             return data
-        # 返却が空のときは再取得して返す
+        # 返却が空のときのみ再取得
         return self.get_meeting(meeting_id)

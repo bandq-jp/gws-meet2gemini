@@ -185,24 +185,23 @@ class GetAiCostsUseCase:
                         meeting_usage_map[meeting_id] = []
                     meeting_usage_map[meeting_id].append(log)
             
-            # 各会議の詳細情報を取得してコスト計算
+            # 全会議IDを一括取得（N+1解消）
+            all_meeting_ids = list(meeting_usage_map.keys())[:limit]
+            meetings_map = self.meeting_repo.get_meetings_core_batch(all_meeting_ids)
+
+            # 各会議のコスト計算
             meeting_costs = []
-            processed_count = 0
-            
-            for meeting_id, usage_logs in meeting_usage_map.items():
-                if processed_count >= limit:
-                    break
-                    
-                # 会議詳細情報を取得
-                meeting = self.meeting_repo.get_meeting_core(meeting_id)
+
+            for meeting_id in all_meeting_ids:
+                meeting = meetings_map.get(meeting_id)
                 if not meeting:
-                    continue  # 会議が見つからない場合はスキップ
-                
-                # コスト計算
+                    continue
+
+                usage_logs = meeting_usage_map[meeting_id]
                 cost_summary = self.cost_calculator.calculate_meeting_costs(
                     usage_logs, meeting.get("title")
                 )
-                
+
                 meeting_costs.append({
                     "meeting_id": meeting_id,
                     "meeting_title": meeting.get("title", "タイトル不明"),
@@ -211,8 +210,6 @@ class GetAiCostsUseCase:
                     "api_calls_count": cost_summary.api_calls_count,
                     "created_at": meeting.get("created_at")
                 })
-                
-                processed_count += 1
             
             # 作成日時の降順でソート
             meeting_costs.sort(key=lambda x: x.get("created_at", ""), reverse=True)

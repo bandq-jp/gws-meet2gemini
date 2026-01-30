@@ -35,7 +35,7 @@ class CustomSchemaRepositoryImpl(CustomSchemaRepository):
     def create(self, schema: CustomSchema) -> CustomSchema:
         """カスタムスキーマを作成"""
         sb = self._get_client()
-        
+
         try:
             # 1. スキーマ基本情報を挿入
             schema_data = {
@@ -47,54 +47,24 @@ class CustomSchemaRepositoryImpl(CustomSchemaRepository):
                 "base_schema_version": schema.base_schema_version,
                 "schema_groups": [{"name": g.name, "description": g.description} for g in schema.schema_groups]
             }
-            
+
             schema_result = sb.table(self.SCHEMAS_TABLE).insert(schema_data).execute()
             if not schema_result.data:
                 raise ValueError("カスタムスキーマの作成に失敗しました")
-            
+
             schema_record = schema_result.data[0]
             schema_id = schema_record["id"]
-            
-            # 2. フィールドを挿入
-            if schema.fields:
-                for field in schema.fields:
-                    field_data = {
-                        "custom_schema_id": schema_id,
-                        "field_key": field.field_key,
-                        "field_label": field.field_label,
-                        "field_description": field.field_description,
-                        "field_type": field.field_type,
-                        "is_required": field.is_required,
-                        "array_item_type": field.array_item_type,
-                        "group_name": field.group_name,
-                        "display_order": field.display_order,
-                        "validation_rules": self._validation_rules_to_dict(field.validation_rules) if field.validation_rules else {}
-                    }
-                    
-                    field_result = sb.table(self.FIELDS_TABLE).insert(field_data).execute()
-                    if not field_result.data:
-                        continue
-                    
-                    field_id = field_result.data[0]["id"]
-                    
-                    # 3. 列挙型オプションを挿入
-                    if field.enum_options:
-                        for option in field.enum_options:
-                            enum_data = {
-                                "schema_field_id": field_id,
-                                "option_value": option.value,
-                                "option_label": option.label,
-                                "display_order": option.display_order
-                            }
-                            sb.table(self.ENUM_OPTIONS_TABLE).insert(enum_data).execute()
-            
+
+            # 2. フィールドをバッチ挿入
+            self._batch_insert_fields(sb, schema_id, schema.fields)
+
             # デフォルトスキーマに設定する場合、他のスキーマのデフォルトフラグを解除
             if schema.is_default:
                 self._unset_other_defaults(schema_id)
-            
+
             # 作成されたスキーマを取得して返す
             return self.get_by_id(UUID(schema_id))
-            
+
         except Exception as e:
             logger.error(f"スキーマ作成エラー: {e}")
             raise ValueError(f"カスタムスキーマの作成に失敗しました: {str(e)}")
@@ -102,36 +72,42 @@ class CustomSchemaRepositoryImpl(CustomSchemaRepository):
     def get_by_id(self, schema_id: UUID) -> Optional[CustomSchema]:
         """IDによるカスタムスキーマの取得"""
         sb = self._get_client()
-        
+
         try:
             # スキーマ基本情報を取得
             schema_result = sb.table(self.SCHEMAS_TABLE).select("*").eq("id", str(schema_id)).maybe_single().execute()
-            
+
             if not schema_result.data:
                 return None
-            
+
             schema_data = schema_result.data
-            
+
             # フィールド情報を取得
             fields_result = sb.table(self.FIELDS_TABLE).select("*").eq("custom_schema_id", str(schema_id)).execute()
-            
+
             fields = []
             if fields_result.data:
-                for field_data in fields_result.data:
-                    # 列挙型オプションを取得
-                    enum_result = sb.table(self.ENUM_OPTIONS_TABLE).select("*").eq("schema_field_id", field_data["id"]).order("display_order").execute()
-                    
-                    enum_options = []
+                # 全フィールドIDを収集し、enum_optionsを一括取得（N+1解消）
+                field_ids = [fd["id"] for fd in fields_result.data if fd.get("id")]
+                enum_by_field: Dict[str, list] = {}
+                if field_ids:
+                    enum_result = sb.table(self.ENUM_OPTIONS_TABLE).select("*").in_("schema_field_id", field_ids).order("display_order").execute()
                     if enum_result.data:
                         for enum_data in enum_result.data:
-                            enum_options.append(EnumOption(
-                                id=UUID(enum_data["id"]) if enum_data["id"] else None,
-                                value=enum_data["option_value"],
-                                label=enum_data["option_label"],
-                                display_order=enum_data["display_order"] or 0
-                            ))
-                    
-                    # フィールドを作成
+                            fid = enum_data["schema_field_id"]
+                            enum_by_field.setdefault(fid, []).append(enum_data)
+
+                for field_data in fields_result.data:
+                    enum_options = [
+                        EnumOption(
+                            id=UUID(ed["id"]) if ed["id"] else None,
+                            value=ed["option_value"],
+                            label=ed["option_label"],
+                            display_order=ed["display_order"] or 0
+                        )
+                        for ed in enum_by_field.get(field_data["id"], [])
+                    ]
+
                     field = SchemaField(
                         id=UUID(field_data["id"]) if field_data["id"] else None,
                         field_key=field_data["field_key"],
@@ -146,56 +122,106 @@ class CustomSchemaRepositoryImpl(CustomSchemaRepository):
                         enum_options=enum_options
                     )
                     fields.append(field)
-            
-            # スキーマグループを復元
-            schema_groups = []
-            groups_data = schema_data.get("schema_groups", [])
-            if groups_data:
-                for group_data in groups_data:
-                    schema_groups.append(SchemaGroup(
-                        name=group_data["name"],
-                        description=group_data.get("description", "")
-                    ))
-            
-            # CustomSchemaオブジェクトを作成
-            return CustomSchema(
-                id=UUID(schema_data["id"]),
-                name=schema_data["name"],
-                description=schema_data["description"],
-                is_default=schema_data.get("is_default", False),
-                is_active=schema_data.get("is_active", True),
-                created_by=schema_data.get("created_by"),
-                base_schema_version=schema_data.get("base_schema_version"),
-                schema_groups=schema_groups,
-                fields=sorted(fields, key=lambda x: (x.group_name, x.display_order)),
-                created_at=datetime.fromisoformat(schema_data["created_at"].replace("Z", "+00:00")) if schema_data.get("created_at") else None,
-                updated_at=datetime.fromisoformat(schema_data["updated_at"].replace("Z", "+00:00")) if schema_data.get("updated_at") else None
-            )
-            
+
+            return self._build_schema_entity(schema_data, fields)
+
         except Exception as e:
             logger.error(f"スキーマ取得エラー: {e}")
             return None
+
+    def _build_schema_entity(self, schema_data: Dict[str, Any], fields: List[SchemaField]) -> CustomSchema:
+        """スキーマデータとフィールドリストからCustomSchemaエンティティを構築"""
+        schema_groups = []
+        groups_data = schema_data.get("schema_groups", [])
+        if groups_data:
+            for group_data in groups_data:
+                schema_groups.append(SchemaGroup(
+                    name=group_data["name"],
+                    description=group_data.get("description", "")
+                ))
+
+        return CustomSchema(
+            id=UUID(schema_data["id"]),
+            name=schema_data["name"],
+            description=schema_data["description"],
+            is_default=schema_data.get("is_default", False),
+            is_active=schema_data.get("is_active", True),
+            created_by=schema_data.get("created_by"),
+            base_schema_version=schema_data.get("base_schema_version"),
+            schema_groups=schema_groups,
+            fields=sorted(fields, key=lambda x: (x.group_name, x.display_order)),
+            created_at=datetime.fromisoformat(schema_data["created_at"].replace("Z", "+00:00")) if schema_data.get("created_at") else None,
+            updated_at=datetime.fromisoformat(schema_data["updated_at"].replace("Z", "+00:00")) if schema_data.get("updated_at") else None
+        )
     
     def get_all(self, include_inactive: bool = False) -> List[CustomSchema]:
-        """全カスタムスキーマの取得"""
+        """全カスタムスキーマの取得（一括取得で最適化）"""
         sb = self._get_client()
-        
+
         try:
             query = sb.table(self.SCHEMAS_TABLE).select("*")
             if not include_inactive:
                 query = query.eq("is_active", True)
-            
+
             result = query.order("created_at", desc=True).execute()
-            
+
+            if not result.data:
+                return []
+
+            schema_ids = [sd["id"] for sd in result.data]
+
+            # 全スキーマのフィールドを一括取得
+            all_fields_result = sb.table(self.FIELDS_TABLE).select("*").in_("custom_schema_id", schema_ids).execute()
+            fields_by_schema: Dict[str, list] = {}
+            all_field_ids: list = []
+            if all_fields_result.data:
+                for fd in all_fields_result.data:
+                    sid = fd["custom_schema_id"]
+                    fields_by_schema.setdefault(sid, []).append(fd)
+                    if fd.get("id"):
+                        all_field_ids.append(fd["id"])
+
+            # 全フィールドのenum_optionsを一括取得
+            enum_by_field: Dict[str, list] = {}
+            if all_field_ids:
+                all_enum_result = sb.table(self.ENUM_OPTIONS_TABLE).select("*").in_("schema_field_id", all_field_ids).order("display_order").execute()
+                if all_enum_result.data:
+                    for ed in all_enum_result.data:
+                        fid = ed["schema_field_id"]
+                        enum_by_field.setdefault(fid, []).append(ed)
+
+            # 各スキーマのエンティティを構築
             schemas = []
-            if result.data:
-                for schema_data in result.data:
-                    schema = self.get_by_id(UUID(schema_data["id"]))
-                    if schema:
-                        schemas.append(schema)
-            
+            for schema_data in result.data:
+                sid = schema_data["id"]
+                fields = []
+                for field_data in fields_by_schema.get(sid, []):
+                    enum_options = [
+                        EnumOption(
+                            id=UUID(ed["id"]) if ed["id"] else None,
+                            value=ed["option_value"],
+                            label=ed["option_label"],
+                            display_order=ed["display_order"] or 0
+                        )
+                        for ed in enum_by_field.get(field_data["id"], [])
+                    ]
+                    fields.append(SchemaField(
+                        id=UUID(field_data["id"]) if field_data["id"] else None,
+                        field_key=field_data["field_key"],
+                        field_label=field_data["field_label"],
+                        field_description=field_data["field_description"],
+                        field_type=field_data["field_type"],
+                        is_required=field_data["is_required"] or False,
+                        array_item_type=field_data["array_item_type"],
+                        group_name=field_data["group_name"] or "",
+                        display_order=field_data["display_order"] or 0,
+                        validation_rules=self._dict_to_validation_rules(field_data.get("validation_rules", {})),
+                        enum_options=enum_options
+                    ))
+                schemas.append(self._build_schema_entity(schema_data, fields))
+
             return schemas
-            
+
         except Exception as e:
             logger.error(f"スキーマ一覧取得エラー: {e}")
             return []
@@ -220,9 +246,9 @@ class CustomSchemaRepositoryImpl(CustomSchemaRepository):
         """カスタムスキーマの更新"""
         if not schema.id:
             raise ValueError("更新にはスキーマIDが必要です")
-        
+
         sb = self._get_client()
-        
+
         try:
             # 1. スキーマ基本情報を更新
             schema_data = {
@@ -234,51 +260,21 @@ class CustomSchemaRepositoryImpl(CustomSchemaRepository):
                 "base_schema_version": schema.base_schema_version,
                 "schema_groups": [{"name": g.name, "description": g.description} for g in schema.schema_groups]
             }
-            
+
             sb.table(self.SCHEMAS_TABLE).update(schema_data).eq("id", str(schema.id)).execute()
-            
-            # 2. 既存フィールドと列挙オプションを削除
+
+            # 2. 既存フィールドと列挙オプションを削除（CASCADE削除でenumも消える）
             sb.table(self.FIELDS_TABLE).delete().eq("custom_schema_id", str(schema.id)).execute()
-            
-            # 3. 新しいフィールドを挿入
-            if schema.fields:
-                for field in schema.fields:
-                    field_data = {
-                        "custom_schema_id": str(schema.id),
-                        "field_key": field.field_key,
-                        "field_label": field.field_label,
-                        "field_description": field.field_description,
-                        "field_type": field.field_type,
-                        "is_required": field.is_required,
-                        "array_item_type": field.array_item_type,
-                        "group_name": field.group_name,
-                        "display_order": field.display_order,
-                        "validation_rules": self._validation_rules_to_dict(field.validation_rules) if field.validation_rules else {}
-                    }
-                    
-                    field_result = sb.table(self.FIELDS_TABLE).insert(field_data).execute()
-                    if not field_result.data:
-                        continue
-                    
-                    field_id = field_result.data[0]["id"]
-                    
-                    # 4. 列挙型オプションを挿入
-                    if field.enum_options:
-                        for option in field.enum_options:
-                            enum_data = {
-                                "schema_field_id": field_id,
-                                "option_value": option.value,
-                                "option_label": option.label,
-                                "display_order": option.display_order
-                            }
-                            sb.table(self.ENUM_OPTIONS_TABLE).insert(enum_data).execute()
-            
+
+            # 3. 新しいフィールドをバッチ挿入
+            self._batch_insert_fields(sb, str(schema.id), schema.fields)
+
             # デフォルトスキーマに設定する場合、他のスキーマのデフォルトフラグを解除
             if schema.is_default:
                 self._unset_other_defaults(schema.id)
-            
+
             return self.get_by_id(schema.id)
-            
+
         except Exception as e:
             logger.error(f"スキーマ更新エラー: {e}")
             raise ValueError(f"カスタムスキーマの更新に失敗しました: {str(e)}")
@@ -354,6 +350,49 @@ class CustomSchemaRepositoryImpl(CustomSchemaRepository):
         
         return self.create(new_schema)
     
+    def _batch_insert_fields(self, sb, schema_id: str, fields: Optional[List[SchemaField]]) -> None:
+        """フィールドとenum_optionsをバッチinsert"""
+        if not fields:
+            return
+
+        # フィールドをバッチinsert
+        field_payloads = [
+            {
+                "custom_schema_id": str(schema_id),
+                "field_key": field.field_key,
+                "field_label": field.field_label,
+                "field_description": field.field_description,
+                "field_type": field.field_type,
+                "is_required": field.is_required,
+                "array_item_type": field.array_item_type,
+                "group_name": field.group_name,
+                "display_order": field.display_order,
+                "validation_rules": self._validation_rules_to_dict(field.validation_rules) if field.validation_rules else {}
+            }
+            for field in fields
+        ]
+
+        field_result = sb.table(self.FIELDS_TABLE).insert(field_payloads).execute()
+        if not field_result.data:
+            return
+
+        # insert結果からfield_idを取得し、enum_optionsをバッチinsert
+        enum_payloads = []
+        for i, field_record in enumerate(field_result.data):
+            field_id = field_record["id"]
+            original_field = fields[i]
+            if original_field.enum_options:
+                for option in original_field.enum_options:
+                    enum_payloads.append({
+                        "schema_field_id": field_id,
+                        "option_value": option.value,
+                        "option_label": option.label,
+                        "display_order": option.display_order
+                    })
+
+        if enum_payloads:
+            sb.table(self.ENUM_OPTIONS_TABLE).insert(enum_payloads).execute()
+
     def _unset_other_defaults(self, current_schema_id: UUID):
         """他のスキーマのデフォルトフラグを解除"""
         sb = self._get_client()

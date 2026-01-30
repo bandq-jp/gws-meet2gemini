@@ -263,18 +263,7 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    full = repo.get_meeting_core(meeting_id)
-                    if not full or not full.get("text_content"):
-                        mock_candidate = type('SkippedCandidate', (), {
-                            'skip_reason': 'no_text',
-                            'meeting_id': meeting_id,
-                            'title': title
-                        })()
-                        candidates.append(mock_candidate)
-                        continue
-
-                    title = full.get("title") or title
-
+                    # タイトルマッチをtext_content取得の前に実行（不要なDB取得を回避）
                     extracted = matcher.extract_from_title(title)
                     if not extracted:
                         mock_candidate = type('SkippedCandidate', (), {
@@ -285,6 +274,7 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
+                    # Zoho検索もtext_content取得の前に実行（不要なDB取得を回避）
                     matches = zoho.search_app_hc_by_exact_name(extracted, limit=5)
                     if len(matches) != 1:
                         mock_candidate = type('SkippedCandidate', (), {
@@ -300,6 +290,17 @@ class AutoProcessMeetingsUseCase:
                     if not matcher.is_exact_match(extracted, match.get("candidate_name", "")):
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'zoho_not_exact',
+                            'meeting_id': meeting_id,
+                            'title': title
+                        })()
+                        candidates.append(mock_candidate)
+                        continue
+
+                    # Zohoマッチ確定後にのみtext_contentを取得
+                    full = repo.get_meeting_core(meeting_id)
+                    if not full or not full.get("text_content"):
+                        mock_candidate = type('SkippedCandidate', (), {
+                            'skip_reason': 'no_text',
                             'meeting_id': meeting_id,
                             'title': title
                         })()
