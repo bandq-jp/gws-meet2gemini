@@ -210,6 +210,7 @@ class MarketingThreadItemConverter(ThreadItemConverter):
             ]
 
 from app.infrastructure.chatkit.context import MarketingRequestContext
+from app.infrastructure.chatkit.keepalive import with_keepalive
 from app.infrastructure.chatkit.tool_events import (
     ToolUsageTracker,
     instrument_run_result,
@@ -353,8 +354,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         monitored = instrument_run_result(result, tracker)
 
         try:
-            async for event in stream_agent_response(context_wrapper, monitored):
-                # sandbox リンク書き換えは ToolUsageTracker が DB を直接更新するので、ここではそのまま流す
+            raw_stream = stream_agent_response(context_wrapper, monitored)
+            async for event in with_keepalive(raw_stream, interval=20):
                 yield event
         except APIError as exc:
             logger.exception("Marketing agent streaming failed")
@@ -376,7 +377,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                     run_config=run_config,
                 )
                 fallback_monitored = instrument_run_result(fallback_result, tracker)
-                async for event in stream_agent_response(context_wrapper, fallback_monitored):
+                fallback_stream = stream_agent_response(context_wrapper, fallback_monitored)
+                async for event in with_keepalive(fallback_stream, interval=20):
                     yield event
             else:
                 hint = (

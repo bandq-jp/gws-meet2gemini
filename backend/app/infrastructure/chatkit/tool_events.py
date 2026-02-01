@@ -135,6 +135,14 @@ class ToolUsageTracker:
         self._token_service: MarketingTokenService | None = None
         # collected attachments for the current assistant message
         self._attachments: list[dict[str, str | None]] = []
+        # Track background DB write tasks for cleanup
+        self._bg_tasks: set[asyncio.Task] = set()
+
+    def _fire_and_forget(self, coro) -> None:
+        """Schedule a coroutine as a tracked background task."""
+        task = asyncio.create_task(coro)
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
     async def observe(self, event: StreamEvent) -> None:
         # Log all events for debugging
@@ -169,8 +177,10 @@ class ToolUsageTracker:
                     logger.info(f"Storing tool call: identifier={identifier}, title={metadata['title']}")
                 await self._presenter.add_tool(**metadata)
 
-                # Save tool call as hidden context for conversation history
-                await self._save_tool_call_as_context(identifier, event.item, metadata)
+                # Save tool call as hidden context (non-blocking)
+                self._fire_and_forget(
+                    self._save_tool_call_as_context(identifier, event.item, metadata)
+                )
 
                 # If output is already available, save it immediately
                 if has_output and identifier:
@@ -184,7 +194,9 @@ class ToolUsageTracker:
                     output_item = OutputItem(raw_item, output)
                     summary = self._summarize_output(output)
                     await self._presenter.complete_tool(identifier, summary)
-                    await self._save_tool_output_as_context(identifier, output_item)
+                    self._fire_and_forget(
+                        self._save_tool_output_as_context(identifier, output_item)
+                    )
             else:
                 logger.warning(f"No metadata for tool call: type={tool_type}")
         elif event.name == "tool_output":
@@ -202,8 +214,10 @@ class ToolUsageTracker:
                 summary = self._summarize_output(event.item.output)
                 await self._presenter.complete_tool(identifier, summary)
 
-                # Save tool output as hidden context for conversation history
-                await self._save_tool_output_as_context(identifier, event.item)
+                # Save tool output as hidden context (non-blocking)
+                self._fire_and_forget(
+                    self._save_tool_output_as_context(identifier, event.item)
+                )
         elif event.name == "message_output_created":
             # This event contains the final output including Code Interpreter results
             logger.info(f"Message output created event")
@@ -339,6 +353,22 @@ class ToolUsageTracker:
             pass
 
     async def close(self) -> None:
+        # Wait for pending background DB writes before cleaning up
+        if self._bg_tasks:
+            pending = list(self._bg_tasks)
+            logger.info("Waiting for %d background DB tasks to complete", len(pending))
+            done, not_done = await asyncio.wait(pending, timeout=10.0)
+            for task in not_done:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            for task in done:
+                exc = task.exception() if not task.cancelled() else None
+                if exc:
+                    logger.error("Background DB task failed: %s", exc)
+            self._bg_tasks.clear()
         await self._presenter.close()
         self._tool_calls.clear()
         self._container_files.clear()

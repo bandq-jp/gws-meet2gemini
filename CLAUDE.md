@@ -1,186 +1,401 @@
-# CLAUDE.md
+# CLAUDE.md - 永続メモリ & 自己改善ログ
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+> ## **【最重要】記憶の更新は絶対に忘れるな**
+> **作業の開始時・途中・完了時に必ずこのファイルを確認・更新せよ。**
+> コード変更、設計変更、新しい知見、バグ修正、アーキテクチャ変更 — どんな小さな変更でも、発生したらその場で即座にこのファイルに記録すること。
+> **ユーザーに「記憶を更新して」と言われる前に、自分から更新するのが当たり前。言われてからでは遅い。**
+> これは最優先の義務であり、他のどんなタスクよりも優先される。
 
-## Project Overview
+> **このファイルはClaude Codeの永続メモリであり、自己改善の記録である。**
+> セッションをまたいで知識を保持し、過去の失敗・学び・判断を蓄積して次のセッションの自分をより賢くするためのファイルである。
+>
+> ## 運用ルール
+> 1. **毎回の作業開始時**にこのファイルを読み込み、内容に従って行動する
+> 2. **作業中に新しい知見・決定・変更が生じたら**、即座にこのファイルを更新する（追記・修正・削除）
+> 3. **更新対象**: アーキテクチャ変更、新しい依存関係、デプロイ設定、踏んだ罠・解決策、環境差異、運用ルールなど
+> 4. このファイルの情報が古くなった場合は削除・修正し、常に最新状態を維持する
+> 5. **あとで思い出せるように書く**: 技術的な知見を記録する際は、調査元の公式ドキュメントURL・GitHubリポジトリ・SDKソースファイルパスなどの**情報ソース**も一緒に記録する
+> 6. **セクションは自由に増減してよい**: 新しいテーマが出てきたらセクションを追加し、不要になったら統合・削除する
+> 7. **自己改善**: ユーザーに指摘された間違い・非効率・判断ミスは「自己改善ログ」セクションに記録する
+> 8. **常時更新の義務**: 新情報の発見、コードリーディング中の新発見、設計変更、UIの変更、技術的知見の獲得、バグの発見と修正など — あらゆる新たな情報や更新が発生した場合は**必ずその場でこのファイルを更新する**
 
-A FastAPI-based service that collects Google Meet transcripts from Google Drive, stores them in Supabase, and generates structured summaries using Gemini AI. Designed for Cloud Run deployment with DDD/Onion Architecture principles.
+---
+
+## Package Management (STRICT)
+
+- **Backend (Python)**: `uv add <package>` for dependencies. **Never use `pip install`.**
+- **Frontend (JS/TS)**: `bun add <package>` for dependencies. **Never use `npm install` or `yarn add`.**
+- Backend lock: `uv sync` to sync after changes
+- Frontend lock: `bun install` to sync after changes
+
+---
+
+## プロジェクト概要
+
+**b&q Hub** — Google Workspace / 外部SaaS連携によるAIプラットフォーム。議事録AI構造化・CRM連携・マーケティングAIチャット・画像生成を提供するモノレポ。
+
+### 主要機能
+1. **ひとキャリ (HitoCari)**: Google Meet/Docs/Notta → Gemini AI構造化抽出 → Supabase保存 → Zoho CRM連携
+2. **マーケティングAIチャット**: OpenAI ChatKit + Agents SDK によるSEO/コンテンツ戦略アシスタント（GPT-5.2対応、Web Search / Code Interpreter / MCP連携）
+3. **画像生成**: Gemini 2.5 Pro によるAI画像生成（テンプレート・リファレンス画像・セッション管理）
+
+---
+
+## Tech Stack
+
+### Backend
+- **Framework**: FastAPI + Uvicorn (Python 3.12)
+- **Package Manager**: uv
+- **AI/ML**: Google GenAI (Gemini 2.5 Pro/Flash), OpenAI Agents SDK 0.7.0, OpenAI ChatKit 1.6.0
+- **Database**: Supabase (PostgreSQL HTTP API, RLS対応)
+- **Authentication**: Clerk JWT + ドメイン制限 (@bandq.jp)
+- **External APIs**: Zoho CRM SDK, Google Drive/Docs API, Google Cloud Tasks, Google Cloud Storage
+- **MCP Servers**: GA4, GSC, Ahrefs, Meta Ads, WordPress (オプション)
+
+### Frontend
+- **Framework**: Next.js 16 + React 19 + TypeScript
+- **Package Manager**: Bun
+- **UI**: Tailwind CSS 4 + shadcn/ui (Radix UI) + Lucide React
+- **Auth**: @clerk/nextjs (Google OAuth, @bandq.jp ドメイン制限)
+- **Chat**: @openai/chatkit 1.5.0, @openai/chatkit-react 1.4.3
+- **Markdown**: react-markdown + remark-gfm + rehype-sanitize
+- **Search**: cmdk (Command Menu)
+
+### Infrastructure
+- **DB**: Supabase (PostgreSQL + Storage + RLS)
+- **Deploy**: Google Cloud Run (backend), Vercel (frontend推定)
+- **Async**: Google Cloud Tasks (バックグラウンドジョブ)
+- **Storage**: Supabase Storage (marketing-attachments, image-gen-references, image-gen-outputs)
+- **Container**: Docker (Cloud Run用)
+
+---
+
+## Project Structure
+
+```
+gws-meet2gemini/
+├── backend/                          # FastAPI バックエンド
+│   ├── app/
+│   │   ├── main.py                  # エントリポイント (CORS, ルーティング, ログ)
+│   │   ├── application/use_cases/   # ユースケース (15+)
+│   │   ├── domain/                  # エンティティ, サービス, リポジトリ(抽象)
+│   │   ├── infrastructure/          # 外部連携 (Supabase, Gemini, Zoho, ChatKit, GCP等)
+│   │   └── presentation/api/v1/    # APIルーター, スキーマ
+│   ├── pyproject.toml               # Python依存関係 (uv管理)
+│   ├── Dockerfile                   # Cloud Run用 (Python 3.12-slim + uv)
+│   └── .env / .env.example          # 環境変数 (150+設定)
+├── frontend/                         # Next.js 16 フロントエンド
+│   ├── src/
+│   │   ├── app/                     # App Router (hitocari, marketing, image-gen等)
+│   │   ├── components/              # UI + feature コンポーネント
+│   │   ├── hooks/                   # use-marketing-chatkit, use-image-gen等
+│   │   ├── lib/                     # APIクライアント, ユーティリティ
+│   │   └── middleware.ts            # Clerk認証 + ルート保護
+│   ├── package.json                 # Bun依存関係
+│   └── .env.local / .env.local.example
+├── supabase/
+│   └── migrations/                  # 19 SQLマイグレーション
+└── docs/                            # ドキュメント
+```
+
+---
+
+## Backend Architecture (DDD/オニオン)
+
+### レイヤー構成
+1. **Presentation** (`presentation/api/v1/`): FastAPIルーター, Pydanticスキーマ
+2. **Application** (`application/use_cases/`): オーケストレーション (15ユースケース)
+3. **Domain** (`domain/`): エンティティ, ドメインサービス, リポジトリ(抽象)
+4. **Infrastructure** (`infrastructure/`): 外部連携の具象実装
+
+### 主要APIエンドポイント
+| Prefix | 機能 |
+|--------|------|
+| `/api/v1/meetings` | 議事録収集・一覧・詳細 |
+| `/api/v1/structured` | Gemini AI構造化抽出・自動処理 |
+| `/api/v1/zoho` | Zoho CRM連携 |
+| `/api/v1/marketing` | ChatKit SSEストリーム, モデルアセット, アタッチメント |
+| `/api/v1/image-gen` | テンプレート・セッション・画像生成 |
+| `/api/v1/custom-schemas` | 抽出スキーマCRUD |
+| `/api/v1/ai-costs` | AI使用量・コスト追跡 |
+| `/api/v1/settings` | アプリ設定 |
+| `/health` | ヘルスチェック |
+
+---
+
+## ChatKit & マーケティングAI 詳細設計
+
+### アーキテクチャ
+```
+Frontend (ChatKit React) → Next.js API Route (SSE proxy) → FastAPI → ChatKitServer → Agents SDK → OpenAI API
+```
+
+### 主要ファイル
+| ファイル | 役割 |
+|---------|------|
+| `backend/app/infrastructure/chatkit/marketing_server.py` | ChatKitServerサブクラス。respond()でエージェントストリーム生成 |
+| `backend/app/infrastructure/chatkit/seo_agent_factory.py` | Agent構築 (モデル, ツール, MCP, reasoning設定) |
+| `backend/app/infrastructure/chatkit/tool_events.py` | ToolUsageTracker: ツール実行のUI表示+DB保存 |
+| `backend/app/infrastructure/chatkit/keepalive.py` | SSEキープアライブ (20秒間隔でProgressUpdateEvent) |
+| `backend/app/infrastructure/chatkit/supabase_store.py` | ChatKit用Supabaseストア |
+| `backend/app/infrastructure/chatkit/model_assets.py` | モデルプリセット管理 |
+| `backend/app/infrastructure/chatkit/context.py` | リクエストコンテキスト |
+| `frontend/src/app/marketing/page.tsx` | メインチャットUI (1000+行) |
+| `frontend/src/hooks/use-marketing-chatkit.ts` | ChatKitフック (streaming, attachments, sharing) |
+| `frontend/src/app/api/marketing/chatkit/start/route.ts` | JWT トークン生成 |
+
+### SSEキープアライブ機構 (keepalive.py)
+- **目的**: 長時間推論 (reasoning_effort: high/xhigh) 中のSSEタイムアウト防止
+- **仕組み**: pump task + asyncio.Queue + wait_for(timeout=20s) パターン
+- **イベント**: タイムアウト時に `ProgressUpdateEvent(text="📊 考え中…")` を送信
+- **適用箇所**: `marketing_server.py` の `respond()` メソッドでメイン・フォールバック両ストリームに適用
+
+### ChatKit ネイティブ推論表示
+- ChatKit agents.py L622-743 で `response.reasoning_summary_text.delta/done` を自動処理
+- `WorkflowItem(type="reasoning")` + `ThoughtTask` でUI表示
+- `seo_agent_factory.py` で `Reasoning(effort=..., summary="detailed")` を設定
+
+### ToolUsageTracker の非同期DB書き込み
+- `_fire_and_forget()` でDB保存を非ブロッキング化
+- `_save_tool_call_as_context()`, `_save_tool_output_as_context()` が対象
+- `close()` で未完了タスクを10秒タイムアウトで待機
+
+---
+
+## SDK バージョン & 技術的知見
+
+### ChatKit Python SDK v1.6.0
+- **ソース**: `backend/.venv/lib/python3.12/site-packages/chatkit/`
+- **SSEキープアライブ**: **なし** — SDK側にはキープアライブ機能が存在しない。カスタム `keepalive.py` が必要
+- **ProgressUpdateEvent**: 型は `chatkit/types.py` に定義済み。複数回安全に送信可能
+- **推論表示**: `chatkit/agents.py` の `stream_agent_response()` が `response.reasoning_summary_text.delta/done` を自動処理し `WorkflowItem(type="reasoning")` + `ThoughtTask` として出力
+- **キャンセル対応**: v1.6.0 で `handle_stream_cancelled()` が改善。`pending_items` の追跡と保存
+
+### ChatKit Frontend SDK v1.5.0 / React v1.4.3
+- **ソース**: `frontend/node_modules/@openai/chatkit/`, `@openai/chatkit-react/`
+- **SSEキープアライブ**: **なし** — フロントエンド側にもタイムアウト対策は存在しない
+- 推論表示はネイティブでサポート（WorkflowItem rendering）
+
+### OpenAI Agents SDK v0.7.0
+- **ソース**: `backend/.venv/lib/python3.12/site-packages/agents/`
+- **SSEキープアライブ**: **なし**
+- `nest_handoff_history` デフォルトが `True`→`False` に変更 (v0.7.0)
+- GPT-5.1/5.2 のデフォルト reasoning effort が `'none'` に変更
+
+### OpenAI Responses API (SSE)
+- **キープアライブ/ハートビート**: **なし** — OpenAI APIもSSEキープアライブを送信しない
+- **Background mode** (`"background": true`): 長時間推論タスクの公式ワークアラウンド
+- **reasoning_summary streaming**: `reasoning.summary="detailed"` で推論中にイベントが流れるが、初期遅延やsummary間の間隔が長い場合がある
+- **情報ソース**:
+  - https://platform.openai.com/docs/api-reference/responses-streaming
+  - https://platform.openai.com/docs/guides/streaming-responses
+  - https://openai.github.io/openai-agents-python/streaming/
+
+---
+
+## Database Tables (Supabase PostgreSQL)
+
+### ひとキャリ関連
+| テーブル | 概要 |
+|---------|------|
+| `meeting_documents` | 議事録メタデータ・本文 (doc_id, title, meeting_datetime, text_content) |
+| `structured_outputs` | Gemini抽出結果 (meeting_id FK, data JSONB) |
+| `zoho_candidate_links` | 議事録→Zoho候補者マッピング (zoho_sync_status, sync_error) |
+| `custom_schemas` | ユーザー定義抽出スキーマ |
+| `schema_fields` | スキーマフィールド定義 |
+| `field_enum_options` | フィールド列挙値 |
+| `ai_usage_logs` | AI API トークン使用量追跡 |
+
+### マーケティングAI関連
+| テーブル | 概要 |
+|---------|------|
+| `marketing_conversations` | ChatKitスレッドメタデータ (owner_email, status, pinned_insights) |
+| `marketing_messages` | メッセージ (role, content JSONB, tool_calls JSONB) |
+| `marketing_attachments` | ファイルアップロード |
+| `marketing_articles` | 記事キャンバス (title, outline, body_markdown) |
+| `marketing_model_assets` | モデルプリセット (model_id, reasoning_effort, web_search等) |
+| `chat_shares` | スレッド共有権限 |
+
+### 画像生成関連
+| テーブル | 概要 |
+|---------|------|
+| `image_gen_templates` | スタイルテンプレート |
+| `image_gen_references` | リファレンス画像 |
+| `image_gen_sessions` | 生成セッション |
+| `image_gen_messages` | セッション内メッセージ |
+
+---
+
+## Frontend Routes
+
+| Path | 概要 |
+|------|------|
+| `/` | ダッシュボード (サービスカード) |
+| `/hitocari` | 議事録一覧 (ページネーション, フィルタ) |
+| `/hitocari/[id]` | 議事録詳細 (トランスクリプト, 構造化データ) |
+| `/hitocari/mypage` | マイページ |
+| `/hitocari/settings` | 設定 |
+| `/marketing` | マーケティングAIチャット (ChatKit) |
+| `/marketing/[threadId]` | チャットスレッド詳細 |
+| `/marketing/dashboard` | 会話一覧 |
+| `/marketing/image-gen` | 画像生成UI |
+| `/sign-in`, `/sign-up` | Clerk認証 |
+| `/unauthorized` | アクセス拒否 |
+
+---
+
+## Environment Variables
+
+### Backend (.env) — 主要項目
+```env
+# Google
+SERVICE_ACCOUNT_JSON=        # ローカル用サービスアカウント
+GOOGLE_SUBJECT_EMAILS=       # 収集対象メール (カンマ区切り)
+MEETING_SOURCE=              # google_docs / notta / both
+
+# Supabase
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+
+# AI
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-pro  # デフォルト
+OPENAI_API_KEY=
+
+# ChatKit
+MARKETING_AGENT_MODEL=gpt-5-mini
+MARKETING_REASONING_EFFORT=  # low/medium/high/xhigh
+MARKETING_CHATKIT_TOKEN_SECRET=  # JWT署名用 (32+バイト)
+MARKETING_UPLOAD_BASE_URL=
+
+# Zoho (optional)
+ZOHO_CLIENT_ID=
+ZOHO_CLIENT_SECRET=
+ZOHO_REFRESH_TOKEN=
+
+# Cloud Tasks
+GCP_PROJECT=
+TASKS_QUEUE=
+TASKS_WORKER_URL=
+TASKS_OIDC_SERVICE_ACCOUNT=
+
+# MCP Servers (optional)
+GA4_MCP_SERVER_URL=
+GSC_MCP_SERVER_URL=
+AHREFS_MCP_SERVER_URL=
+META_ADS_MCP_SERVER_URL=
+WORDPRESS_MCP_SERVER_URL=
+
+# Server
+ENV=local  # local / production
+CORS_ALLOW_ORIGINS=
+LOG_LEVEL=INFO
+```
+
+### Frontend (.env.local) — 主要項目
+```env
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
+CLERK_SECRET_KEY=
+ALLOWED_EMAIL_DOMAINS=bandq.jp
+NEXT_PUBLIC_MARKETING_CHATKIT_URL=  # Backend ChatKitエンドポイント
+MARKETING_CHATKIT_TOKEN_SECRET=     # Backend と一致必須
+USE_LOCAL_BACKEND=true              # ローカル開発用
+DEV_BACKEND_BASE=http://localhost:8000
+```
+
+---
 
 ## Development Commands
 
-### Local Development
+### Backend
 ```bash
-# Install dependencies
-pip install -e .
-
-# Start development server
-uvicorn app.main:app --reload
-
-# Alternative with custom port
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
-```
-
-### Testing
-Access the test client at `http://localhost:8000/test-client` or open `docs/test-client.html` directly in a browser.
-
-### Cloud Run Deployment
-```bash
-# Build container
-gcloud builds submit --tag gcr.io/<PROJECT>/meet2gemini
-
-# Deploy
-gcloud run deploy meet2gemini \
-  --image gcr.io/<PROJECT>/meet2gemini \
-  --region <REGION> \
-  --set-env-vars SUPABASE_URL=... \
-  --set-env-vars SUPABASE_SERVICE_ROLE_KEY=... \
-  --set-env-vars GOOGLE_SUBJECT_EMAILS=... \
-  --set-env-vars GEMINI_API_KEY=... \
-  --no-allow-unauthenticated
-```
-
-## Architecture
-
-### DDD/Onion Structure
-- **app/presentation/**: FastAPI routers and API schemas (input/output transformation)
-- **app/application/use_cases/**: Business logic orchestration (collect_meetings.py, process_structured_data.py, etc.)
-- **app/domain/**: Core entities and domain services (meeting_document.py, structured_data.py)
-- **app/infrastructure/**: External integrations
-  - `google/`: Google Drive/Docs API clients
-  - `supabase/`: Database repositories using HTTP API
-  - `gemini/`: AI extraction with structured output
-  - `config/`: Settings and environment variables
-
-### Key Integration Points
-- Google API authentication uses service account JSON locally, Workload Identity in Cloud Run
-- Supabase integration via HTTP API only (no direct Postgres connection)
-- Gemini extraction uses split/parallel processing for large schemas
-- CORS middleware configured for local test client
-
-### Database Schema
-Tables in Supabase:
-- `meeting_documents`: Meeting transcripts with metadata (unique on doc_id + organizer_email)
-- `structured_outputs`: Processed Gemini extractions
-
-Apply migrations by running `supabase/migrations/0001_init.sql` in Supabase SQL editor.
-
-## Security Configuration
-
-### Backend (Cloud Run) - 社内限定アクセス
-
-Cloud Run は認証必須 (`--no-allow-unauthenticated`) で設定され、Vercel の BFF 経由のみアクセス可能。
-
-### Frontend (Vercel) - 社内ドメイン制限
-
-Clerk認証に加えて、社内ドメイン（@bandq.jp）のみアクセス許可。
-
-## Service Account Setup (Vercel用)
-
-1. **Vercel用サービスアカウント作成**:
-```bash
-gcloud iam service-accounts create vercel-bff \
-  --display-name="Vercel BFF Invoker"
-```
-
-2. **Cloud Run Invoker権限付与**:
-```bash
-gcloud run services add-iam-policy-binding meet2gemini \
-  --region <REGION> \
-  --member=serviceAccount:vercel-bff@<PROJECT>.iam.gserviceaccount.com \
-  --role=roles/run.invoker
-```
-
-3. **サービスアカウントキー生成**:
-```bash
-gcloud iam service-accounts keys create vercel-sa-key.json \
-  --iam-account=vercel-bff@<PROJECT>.iam.gserviceaccount.com
-```
-
-## Environment Configuration
-
-### Backend Environment Variables:
-- `SERVICE_ACCOUNT_JSON`: Path to service account file (local only)
-- `GOOGLE_SUBJECT_EMAILS`: Comma-separated email accounts to impersonate
-- `SUPABASE_URL`: Supabase project URL
-- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key
-- `GEMINI_API_KEY` or `GOOGLE_API_KEY`: Gemini AI API key
-- `LOG_LEVEL`: Logging level (default: INFO)
-- `CORS_ALLOW_ORIGINS`: 社内VercelドメインのみCC例: `https://your-app.vercel.app`
-- `ENV`: Environment type (`local` for development, `production` for Cloud Run)
-
-### Frontend Environment Variables:
-
-**Local Development (`.env.local`)**:
-```bash
-USE_LOCAL_BACKEND=true
-DEV_BACKEND_BASE=http://localhost:8000
-ALLOWED_EMAIL_DOMAINS=@bandq.jp
-```
-
-**Production (Vercel Environment Variables)**:
-```bash
-USE_LOCAL_BACKEND=false
-CLOUD_RUN_BASE=https://<service>-<hash>-<region>.run.app
-GCP_SA_JSON=<vercel-sa-key.jsonの内容>
-ALLOWED_EMAIL_DOMAINS=@bandq.jp
-```
-
-Copy `.env.example` to `.env` for local development.
-
-## API Endpoints
-
-Base path: `/api/v1`
-
-- `POST /meetings/collect?accounts=email1&accounts=email2`: Collect Google Docs from specified accounts
-- `GET /meetings`: List stored meeting documents
-- `GET /meetings/{id}`: Get specific meeting document
-- `POST /structured/process/{meeting_id}`: Process meeting with Gemini AI
-- `GET /structured/{meeting_id}`: Retrieve structured output
-
-## Security Verification Checklist
-
-### 本番切替前の確認事項:
-
-1. **Cloud Run 設定確認**:
-   - [ ] `--no-allow-unauthenticated` でデプロイされている
-   - [ ] Vercel用サービスアカウントに `roles/run.invoker` 権限が付与されている
-   - [ ] 直接 `run.app` URL にアクセスすると 401/403 エラーが返る
-
-2. **Vercel BFF 確認**:
-   - [ ] `USE_LOCAL_BACKEND=false` で本番Cloud Runを呼び出し
-   - [ ] `GCP_SA_JSON` にサービスアカウントキーが設定されている
-   - [ ] ID Token が正しく付与されてCloud Runにリクエストされている
-
-3. **社内ドメイン制限確認**:
-   - [ ] `@bandq.jp` 以外のメールアドレスでログインすると `/unauthorized` にリダイレクト
-   - [ ] ローカル開発では社内ドメイン制限が無効化されている
-
-4. **CORS 制限確認**:
-   - [ ] 本番バックエンドの `CORS_ALLOW_ORIGINS` にVercelドメインのみ設定
-   - [ ] 他のドメインからのブラウザアクセスが拒否される
-
-### ローカル開発テスト:
-```bash
-# バックエンド
 cd backend
-uvicorn app.main:app --reload --port 8000
-
-# フロントエンド
-cd frontend
-bun run dev  # http://localhost:3000
+uv sync                                                    # 依存同期
+uv run uvicorn app.main:app --reload --host 0.0.0.0       # 開発サーバー (port 8000)
+uv run pytest                                              # テスト
 ```
 
-### 本番Cloud Run プロキシテスト（認証必要）:
+### Frontend
 ```bash
-gcloud run services proxy meet2gemini --region <REGION> --port 8085
-# → http://localhost:8085 で認証付きアクセス可能
+cd frontend
+bun install                                                # 依存インストール
+bun dev                                                    # 開発サーバー (port 3000, Turbopack)
+bun run build                                              # 本番ビルド
+bun lint                                                   # ESLint
 ```
 
-## Development Notes
+### Docker (Cloud Run)
+```bash
+docker build -t meet2gemini:latest backend/
+docker run -p 8000:8080 -e SUPABASE_URL=... meet2gemini:latest
+```
 
-- The service uses domain-wide delegation to impersonate Google Workspace users
-- Meeting documents are detected by folder structure (Meet Recordings folder)  
-- Gemini processing splits large documents for better reliability
-- All database operations use Supabase HTTP API, not direct SQL connections
-- **Security**: Direct access to Cloud Run is blocked; access only via Vercel BFF
-- **Access Control**: Company domain (@bandq.jp) restriction via Clerk middleware
+### Database
+```bash
+# Supabase CLIでマイグレーション適用
+npx supabase db push
+```
+
+---
+
+## Git Branching
+
+- **main**: 本番ブランチ
+- **develop**: 開発ブランチ
+- **feat/***: フィーチャーブランチ → develop へPR
+- コミットメッセージ: `type(scope): description` (feat, refactor, fix, chore)
+
+---
+
+## セッション内の変更履歴 (2026-02-01)
+
+### 1. マーケティングAI SSEキープアライブ実装
+**問題**: 推論量が多い場合 (reasoning_effort: high/xhigh)、`stream_agent_response()` がトークン出力開始まで30秒〜数分沈黙 → Cloud Run / Vercel / ブラウザがSSEタイムアウト
+
+**調査結果**:
+- ChatKit SDK (Python v1.6.0, Frontend v1.5.0): キープアライブ機能なし
+- OpenAI Agents SDK (v0.7.0): キープアライブ機能なし
+- OpenAI Responses API: SSEハートビートを送信しない
+- `reasoning.summary="detailed"` で推論中にイベントは流れるが、初期遅延が問題
+
+**実装**:
+- **新規**: `backend/app/infrastructure/chatkit/keepalive.py`
+  - `with_keepalive(events, interval=20)` async generator
+  - pump task + asyncio.Queue + wait_for(timeout) パターン
+  - `_DoneSentinel` / `_ExceptionSentinel` で完了/例外を伝搬
+  - `finally` で pump task を確実にキャンセル
+
+- **変更**: `backend/app/infrastructure/chatkit/marketing_server.py`
+  - メイン・フォールバック両ストリームを `with_keepalive()` でラップ
+
+- **変更**: `backend/app/infrastructure/chatkit/tool_events.py`
+  - `ToolUsageTracker` に `_bg_tasks` + `_fire_and_forget()` 追加
+  - DB書き込み (`_save_tool_call_as_context`, `_save_tool_output_as_context`) を非同期化
+  - `close()` で未完了タスクを10秒タイムアウトで待機
+
+- **変更**: `frontend/src/app/marketing/page.tsx`
+  - カスタム経過時間UIを追加後、ユーザーの指摘により**完全削除** → ChatKitネイティブ推論表示に委ねる
+
+### 2. SDKバージョンアップ (ユーザーが実施)
+- Backend: chatkit 1.5.3→1.6.0, agents 0.6.9→0.7.0, openai 2.15.0→2.16.0
+- Frontend: chatkit 1.4.0→1.5.0, chatkit-react 1.4.2→1.4.3
+- 破壊的変更なし（調査済み）
+
+---
+
+## 自己改善ログ
+
+> ユーザーから指摘された失敗・判断ミス・非効率を記録し、同じ過ちを繰り返さないための学習記録。
+
+### 2026-02-01
+- **カスタムUIの過剰実装**: SSE問題の対策としてフロントエンドにカスタム経過時間インジケーターを実装したが、ユーザーに「まったくよくありません。しっかりとChatkitの仕様に合わせてやってほしい。カスタムUIでやる必要はありません。思考過程とかもちゃんとchatkitでできるようになっています」と強く指摘された。**SDKの公式機能を先に徹底的に調査し、ネイティブ機能で解決できるかを最優先で確認すべき。カスタム実装は最終手段。**
+- **SDK機能の調査不足**: ChatKit SDKの `WorkflowItem(type="reasoning")` + `ThoughtTask` によるネイティブ推論表示を最初に見落としていた。**外部SDKを使う場合、まずソースコードを全て読んで機能を把握してから設計に入るべき。**
+- **記憶ファイル (CLAUDE.md) の未整備**: プロジェクトの記憶が全くない状態で作業していた。新しいプロジェクトを開始する時点で、まずCLAUDE.mdを作成・整備すべき。
+
+---
+
+> ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
+> **このファイルの冒頭にも書いたが、改めて念押しする。**
+> 作業が完了したら、コミットする前に、必ずこのファイルに変更内容を記録せよ。
+> 新しいファイルを作成した、既存ファイルを変更した、設計を変更した、バグを見つけた、知見を得た — すべて記録対象。
+> **「後で更新しよう」は禁止。今すぐ更新せよ。**

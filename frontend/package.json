@@ -11,8 +11,8 @@
   "dependencies": {
     "@clerk/localizations": "latest",
     "@clerk/nextjs": "latest",
-    "@openai/chatkit": "^1.4.0",
-    "@openai/chatkit-react": "^1.4.2",
+    "@openai/chatkit": "^1.5.0",
+    "@openai/chatkit-react": "^1.4.3",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-avatar": "latest",
