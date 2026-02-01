@@ -23,15 +23,20 @@ class StructuredRepositoryImpl:
             payload["zoho_sync_error"] = structured_data.zoho_sync.error
             payload["zoho_synced_at"] = structured_data.zoho_sync.synced_at.isoformat() if structured_data.zoho_sync.synced_at else None
             payload["zoho_sync_fields_count"] = structured_data.zoho_sync.fields_count
-        res = sb.table(self.TABLE).upsert(payload, on_conflict=["meeting_id"]).execute()
-        return res.data[0] if res.data else {}
+        # returning="minimal" でレスポンスからdata JSONB等を除外（エグレス削減）
+        sb.table(self.TABLE).upsert(
+            payload, on_conflict=["meeting_id"], returning="minimal"
+        ).execute()
+        return {}
 
     # Legacy method for backward compatibility
     def upsert_structured_legacy(self, meeting_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         sb = get_supabase()
         payload = {"meeting_id": meeting_id, "data": data}
-        res = sb.table(self.TABLE).upsert(payload, on_conflict=["meeting_id"]).execute()
-        return res.data[0] if res.data else {}
+        sb.table(self.TABLE).upsert(
+            payload, on_conflict=["meeting_id"], returning="minimal"
+        ).execute()
+        return {}
 
     def get_by_meeting_id(self, meeting_id: str) -> Dict[str, Any]:
         sb = get_supabase()
@@ -121,5 +126,6 @@ class StructuredRepositoryImpl:
         if status == "success":
             payload["zoho_synced_at"] = datetime.utcnow().isoformat()
 
-        res = sb.table(self.TABLE).update(payload).eq("meeting_id", meeting_id).execute()
-        return res.data[0] if res.data else {}
+        # returning="minimal" でレスポンスからdata JSONB等を除外（エグレス削減）
+        sb.table(self.TABLE).update(payload, returning="minimal").eq("meeting_id", meeting_id).execute()
+        return {}

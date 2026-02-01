@@ -381,6 +381,43 @@ npx supabase db push
 - Frontend: chatkit 1.4.0→1.5.0, chatkit-react 1.4.2→1.4.3
 - 破壊的変更なし（調査済み）
 
+### 3. Supabaseエグレス削減 (2026-02-02)
+**問題**: PostgRESTエグレスが908MB/日 (100%)、月間21.32GB でFree Plan (5GB) を大幅超過
+
+**原因分析**:
+- `collect-task` が30分〜2時間毎に実行され、全ドキュメントに対して `get_by_doc_and_organizer()` で `select("*")` (text_content含む) を毎回取得
+- 変更チェックには `metadata.modifiedTime` しか不要なのに、5-50KB/件の text_content を毎回返却
+- `upsert_meeting()`, `upsert_structured()`, `update_zoho_sync_status()` が返却値を使わないのに全カラムをレスポンスで受信
+- ChatKit `load_threads()` で N+1 問題（スレッド一覧取得後、各スレッドを個別に再取得）
+
+**修正内容**:
+- **`meeting_repository_impl.py`**:
+  - `get_by_doc_and_organizer()`: `select("*")` → `select("id,metadata")` — **最大の削減効果**
+  - `upsert_meeting()`: `returning="minimal"` で返却データ抑制
+  - `list_meetings()` (レガシー): `select("*")` → 軽量フィールドのみ (text_content除外)
+  - `get_meeting()`: `select("*")` → 明示的カラム指定
+  - `update_transcript()`: `returning="minimal"` で返却データ抑制
+
+- **`structured_repository_impl.py`**:
+  - `upsert_structured()`: `returning="minimal"` で data JSONB 返却抑制
+  - `upsert_structured_legacy()`: 同上
+  - `update_zoho_sync_status()`: `returning="minimal"` で data JSONB 返却抑制
+
+- **`ai_usage_repository_impl.py`**:
+  - `insert_many()`: `returning="minimal"` で返却データ抑制
+
+- **`supabase_store.py`** (ChatKit):
+  - `load_threads()`: N+1解消 — `_row_to_thread()` ヘルパーで取得済み行データを直接変換
+  - `add_thread_item()`: upsert/update に `returning="minimal"` 追加
+  - `save_item()`: update に `returning="minimal"` 追加
+
+**技術的知見**:
+- supabase-py (postgrest) の upsert/update/insert/delete は `returning` パラメータを受け付ける
+- `returning="minimal"` で PostgREST が `Prefer: return=minimal` ヘッダーを送信し、レスポンスボディが空になる
+- `ReturnMethod` enum は `postgrest.types` に定義: `minimal` / `representation`
+
+**期待効果**: 908MB/日 → ~50-100MB/日 (Free Plan 5GB内に収まる見込み)
+
 ---
 
 ## 自己改善ログ

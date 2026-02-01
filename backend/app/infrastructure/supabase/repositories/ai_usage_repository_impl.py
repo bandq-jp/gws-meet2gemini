@@ -37,13 +37,12 @@ class AiUsageRepositoryImpl:
                 for event in events
             ]
             
-            # 大量データの場合は分割挿入を考慮（現在はシンプルな実装）
-            result = sb.table(self.TABLE).insert(payload).execute()
-            
+            # returning="minimal" でレスポンスデータを抑制（エグレス削減）
+            sb.table(self.TABLE).insert(payload, returning="minimal").execute()
+
             logger.info(
                 f"AI使用量ログを挿入完了: meeting_id={meeting_id}, "
-                f"events_count={len(events)}, "
-                f"inserted_rows={len(result.data) if result.data else 0}"
+                f"events_count={len(events)}"
             )
             
         except Exception as e:

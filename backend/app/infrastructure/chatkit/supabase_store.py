@@ -174,6 +174,36 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         )
         return payload
 
+    def _row_to_thread(self, row: dict, context: MarketingRequestContext) -> ThreadMetadata:
+        """DBの行データからThreadMetadataを構築する（N+1回避用の共通ヘルパー）"""
+        # Access control: owner OR shared
+        is_owner = row.get("owner_clerk_id") == context.user_id
+        is_shared = row.get("is_shared", False)
+
+        if not is_owner and not is_shared:
+            raise NotFoundError(f"Thread {row.get('id')} not found")  # 404 for security
+
+        metadata = row.get("metadata") or {}
+        # Inject sharing info into metadata for frontend
+        metadata["is_shared"] = is_shared
+        metadata["is_owner"] = is_owner
+        metadata["can_edit"] = is_owner  # Only owner can send messages
+        metadata["shared_at"] = row.get("shared_at")
+        metadata["shared_by_email"] = row.get("shared_by_email") if is_owner else None
+
+        return self._thread_adapter.validate_python(
+            {
+                "id": row["id"],
+                "title": row.get("title"),
+                "created_at": _parse_dt(row.get("created_at") or datetime.utcnow()),
+                "status": metadata.get(
+                    "status",
+                    {"type": row.get("status") or "active"},
+                ),
+                "metadata": metadata,
+            }
+        )
+
     async def load_thread(
         self, thread_id: str, context: MarketingRequestContext
     ) -> ThreadMetadata:
@@ -190,34 +220,8 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
             raise NotFoundError(f"Thread {thread_id} not found")
         row = data[0]
 
-        # Access control: owner OR shared
-        is_owner = row.get("owner_clerk_id") == context.user_id
-        is_shared = row.get("is_shared", False)
-
-        if not is_owner and not is_shared:
-            raise NotFoundError(f"Thread {thread_id} not found")  # 404 for security
-
-        metadata = row.get("metadata") or {}
-        # Inject sharing info into metadata for frontend
-        metadata["is_shared"] = is_shared
-        metadata["is_owner"] = is_owner
-        metadata["can_edit"] = is_owner  # Only owner can send messages
-        metadata["shared_at"] = row.get("shared_at")
-        metadata["shared_by_email"] = row.get("shared_by_email") if is_owner else None
-
         try:
-            thread = self._thread_adapter.validate_python(
-                {
-                    "id": row["id"],
-                    "title": row.get("title"),
-                    "created_at": _parse_dt(row.get("created_at") or datetime.utcnow()),
-                    "status": metadata.get(
-                        "status",
-                        {"type": row.get("status") or "active"},
-                    ),
-                    "metadata": metadata,
-                }
-            )
+            thread = self._row_to_thread(row, context)
         except Exception as exc:
             logger.exception("Failed to deserialize marketing thread row")
             raise NotFoundError(f"Thread {thread_id} malformed") from exc
@@ -423,10 +427,11 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
         has_more = len(rows) > limit
         rows = rows[:limit]
         threads: list[ThreadMetadata] = []
+        # N+1回避: 既に取得済みの行データから直接ThreadMetadataを構築
         for row in rows:
             try:
-                threads.append(await self.load_thread(row["id"], context))
-            except NotFoundError:
+                threads.append(self._row_to_thread(row, context))
+            except (NotFoundError, Exception):
                 continue
         next_after = rows[-1]["id"] if has_more and rows else None
         return Page[ThreadMetadata](data=threads, has_more=has_more, after=next_after)
@@ -447,12 +452,10 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
             "created_at": getattr(item, "created_at", datetime.utcnow()).isoformat(),
         }
         logger.info(f"Saving thread item to Supabase: type={item.type}, id={item.id[:8]}..., thread={thread_id[:8]}...")
-        sb.table(self.ITEM_TABLE).upsert(payload).execute()
+        sb.table(self.ITEM_TABLE).upsert(payload, returning="minimal").execute()
         logger.info(f"Successfully saved thread item: type={item.type}, id={item.id[:8]}...")
         sb.table(self.THREAD_TABLE).update(
-            {
-                "last_message_at": payload["created_at"],
-            }
+            {"last_message_at": payload["created_at"]}, returning="minimal"
         ).eq("id", thread_id).execute()
 
         # Generate title for first user message if thread has default title
@@ -471,7 +474,7 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
             "plain_text": _plain_text_from_item(item),
             "content": item.model_dump(mode="json"),
         }
-        sb.table(self.ITEM_TABLE).update(payload).eq("id", item.id).execute()
+        sb.table(self.ITEM_TABLE).update(payload, returning="minimal").eq("id", item.id).execute()
 
     async def load_item(
         self, thread_id: str, item_id: str, context: MarketingRequestContext

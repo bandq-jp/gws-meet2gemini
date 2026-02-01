@@ -13,7 +13,8 @@ class MeetingRepositoryImpl:
     def get_by_doc_and_organizer(self, doc_id: str, organizer_email: str) -> Dict[str, Any]:
         sb = get_supabase()
         logger.debug("Supabase select doc_id=%s organizer=%s", doc_id, organizer_email)
-        res = sb.table(self.TABLE).select("*").eq("doc_id", doc_id).eq("organizer_email", organizer_email).limit(1).execute()
+        # text_content を除外し、変更チェックに必要な id, metadata のみ取得（エグレス削減）
+        res = sb.table(self.TABLE).select("id,metadata").eq("doc_id", doc_id).eq("organizer_email", organizer_email).limit(1).execute()
         data = getattr(res, "data", None)
         if isinstance(data, list) and data:
             return data[0]
@@ -36,18 +37,17 @@ class MeetingRepositoryImpl:
         }
         # dedupe by doc_id + organizer_email
         logger.debug("Supabase upsert doc_id=%s organizer=%s", meeting.doc_id, meeting.organizer_email)
-        res = sb.table(self.TABLE).upsert(payload, on_conflict="doc_id,organizer_email").execute()
-        data = getattr(res, "data", None)
-        if isinstance(data, list) and data:
-            return data[0]
-        if isinstance(data, dict):
-            return data
+        # returning="minimal" でレスポンスからtext_content等を除外（エグレス削減）
+        sb.table(self.TABLE).upsert(
+            payload, on_conflict="doc_id,organizer_email", returning="minimal"
+        ).execute()
         return {}
 
     def list_meetings(self, accounts: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         sb = get_supabase()
-        # 構造化済みかどうかを判定するため、structured_outputsテーブルを別途チェック
-        query = sb.table(self.TABLE).select("*")
+        # text_contentを除外した軽量フィールドのみ取得（エグレス削減）
+        select_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,created_at,updated_at"
+        query = sb.table(self.TABLE).select(select_fields)
         if accounts:
             query = query.in_("organizer_email", accounts)
         res = query.order("meeting_datetime", desc=True).execute()
@@ -218,8 +218,9 @@ class MeetingRepositoryImpl:
 
     def get_meeting(self, meeting_id: str) -> Dict[str, Any]:
         sb = get_supabase()
-        # 会議データを取得
-        res = sb.table(self.TABLE).select("*").eq("id", meeting_id).limit(1).execute()
+        # 明示的カラム指定で取得（エグレス削減）
+        select_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,text_content,metadata,created_at,updated_at"
+        res = sb.table(self.TABLE).select(select_fields).eq("id", meeting_id).limit(1).execute()
         data = getattr(res, "data", None)
 
         item = None
@@ -264,11 +265,6 @@ class MeetingRepositoryImpl:
             "metadata": metadata,
         }
 
-        res = sb.table(self.TABLE).update(payload).eq("id", meeting_id).execute()
-        data = getattr(res, "data", None)
-        if isinstance(data, list) and data:
-            return data[0]
-        if isinstance(data, dict):
-            return data
-        # 返却が空のときのみ再取得
+        sb.table(self.TABLE).update(payload, returning="minimal").eq("id", meeting_id).execute()
+        # 更新後のデータを返す
         return self.get_meeting(meeting_id)
