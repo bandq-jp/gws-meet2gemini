@@ -167,4 +167,57 @@ body {
     white-space: pre;
     word-wrap: normal;
   }
+
+  /* --- ThinkingIndicator animations --- */
+  .thinking-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--brand-300);
+  }
+
+  .thinking-dot-1 {
+    animation: thinking-bounce 1.2s ease-in-out infinite;
+    animation-delay: 0s;
+  }
+  .thinking-dot-2 {
+    animation: thinking-bounce 1.2s ease-in-out infinite;
+    animation-delay: 0.15s;
+  }
+  .thinking-dot-3 {
+    animation: thinking-bounce 1.2s ease-in-out infinite;
+    animation-delay: 0.3s;
+  }
+
+  .thinking-label {
+    animation: thinking-fade-in 0.4s ease-out;
+  }
+
+  /* Safe bottom padding for mobile */
+  .safe-bottom {
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes thinking-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+@keyframes thinking-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

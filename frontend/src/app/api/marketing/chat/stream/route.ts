@@ -4,9 +4,16 @@ import { GoogleAuth } from "google-auth-library";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const DEFAULT_BACKEND_URL = "http://localhost:8000/api/v1/marketing/chatkit";
+const DEFAULT_BACKEND_URL =
+  "http://localhost:8000/api/v1/marketing/chat/stream";
 const BACKEND_URL =
-  process.env.MARKETING_CHATKIT_BACKEND_URL || DEFAULT_BACKEND_URL;
+  process.env.MARKETING_CHAT_STREAM_URL ||
+  (process.env.MARKETING_CHATKIT_BACKEND_URL
+    ? process.env.MARKETING_CHATKIT_BACKEND_URL.replace(
+        /\/chatkit\/?$/,
+        "/chat/stream"
+      )
+    : DEFAULT_BACKEND_URL);
 const BACKEND_ORIGIN = safeOrigin(BACKEND_URL);
 const BACKEND_AUDIENCE =
   process.env.MARKETING_CHATKIT_BACKEND_AUDIENCE || BACKEND_ORIGIN;
@@ -18,13 +25,12 @@ const IS_LOCAL_BACKEND = BACKEND_URL.startsWith("http://localhost");
 const SHOULD_USE_ID_TOKEN =
   REQUIRE_ID_TOKEN_ENV === "true" ||
   (REQUIRE_ID_TOKEN_ENV !== "false" && !IS_LOCAL_BACKEND);
+
 let googleAuthPromise: Promise<GoogleAuth> | null = null;
 type DuplexRequestInit = RequestInit & { duplex?: "half" };
 
 function safeOrigin(url: string | undefined | null) {
-  if (!url) {
-    return "";
-  }
+  if (!url) return "";
   try {
     return new URL(url).origin;
   } catch {
@@ -32,26 +38,12 @@ function safeOrigin(url: string | undefined | null) {
   }
 }
 
-function buildForwardHeaders(request: NextRequest) {
-  const headers = new Headers();
-  request.headers.forEach((value, key) => {
-    if (key === "host" || key === "content-length") {
-      return;
-    }
-    headers.set(key, value);
-  });
-  if (!headers.has("accept")) {
-    headers.set("accept", "text/event-stream, application/json");
-  }
-  return headers;
-}
-
 async function getIdToken(): Promise<string> {
   if (!SERVICE_ACCOUNT_JSON) {
-    throw new Error("GCP_SA_JSON (or MARKETING_CHATKIT_GCP_SA_JSON) is not configured");
+    throw new Error("GCP_SA_JSON is not configured");
   }
   if (!BACKEND_AUDIENCE) {
-    throw new Error("MARKETING_CHATKIT_BACKEND_URL must be a valid absolute URL");
+    throw new Error("Backend URL must be a valid absolute URL");
   }
   if (!googleAuthPromise) {
     googleAuthPromise = Promise.resolve(
@@ -72,7 +64,7 @@ async function getIdToken(): Promise<string> {
 export async function POST(request: NextRequest) {
   if (!BACKEND_URL) {
     return NextResponse.json(
-      { error: "MARKETING_CHATKIT_BACKEND_URL is not configured" },
+      { error: "Backend URL is not configured" },
       { status: 500 }
     );
   }
@@ -90,10 +82,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const backendHeaders = buildForwardHeaders(request);
-    backendHeaders.delete(CLIENT_SECRET_HEADER);
-    backendHeaders.delete("authorization");
+    const backendHeaders = new Headers();
+    backendHeaders.set("Content-Type", "application/json");
+    backendHeaders.set("Accept", "text/event-stream");
     backendHeaders.set(CLIENT_SECRET_HEADER, clientSecret);
+
+    // Forward model asset header
+    const modelAssetId = request.headers.get("x-model-asset-id");
+    if (modelAssetId) {
+      backendHeaders.set("x-model-asset-id", modelAssetId);
+    }
 
     if (SHOULD_USE_ID_TOKEN) {
       try {
@@ -121,8 +119,8 @@ export async function POST(request: NextRequest) {
 
     const backendResponse = await fetch(BACKEND_URL, backendInit);
 
-    const responseHeaders = new Headers(backendResponse.headers);
-    responseHeaders.delete("content-length");
+    const responseHeaders = new Headers();
+    responseHeaders.set("Content-Type", "text/event-stream");
     responseHeaders.set("Cache-Control", "no-cache");
     responseHeaders.set("Connection", "keep-alive");
 
@@ -131,15 +129,12 @@ export async function POST(request: NextRequest) {
       headers: responseHeaders,
     });
   } catch (error) {
-    // Client aborted the request - this is normal (e.g., page navigation)
     if (error instanceof Error && error.name === "AbortError") {
-      console.log("ChatKit request aborted by client (normal behavior)");
-      return new NextResponse(null, { status: 499 }); // Client Closed Request
+      return new NextResponse(null, { status: 499 });
     }
-
-    console.error("Failed to forward ChatKit request", error);
+    console.error("Failed to forward chat stream request", error);
     return NextResponse.json(
-      { error: "Failed to reach marketing ChatKit backend" },
+      { error: "Failed to reach marketing backend" },
       { status: 502 }
     );
   } finally {

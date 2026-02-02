@@ -46,7 +46,7 @@
 ### Backend
 - **Framework**: FastAPI + Uvicorn (Python 3.12)
 - **Package Manager**: uv
-- **AI/ML**: Google GenAI (Gemini 2.5 Pro/Flash), OpenAI Agents SDK 0.7.0, OpenAI ChatKit 1.6.0
+- **AI/ML**: Google GenAI (Gemini 2.5 Pro/Flash), OpenAI Agents SDK 0.7.0
 - **Database**: Supabase (PostgreSQL HTTP API, RLS対応)
 - **Authentication**: Clerk JWT + ドメイン制限 (@bandq.jp)
 - **External APIs**: Zoho CRM SDK, Google Drive/Docs API, Google Cloud Tasks, Google Cloud Storage
@@ -57,7 +57,7 @@
 - **Package Manager**: Bun
 - **UI**: Tailwind CSS 4 + shadcn/ui (Radix UI) + Lucide React
 - **Auth**: @clerk/nextjs (Google OAuth, @bandq.jp ドメイン制限)
-- **Chat**: @openai/chatkit 1.5.0, @openai/chatkit-react 1.4.3
+- **Chat**: カスタムSSEフック (useMarketingChat) + ActivityItemタイムライン
 - **Markdown**: react-markdown + remark-gfm + rehype-sanitize
 - **Search**: cmdk (Command Menu)
 
@@ -123,58 +123,73 @@ gws-meet2gemini/
 
 ---
 
-## ChatKit & マーケティングAI 詳細設計
+## マーケティングAI チャット 詳細設計
 
-### アーキテクチャ
+### アーキテクチャ (2026-02-02 大規模改修後)
 ```
-Frontend (ChatKit React) → Next.js API Route (SSE proxy) → FastAPI → ChatKitServer → Agents SDK → OpenAI API
+Frontend (カスタムReact) → Next.js API Route (SSE proxy) → FastAPI → MarketingAgentService → Agents SDK → OpenAI API
 ```
+
+**ChatKit SDKを完全廃止**し、直接Agents SDK + カスタムSSEストリーミング + ActivityItemタイムラインに移行。
 
 ### 主要ファイル
 | ファイル | 役割 |
 |---------|------|
-| `backend/app/infrastructure/chatkit/marketing_server.py` | ChatKitServerサブクラス。respond()でエージェントストリーム生成 |
+| `backend/app/infrastructure/chatkit/agent_service.py` | MarketingAgentService: Runner.run_streamed() → Queue → SSE dict生成 |
 | `backend/app/infrastructure/chatkit/seo_agent_factory.py` | Agent構築 (モデル, ツール, MCP, reasoning設定) |
-| `backend/app/infrastructure/chatkit/tool_events.py` | ToolUsageTracker: ツール実行のUI表示+DB保存 |
-| `backend/app/infrastructure/chatkit/keepalive.py` | SSEキープアライブ (20秒間隔でProgressUpdateEvent) |
-| `backend/app/infrastructure/chatkit/supabase_store.py` | ChatKit用Supabaseストア |
+| `backend/app/infrastructure/chatkit/keepalive.py` | SSEキープアライブ (20秒間隔でdict型イベント) |
+| `backend/app/infrastructure/chatkit/ask_user_store.py` | ask_user構造化質問のインメモリストア |
 | `backend/app/infrastructure/chatkit/model_assets.py` | モデルプリセット管理 |
 | `backend/app/infrastructure/chatkit/context.py` | リクエストコンテキスト |
-| `frontend/src/app/marketing/page.tsx` | メインチャットUI (1000+行) |
-| `frontend/src/hooks/use-marketing-chatkit.ts` | ChatKitフック (streaming, attachments, sharing) |
-| `frontend/src/app/api/marketing/chatkit/start/route.ts` | JWT トークン生成 |
+| `backend/app/presentation/api/v1/marketing_chat.py` | SSEストリーミング + スレッドCRUDルーター |
+| `backend/app/presentation/api/v1/marketing.py` | モデルアセット, 添付ファイル, 共有エンドポイント |
+| `frontend/src/app/marketing/page.tsx` | メインチャットUI (~400行) |
+| `frontend/src/hooks/use-marketing-chat.ts` | カスタムSSEフック (fetch + ReadableStream) |
+| `frontend/src/lib/marketing-types.ts` | ActivityItem型定義, Message, StreamEvent等 |
+| `frontend/src/components/marketing/chat/ChatWindow.tsx` | チャットウィンドウ + EmptyState |
+| `frontend/src/components/marketing/chat/ChatMessage.tsx` | メッセージ表示 (ActivityItemタイムライン) |
+| `frontend/src/components/marketing/chat/ChatInput.tsx` | 入力コンポーネント + モデルアセットセレクター |
+| `frontend/src/components/marketing/chat/ThinkingIndicator.tsx` | 思考中アニメーション |
+| `frontend/src/components/marketing/chat/HistoryPanel.tsx` | 会話履歴シートパネル |
+| `frontend/src/app/api/marketing/chat/stream/route.ts` | SSEプロキシ |
+| `frontend/src/app/api/marketing/chat/threads/route.ts` | スレッドCRUDプロキシ |
+| `frontend/src/app/api/marketing/chatkit/start/route.ts` | JWT トークン生成 (保持) |
 
 ### SSEキープアライブ機構 (keepalive.py)
-- **目的**: 長時間推論 (reasoning_effort: high/xhigh) 中のSSEタイムアウト防止
+- **目的**: 長時間推論中のSSEタイムアウト防止
 - **仕組み**: pump task + asyncio.Queue + wait_for(timeout=20s) パターン
-- **イベント**: タイムアウト時に `ProgressUpdateEvent(text="📊 考え中…")` を送信
-- **適用箇所**: `marketing_server.py` の `respond()` メソッドでメイン・フォールバック両ストリームに適用
+- **イベント**: タイムアウト時に `{"type": "keepalive", "text": "📊 考え中…"}` dictを送信
+- **適用箇所**: `agent_service.py` の `stream_chat()` メソッドで適用
 
-### ChatKit ネイティブ推論表示
-- ChatKit agents.py L622-743 で `response.reasoning_summary_text.delta/done` を自動処理
-- `WorkflowItem(type="reasoning")` + `ThoughtTask` でUI表示
-- `seo_agent_factory.py` で `Reasoning(effort=..., summary="detailed")` を設定
+### ActivityItemタイムライン
+- `ReasoningActivityItem`: 思考過程 (日本語翻訳済み)
+- `ToolActivityItem`: ツール実行 (名前, 引数, 出力)
+- `TextActivityItem`: テキストコンテンツ
+- `AskUserActivityItem`: 構造化質問 (choice/text/confirm)
+- ストリーミング中は全アイテム表示、完了後はreasoning/toolを「思考 N · ツール M」に折りたたみ
 
-### ToolUsageTracker の非同期DB書き込み
-- `_fire_and_forget()` でDB保存を非ブロッキング化
-- `_save_tool_call_as_context()`, `_save_tool_output_as_context()` が対象
-- `close()` で未完了タスクを10秒タイムアウトで待機
+### 推論翻訳機構
+- `agent_service.py` の `translate_to_japanese()` で英語reasoning summaryを日本語に翻訳
+- gpt-5-nano, effort=minimal で低コスト翻訳
+- `marketing_chat.py` のイベントループ内でインライン実行
+
+### MCP フェイルオーバー
+- MCPツールリスト取得エラー時、失敗したMCPサーバーを除外してエージェントを再構築
+- `_is_mcp_toollist_error()` でエラー判定
+- `_infer_mcp_source()` でエラーソースのMCPサーバーを推定
+
+### コンテキスト永続化
+- `context_items` JSONB: Responses API `to_input_list()` をシリアライズして保存
+- マルチターン会話で正確なコンテキストを維持
+- フォールバック: context_itemsがない場合、メッセージ履歴から平文コンテキストを構築
 
 ---
 
 ## SDK バージョン & 技術的知見
 
-### ChatKit Python SDK v1.6.0
-- **ソース**: `backend/.venv/lib/python3.12/site-packages/chatkit/`
-- **SSEキープアライブ**: **なし** — SDK側にはキープアライブ機能が存在しない。カスタム `keepalive.py` が必要
-- **ProgressUpdateEvent**: 型は `chatkit/types.py` に定義済み。複数回安全に送信可能
-- **推論表示**: `chatkit/agents.py` の `stream_agent_response()` が `response.reasoning_summary_text.delta/done` を自動処理し `WorkflowItem(type="reasoning")` + `ThoughtTask` として出力
-- **キャンセル対応**: v1.6.0 で `handle_stream_cancelled()` が改善。`pending_items` の追跡と保存
-
-### ChatKit Frontend SDK v1.5.0 / React v1.4.3
-- **ソース**: `frontend/node_modules/@openai/chatkit/`, `@openai/chatkit-react/`
-- **SSEキープアライブ**: **なし** — フロントエンド側にもタイムアウト対策は存在しない
-- 推論表示はネイティブでサポート（WorkflowItem rendering）
+### ChatKit SDK — 廃止済み (2026-02-02)
+- Python SDK `openai-chatkit` と Frontend SDK `@openai/chatkit`, `@openai/chatkit-react` は完全に削除済み
+- 代わりにカスタムSSEストリーミング + ActivityItemタイムラインパターンを使用
 
 ### OpenAI Agents SDK v0.7.0
 - **ソース**: `backend/.venv/lib/python3.12/site-packages/agents/`
@@ -262,7 +277,7 @@ GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-pro  # デフォルト
 OPENAI_API_KEY=
 
-# ChatKit
+# マーケティングAI
 MARKETING_AGENT_MODEL=gpt-5-mini
 MARKETING_REASONING_EFFORT=  # low/medium/high/xhigh
 MARKETING_CHATKIT_TOKEN_SECRET=  # JWT署名用 (32+バイト)
@@ -417,6 +432,64 @@ npx supabase db push
 - `ReturnMethod` enum は `postgrest.types` に定義: `minimal` / `representation`
 
 **期待効果**: 908MB/日 → ~50-100MB/日 (Free Plan 5GB内に収まる見込み)
+
+### 4. マーケティングAI ChatKit→カスタムSSE大規模改修 (2026-02-02)
+
+**概要**: ChatKit SDK (Python `openai-chatkit`, Frontend `@openai/chatkit-react`) を完全廃止し、ga4-oauth-aiagentプロジェクトのパターンに基づく直接Agents SDK + カスタムSSE + ActivityItemタイムラインアーキテクチャに移行。
+
+**変更範囲**:
+
+**新規作成**:
+- `supabase/migrations/0020_add_context_activity_items.sql` — context_items, activity_items カラム追加
+- `backend/app/infrastructure/chatkit/agent_service.py` — MarketingAgentService (Runner.run_streamed → Queue → SSE dict)
+- `backend/app/infrastructure/chatkit/ask_user_store.py` — 構造化質問のインメモリストア
+- `backend/app/presentation/api/v1/marketing_chat.py` — SSEストリーミング + スレッドCRUDルーター
+- `frontend/src/lib/marketing-types.ts` — ActivityItem型定義
+- `frontend/src/hooks/use-marketing-chat.ts` — カスタムSSEフック
+- `frontend/src/components/marketing/chat/` — ChatWindow, ChatMessage, ChatInput, ThinkingIndicator, HistoryPanel
+- `frontend/src/app/api/marketing/chat/` — stream, respond, threads プロキシルート
+
+**大幅修正**:
+- `backend/app/infrastructure/chatkit/keepalive.py` — ChatKit型 → dict型
+- `backend/app/presentation/api/v1/marketing.py` — ChatKitエンドポイント削除、共有を直接Supabaseクエリに変更
+- `frontend/src/app/marketing/page.tsx` — 1056行 → ~400行に簡素化
+- `frontend/src/app/globals.css` — ThinkingIndicatorアニメーション追加
+- `frontend/src/components/marketing/share-dialog.tsx` — import先をmarketing-types.tsに変更
+
+**削除**:
+- `backend/app/infrastructure/chatkit/marketing_server.py` — agent_service.pyに置換
+- `backend/app/infrastructure/chatkit/supabase_store.py` — 直接DBクエリに置換
+- `backend/app/infrastructure/chatkit/tool_events.py` — agent_serviceに統合
+- `backend/app/infrastructure/chatkit/attachment_store.py` — 未使用
+- `backend/app/infrastructure/chatkit/seo_article_tools.py` — 無効化済み(コメントアウト)
+- `frontend/src/hooks/use-marketing-chatkit.ts` — use-marketing-chat.tsに置換
+- `frontend/src/app/api/marketing/chatkit/server/route.ts` — chat/stream/route.tsに置換
+
+**パッケージ削除**: `openai-chatkit` (Python), `@openai/chatkit`, `@openai/chatkit-react` (Frontend)
+
+### 5. クロスチェック修正 (2026-02-02)
+**問題**: 参考プロジェクト (ga4-oauth-aiagent) との比較で、重要な機能が欠落していることが判明
+
+**agent_service.py 修正内容**:
+- **ChatContext dataclass 追加**: `emit_event` コールバック + `ask_user_store` + `conversation_id` を持つコンテキスト
+- **ask_user @function_tool 追加**: `ToolContext[ChatContext]` 経由で `emit_event` を呼び、質問をSSEストリームに送出。`asyncio.wait_for(timeout=300)` でユーザー応答を待機
+- **Queue multiplexing をサービスレベルに移動**: `_run_streamed()` 内で queue を作成し、`emit_event` → queue → yield の経路を確立。SDK stream events と ask_user 等の out-of-band events を統合
+- **`context=chat_context` を Runner.run_streamed() に渡す**: ToolContext 経由でツール関数が ChatContext にアクセス可能に
+- **`done` イベントを最後に yield**: `_run_streamed()` 終了時に `{"type": "done"}` を送出（参考プロジェクトと同じ）
+- **`_ask_user_responses` 内部イベント**: ユーザー回答をルーターが activity_items に永続化できるよう emit
+
+**marketing_chat.py 修正内容**:
+- **`tool_calls_data` トラッキング追加**: tool_call イベントを蓄積（参考プロジェクトと同じ）
+- **`ask_user` イベントの activity_items 蓄積追加**: kind="ask_user", groupId, questions
+- **`_ask_user_responses` インターセプション追加**: 内部イベントを受信し、対応する ask_user activity_item に responses を永続化。クライアントには送信しない
+- **content 保存形式を plain text に修正**: `json.dumps({"type": "text", "text": ...})` → `full_response or ""` (plain string)
+- **user message 保存も plain text に修正**: `json.dumps(...)` → `body.message` (plain string)
+- **try/except フォールバック追加**: activity_items カラムが未存在の場合のフォールバック
+
+**技術的知見**:
+- `Runner.run_streamed()` の `context=` パラメータに ChatContext を渡すと、`@function_tool` の `ToolContext[ChatContext]` で `ctx.context` 経由でアクセス可能
+- out-of-band events (ask_user, chart 等) は `emit_event` → queue に put し、SDK events と同じ queue から yield することで統合ストリームを実現
+- `_ask_user_responses` は内部イベントとしてルーターで消費し、activity_items の永続化に使用。クライアントには送信しない
 
 ---
 

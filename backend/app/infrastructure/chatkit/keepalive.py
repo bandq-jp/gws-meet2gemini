@@ -1,18 +1,15 @@
-"""SSE keepalive helper for ChatKit streaming responses.
+"""SSE keepalive helper for streaming responses.
 
-Wraps an async iterator of ThreadStreamEvents and injects periodic
-ProgressUpdateEvent keepalives when no real events have been yielded
-for a configurable interval.  This prevents intermediate proxies
-(Cloud Run, Vercel, browsers) from timing out idle SSE connections
-during long model reasoning phases.
+Wraps an async iterator of dict events and injects periodic keepalive
+events when no real events have been yielded for a configurable interval.
+This prevents intermediate proxies (Cloud Run, Vercel, browsers) from
+timing out idle SSE connections during long model reasoning phases.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from typing import AsyncIterator
-
-from chatkit.types import ProgressUpdateEvent, ThreadStreamEvent
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +33,12 @@ class _ExceptionSentinel(_Sentinel):
 
 
 async def with_keepalive(
-    events: AsyncIterator[ThreadStreamEvent],
+    events: AsyncIterator[dict],
     *,
     interval: float = DEFAULT_KEEPALIVE_INTERVAL,
     text: str = DEFAULT_KEEPALIVE_TEXT,
-) -> AsyncIterator[ThreadStreamEvent]:
-    """Wrap an event stream, injecting ``ProgressUpdateEvent`` keepalives
+) -> AsyncIterator[dict]:
+    """Wrap an event stream, injecting keepalive dict events
     whenever *interval* seconds pass without a real event.
 
     The keepalive stops as soon as the underlying iterator is exhausted
@@ -49,7 +46,7 @@ async def with_keepalive(
     ``GeneratorExit``).
     """
 
-    event_queue: asyncio.Queue[ThreadStreamEvent | _Sentinel] = asyncio.Queue()
+    event_queue: asyncio.Queue[dict | _Sentinel] = asyncio.Queue()
     done = asyncio.Event()
 
     async def _pump() -> None:
@@ -77,7 +74,7 @@ async def with_keepalive(
                 if done.is_set():
                     break
                 logger.debug("Sending SSE keepalive (no event for %.0fs)", interval)
-                yield ProgressUpdateEvent(text=text)
+                yield {"type": "keepalive", "text": text}
                 continue
 
             if isinstance(item, _DoneSentinel):

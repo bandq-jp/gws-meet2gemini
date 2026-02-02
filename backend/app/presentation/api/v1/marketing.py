@@ -26,8 +26,6 @@ from fastapi import Form
 from starlette.responses import StreamingResponse
 from openai import OpenAI
 
-from chatkit.server import NonStreamingResult, StreamingResult
-
 from app.infrastructure.chatkit.context import MarketingRequestContext
 from app.infrastructure.chatkit.model_assets import (
     list_model_assets,
@@ -35,8 +33,7 @@ from app.infrastructure.chatkit.model_assets import (
     get_model_asset,
     delete_model_asset,
 )
-from app.infrastructure.chatkit.marketing_server import get_marketing_chat_server
-from app.infrastructure.chatkit.supabase_store import SupabaseChatStore, PermissionDeniedError
+from datetime import datetime
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.supabase.client import get_supabase
 from app.infrastructure.security.marketing_token_service import (
@@ -626,33 +623,7 @@ def _ensure_bucket_exists(sb, bucket: str) -> None:
         logger.exception("Failed to create or verify attachment bucket %s", bucket)
 
 
-@router.post("/chatkit")
-async def marketing_chatkit(
-    request: Request,
-    context: MarketingRequestContext = Depends(require_marketing_context),
-):
-    server = get_marketing_chat_server()
-    body = await request.body()
-    result = await server.process(body, context=context)
-    if isinstance(result, StreamingResult):
-        return StreamingResponse(
-            result,
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-            },
-        )
-    if isinstance(result, NonStreamingResult):
-        return Response(
-            content=result.json,
-            media_type="application/json",
-            headers={"Cache-Control": "no-store"},
-        )
-    raise HTTPException(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Unhandled ChatKit response",
-    )
+## ChatKit endpoint removed — replaced by /marketing/chat/stream in marketing_chat.py
 
 
 @router.get("/model-assets")
@@ -845,12 +816,34 @@ async def toggle_thread_share(
     if is_shared is None:
         raise HTTPException(status_code=400, detail="is_shared is required")
 
-    store = SupabaseChatStore()
+    sb = get_supabase()
     try:
-        result = await store.toggle_share(thread_id, bool(is_shared), context)
-        return result
-    except PermissionDeniedError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        res = (
+            sb.table("marketing_conversations")
+            .select("owner_clerk_id, is_shared")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Thread not found")
+        if res.data[0].get("owner_clerk_id") != context.user_id:
+            raise HTTPException(status_code=403, detail="Only the owner can share this thread")
+
+        update_payload: dict = {"is_shared": bool(is_shared)}
+        if is_shared and not res.data[0].get("is_shared"):
+            update_payload["shared_at"] = datetime.utcnow().isoformat()
+            update_payload["shared_by_email"] = context.user_email
+            update_payload["shared_by_clerk_id"] = context.user_id
+
+        sb.table("marketing_conversations").update(update_payload).eq("id", thread_id).execute()
+        return {
+            "thread_id": thread_id,
+            "is_shared": bool(is_shared),
+            "share_url": f"/marketing/{thread_id}" if is_shared else None,
+        }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Failed to toggle share for thread %s", thread_id)
         raise HTTPException(status_code=404, detail="Thread not found") from exc
@@ -866,10 +859,36 @@ async def get_thread_share_status(
 
     Returns: { "thread_id", "is_shared", "shared_at", "is_owner", "can_toggle", "share_url" }
     """
-    store = SupabaseChatStore()
+    sb = get_supabase()
     try:
-        result = await store.get_share_status(thread_id, context)
-        return result
+        res = (
+            sb.table("marketing_conversations")
+            .select("id, is_shared, shared_at, shared_by_email, owner_clerk_id")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        row = res.data[0]
+        is_owner = row.get("owner_clerk_id") == context.user_id
+        thread_is_shared = row.get("is_shared", False)
+
+        if not is_owner and not thread_is_shared:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        return {
+            "thread_id": thread_id,
+            "is_shared": thread_is_shared,
+            "shared_at": row.get("shared_at"),
+            "shared_by_email": row.get("shared_by_email") if is_owner else None,
+            "is_owner": is_owner,
+            "can_toggle": is_owner,
+            "share_url": f"/marketing/{thread_id}" if thread_is_shared else None,
+        }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Failed to get share status for thread %s", thread_id)
         raise HTTPException(status_code=404, detail="Thread not found") from exc

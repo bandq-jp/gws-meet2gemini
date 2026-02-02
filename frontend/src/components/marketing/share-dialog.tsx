@@ -12,7 +12,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Copy, Check, ExternalLink } from "lucide-react";
-import type { ShareInfo } from "@/hooks/use-marketing-chatkit";
+import type { ShareInfo } from "@/lib/marketing-types";
 
 type ShareDialogProps = {
   open: boolean;
