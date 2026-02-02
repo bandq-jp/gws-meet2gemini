@@ -70,6 +70,9 @@ const TOOL_ICONS: Record<string, typeof BarChart3> = {
   // OpenAI tools
   web_search_call: Globe,
   code_interpreter_call: Code2,
+  mcp_call: Wrench,
+  file_search_call: Search,
+  mcp_list_tools: Wrench,
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -85,6 +88,9 @@ const TOOL_LABELS: Record<string, string> = {
   inspect_url_enhanced: "URL検査",
   web_search_call: "Web検索",
   code_interpreter_call: "コード実行",
+  mcp_call: "MCP呼び出し",
+  file_search_call: "ファイル検索",
+  mcp_list_tools: "ツール一覧取得",
   search_job_seekers: "求職者検索",
   aggregate_by_channel: "チャネル集計",
   count_job_seekers_by_status: "ステータス集計",

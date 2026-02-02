@@ -35,6 +35,16 @@ logger = logging.getLogger(__name__)
 # Sentinel to signal end-of-stream from the SDK background task
 _SENTINEL = object()
 
+# Server-side tool types that execute within a single Response API call
+# and do NOT produce ToolCallOutputItem from the SDK.
+_SERVER_SIDE_TOOL_TYPES = frozenset({
+    "web_search_call",
+    "mcp_call",
+    "code_interpreter_call",
+    "file_search_call",
+    "mcp_list_tools",
+})
+
 
 class _ErrorSentinel:
     """Carries an exception from the pump task so it can be re-raised
@@ -335,11 +345,12 @@ class MarketingAgentService:
             max_turns=50,
         )
 
+        emitted_tool_ids: set[str] = set()
+
         async def _pump_sdk_events() -> None:
             try:
                 async for event in result.stream_events():
-                    sdk_event = self._process_sdk_event(event)
-                    if sdk_event is not None:
+                    for sdk_event in self._process_sdk_event(event, emitted_tool_ids):
                         await queue.put(sdk_event)
             except APIError as e:
                 # Propagate APIError so _run_with_failover can catch it
@@ -379,28 +390,87 @@ class MarketingAgentService:
         # Signal stream completion
         yield {"type": "done"}
 
-    def _process_sdk_event(self, event) -> dict | None:
-        """Convert a single SDK stream event into a dict for SSE, or None to skip."""
+    def _process_sdk_event(self, event, emitted_tool_ids: set[str]) -> list[dict]:
+        """Convert a single SDK stream event into SSE dicts.
+
+        Returns a list (possibly empty) of dicts to emit.
+
+        Server-side tools (WebSearch, CodeInterpreter, HostedMCP) execute
+        within a single Responses API call.  The SDK emits
+        ``run_item_stream_event(tool_call_item)`` only AFTER the full response
+        step completes, and never emits ``tool_call_output_item`` for them.
+
+        We therefore rely on two raw response events for correct timing:
+        - ``response.output_item.added``  → emit ``tool_call`` when the tool starts
+        - ``response.output_item.done``   → emit ``tool_result`` when it finishes
+
+        For function tools (ask_user, Zoho CRM) the existing
+        ``run_item_stream_event`` path still fires and is kept as-is.
+        """
+        results: list[dict] = []
+
         if event.type == "raw_response_event":
             data = event.data
             event_type = getattr(data, "type", "")
+
             if event_type == "response.output_text.delta":
                 delta = getattr(data, "delta", "")
                 if delta:
-                    return {"type": "text_delta", "content": delta}
+                    results.append({"type": "text_delta", "content": delta})
+
             elif event_type == "response.created":
-                return {"type": "response_created"}
+                results.append({"type": "response_created"})
+
+            elif event_type == "response.output_item.added":
+                # Fires when a new output item is added to the response stream.
+                # For server-side tools this arrives at the correct timing
+                # (interleaved with text deltas).
+                item = getattr(data, "item", None)
+                if item:
+                    item_type = getattr(item, "type", "")
+                    item_id = getattr(item, "id", None)
+                    if item_type in _SERVER_SIDE_TOOL_TYPES and item_id:
+                        emitted_tool_ids.add(item_id)
+                        name = getattr(item, "name", None) or item_type
+                        arguments = getattr(item, "arguments", None) or ""
+                        results.append({
+                            "type": "tool_call",
+                            "call_id": item_id,
+                            "name": name,
+                            "arguments": arguments,
+                        })
+
+            elif event_type == "response.output_item.done":
+                # Fires when an output item completes.  For server-side tools
+                # this signals that the tool finished execution.
+                item = getattr(data, "item", None)
+                if item:
+                    item_id = getattr(item, "id", None)
+                    item_type = getattr(item, "type", "")
+                    if item_type in _SERVER_SIDE_TOOL_TYPES and item_id and item_id in emitted_tool_ids:
+                        output = _extract_server_tool_output(item)
+                        results.append({
+                            "type": "tool_result",
+                            "call_id": item_id,
+                            "output": output,
+                        })
+
         elif event.type == "run_item_stream_event":
             item = event.item
             if hasattr(item, "type"):
                 if item.type == "tool_call_item":
                     raw = item.raw_item
-                    return {
-                        "type": "tool_call",
-                        "call_id": getattr(raw, "call_id", None),
-                        "name": getattr(raw, "name", "unknown"),
-                        "arguments": getattr(raw, "arguments", ""),
-                    }
+                    raw_id = getattr(raw, "id", None)
+                    # Skip if already emitted via raw response events
+                    if raw_id and raw_id in emitted_tool_ids:
+                        pass
+                    else:
+                        results.append({
+                            "type": "tool_call",
+                            "call_id": getattr(raw, "call_id", None) or raw_id,
+                            "name": getattr(raw, "name", "unknown"),
+                            "arguments": getattr(raw, "arguments", ""),
+                        })
                 elif item.type == "tool_call_output_item":
                     raw = item.raw_item
                     call_id = (
@@ -408,14 +478,15 @@ class MarketingAgentService:
                         if isinstance(raw, dict)
                         else getattr(raw, "call_id", None)
                     )
-                    return {
+                    results.append({
                         "type": "tool_result",
                         "call_id": call_id,
                         "output": str(item.output)[:4000],
-                    }
+                    })
             if isinstance(item, ReasoningItem):
-                return self._process_reasoning_item(item)
-        return None
+                results.append(self._process_reasoning_item(item))
+
+        return results
 
     def _process_reasoning_item(self, item: ReasoningItem) -> dict:
         """Extract reasoning summary from a ReasoningItem."""
@@ -477,6 +548,35 @@ class MarketingAgentService:
             "Code Interpreter is disabled but %d attachment file(s) were uploaded",
             len(file_ids),
         )
+
+
+# --- Server-side tool output extraction ---
+
+
+def _extract_server_tool_output(item) -> str:
+    """Extract a human-readable output summary from a completed server-side tool item."""
+    item_type = getattr(item, "type", "")
+    status = getattr(item, "status", "completed")
+
+    if item_type == "web_search_call":
+        return f"(web search {status})"
+    elif item_type == "code_interpreter_call":
+        # Code interpreter may have output/results
+        output = getattr(item, "output", None)
+        if output:
+            return str(output)[:4000]
+        return f"(code interpreter {status})"
+    elif item_type == "mcp_call":
+        output = getattr(item, "output", None)
+        if output:
+            return str(output)[:4000]
+        return f"(mcp call {status})"
+    elif item_type == "file_search_call":
+        results = getattr(item, "results", None)
+        if results:
+            return str(results)[:4000]
+        return f"(file search {status})"
+    return f"({status})"
 
 
 # --- MCP error helpers (ported from marketing_server.py) ---

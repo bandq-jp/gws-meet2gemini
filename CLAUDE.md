@@ -500,12 +500,28 @@ npx supabase db push
 - **問題**: `handleRenameSubmit` が `/api/marketing/chat/threads/${id}/title` を呼んでいたが、対応するNext.jsルート未存在 → 404
 - **修正**: `/api/marketing/chat/threads/${id}` に変更（`[id]/route.ts` の PUT ハンドラがバックエンドの `/threads/${id}/title` にプロキシ済み）
 
+**サーバーサイドツール インターリーブ & 完了検出修正 (本セッション)**:
+- **問題**: HostedMCPTool, WebSearchTool, CodeInterpreterTool はサーバーサイドで実行され、単一のResponses API呼び出し内で処理される。SDKは `run_item_stream_event(tool_call_item)` をレスポンスステップ完了後にのみ発火し、テキストデルタとの正しいタイミングでは発火しない。さらに `tool_call_output_item` をサーバーサイドツールには生成しないため、`tool_result` イベントが発火せず、ツールが永遠にローディング状態になる
+- **根本原因**: `_process_sdk_event()` が `response.output_text.delta` と `response.created` のみを処理し、`response.output_item.added` と `response.output_item.done` を処理していなかった
+- **修正**:
+  - `_process_sdk_event()` の返り値を `dict | None` → `list[dict]` に変更
+  - `_SERVER_SIDE_TOOL_TYPES` frozenset 追加: `web_search_call`, `mcp_call`, `code_interpreter_call`, `file_search_call`, `mcp_list_tools`
+  - `response.output_item.added` ハンドリング追加: サーバーサイドツール開始時に正しいタイミングで `tool_call` を発火
+  - `response.output_item.done` ハンドリング追加: サーバーサイドツール完了時に `tool_result` を発火
+  - `emitted_tool_ids: set[str]` で重複防止: raw events で発火済みのツールは `run_item_stream_event` からスキップ
+  - `_extract_server_tool_output()` ヘルパー: サーバーサイドツールの完了アイテムから出力を抽出
+  - `_pump_sdk_events()` を更新: list return対応
+- **フロントエンド**: `ChatMessage.tsx` に `mcp_call`, `file_search_call`, `mcp_list_tools` のアイコン・ラベルを追加
+
 **技術的知見**:
 - `Runner.run_streamed()` の `context=` パラメータに ChatContext を渡すと、`@function_tool` の `ToolContext[ChatContext]` で `ctx.context` 経由でアクセス可能
 - out-of-band events (ask_user, chart 等) は `emit_event` → queue に put し、SDK events と同じ queue から yield することで統合ストリームを実現
 - `_ask_user_responses` は内部イベントとしてルーターで消費し、activity_items の永続化に使用。クライアントには送信しない
 - `_ErrorSentinel` パターン: asyncio.Queue 経由で例外を伝播させる手法。pump task (background asyncio.Task) で発生した特定の例外を、queue consumer で再raise可能にする
 - Next.js App Router のルートマッチング: `/api/path/[id]/route.ts` は `/api/path/{anything}` にのみマッチし、`/api/path/{anything}/suffix` にはマッチしない。追加パスセグメントには別途 `[id]/suffix/route.ts` が必要
+- **サーバーサイドツール vs ファンクションツール**: OpenAI Agents SDK v0.7.0 において、WebSearchTool / CodeInterpreterTool / HostedMCPTool はサーバーサイドで実行され、`ToolCallOutputItem` が生成されない。ファンクションツール（ask_user, Zoho CRM等のローカル @function_tool）は `ToolCallOutputItem` が正常に生成される
+- **raw response events の活用**: `response.output_item.added` でサーバーサイドツール開始を検出、`response.output_item.done` で完了を検出。これらは `run_item_stream_event` より正確なタイミングで発火する
+- **重複防止**: `emitted_tool_ids` セットで raw events 経由で既に発火したツールを追跡し、`run_item_stream_event` の `tool_call_item` をスキップ
 
 ---
 
