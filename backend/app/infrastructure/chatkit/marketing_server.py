@@ -350,6 +350,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             agent_input,
             context=context_wrapper,
             run_config=run_config,
+            max_turns=50,
         )
         monitored = instrument_run_result(result, tracker)
 
@@ -375,6 +376,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                     agent_input,
                     context=context_wrapper,
                     run_config=run_config,
+                    max_turns=50,
                 )
                 fallback_monitored = instrument_run_result(fallback_result, tracker)
                 fallback_stream = stream_agent_response(context_wrapper, fallback_monitored)
