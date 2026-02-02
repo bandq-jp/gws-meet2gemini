@@ -486,10 +486,26 @@ npx supabase db push
 - **user message 保存も plain text に修正**: `json.dumps(...)` → `body.message` (plain string)
 - **try/except フォールバック追加**: activity_items カラムが未存在の場合のフォールバック
 
+**DB修正内容 (前セッション)**:
+- **ID生成**: `marketing_conversations.id` と `marketing_messages.id` は `text primary key` で自動生成なし → `_gen_thread_id()` (`thr_` + uuid hex) と `_gen_message_id()` (`msg_` + uuid hex) を追加
+- **content JSONB形式**: `marketing_messages.content` は JSONB 型 → `{"type": "text", "text": ...}` dict として保存
+- **content読み取り**: バックエンド・フロントエンドともに dict (JSONB) と string (レガシー) の両方をパース
+
+**MCP failover修正 (本セッション)**:
+- **問題**: `_pump_sdk_events()` が全ての例外を `{"type": "error"}` dict に変換し、`APIError` が `_run_with_failover` の `except APIError` に到達しない
+- **修正**: `_ErrorSentinel` クラスを追加。`_pump_sdk_events` で `APIError` を `_ErrorSentinel(e)` としてqueue投入。queue consumer で `isinstance(item, _ErrorSentinel)` → `raise item.exc` で再raise。`_run_with_failover` の `except APIError` でMCP failoverが正常動作
+- **パターン**: `keepalive.py` の `_ExceptionSentinel` と同じ手法
+
+**HistoryPanel URL修正 (本セッション)**:
+- **問題**: `handleRenameSubmit` が `/api/marketing/chat/threads/${id}/title` を呼んでいたが、対応するNext.jsルート未存在 → 404
+- **修正**: `/api/marketing/chat/threads/${id}` に変更（`[id]/route.ts` の PUT ハンドラがバックエンドの `/threads/${id}/title` にプロキシ済み）
+
 **技術的知見**:
 - `Runner.run_streamed()` の `context=` パラメータに ChatContext を渡すと、`@function_tool` の `ToolContext[ChatContext]` で `ctx.context` 経由でアクセス可能
 - out-of-band events (ask_user, chart 等) は `emit_event` → queue に put し、SDK events と同じ queue から yield することで統合ストリームを実現
 - `_ask_user_responses` は内部イベントとしてルーターで消費し、activity_items の永続化に使用。クライアントには送信しない
+- `_ErrorSentinel` パターン: asyncio.Queue 経由で例外を伝播させる手法。pump task (background asyncio.Task) で発生した特定の例外を、queue consumer で再raise可能にする
+- Next.js App Router のルートマッチング: `/api/path/[id]/route.ts` は `/api/path/{anything}` にのみマッチし、`/api/path/{anything}/suffix` にはマッチしない。追加パスセグメントには別途 `[id]/suffix/route.ts` が必要
 
 ---
 

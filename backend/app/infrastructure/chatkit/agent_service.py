@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 _SENTINEL = object()
 
 
+class _ErrorSentinel:
+    """Carries an exception from the pump task so it can be re-raised
+    in the queue consumer (e.g. APIError for MCP failover)."""
+
+    def __init__(self, exc: Exception) -> None:
+        self.exc = exc
+
+
 # ---------- ChatContext (passed to tool functions via ToolContext) ----------
 
 @dataclass
@@ -333,6 +341,10 @@ class MarketingAgentService:
                     sdk_event = self._process_sdk_event(event)
                     if sdk_event is not None:
                         await queue.put(sdk_event)
+            except APIError as e:
+                # Propagate APIError so _run_with_failover can catch it
+                # and trigger MCP failover logic
+                await queue.put(_ErrorSentinel(e))
             except Exception as e:
                 await queue.put({"type": "error", "message": str(e)})
             finally:
@@ -345,6 +357,8 @@ class MarketingAgentService:
                 item = await queue.get()
                 if item is _SENTINEL:
                     break
+                if isinstance(item, _ErrorSentinel):
+                    raise item.exc
                 yield item  # type: ignore[misc]
         finally:
             if not pump_task.done():

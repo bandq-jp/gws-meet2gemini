@@ -124,7 +124,7 @@ export function HistoryPanel({
     }
     try {
       const token = await ensureClientSecret();
-      await fetch(`/api/marketing/chat/threads/${id}/title`, {
+      await fetch(`/api/marketing/chat/threads/${id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
