@@ -501,6 +501,10 @@ class ZohoClient:
     ) -> Dict[str, int]:
         """流入経路ごとの求職者数を集計
 
+        Note:
+            最適化: 全レコードを1回取得し、メモリ内で集計する。
+            以前の実装では各チャネルごとにAPIを呼び出していたため非効率だった。
+
         Args:
             date_from: 集計期間開始（YYYY-MM-DD）
             date_to: 集計期間終了（YYYY-MM-DD）
@@ -517,20 +521,22 @@ class ZohoClient:
             "feed_indeed", "referral", "other",
         ]
 
-        results: Dict[str, int] = {}
+        # 全レコードを1回取得（日付フィルタ適用）
+        logger.info(
+            "[zoho] count_by_channel: fetching all records (date_from=%s, date_to=%s)",
+            date_from, date_to
+        )
+        all_records = self._fetch_all_records(max_pages=15)
 
-        for channel in channels:
-            try:
-                records = self.search_by_criteria(
-                    channel=channel,
-                    date_from=date_from,
-                    date_to=date_to,
-                    limit=200,
-                )
-                results[channel] = len(records)
-            except Exception as e:
-                logger.warning("[zoho] count_by_channel failed for %s: %s", channel, e)
-                results[channel] = 0
+        # 日付フィルタ
+        filtered = self._filter_by_date(all_records, date_from, date_to)
+
+        # メモリ内で流入経路ごとに集計
+        results: Dict[str, int] = {ch: 0 for ch in channels}
+        for r in filtered:
+            ch = r.get(self.CHANNEL_FIELD_API)
+            if ch in results:
+                results[ch] += 1
 
         logger.info("[zoho] count_by_channel results: total=%s", sum(results.values()))
         return results
@@ -542,6 +548,10 @@ class ZohoClient:
         date_to: Optional[str] = None,
     ) -> Dict[str, int]:
         """ステータスごとの求職者数を集計（ファネル分析用）
+
+        Note:
+            最適化: 全レコードを1回取得し、メモリ内で集計する。
+            以前の実装では各ステータスごとにAPIを呼び出していたため非効率だった。
 
         Args:
             channel: 流入経路でフィルタ（省略時は全体）
@@ -562,21 +572,26 @@ class ZohoClient:
             "17. 連絡禁止", "18. 中長期対応", "19. 他社送客",
         ]
 
-        results: Dict[str, int] = {}
+        # 全レコードを1回取得（日付フィルタ適用）
+        logger.info(
+            "[zoho] count_by_status: fetching all records (channel=%s, date_from=%s, date_to=%s)",
+            channel, date_from, date_to
+        )
+        all_records = self._fetch_all_records(max_pages=15)
 
-        for status in statuses:
-            try:
-                records = self.search_by_criteria(
-                    channel=channel,
-                    status=status,
-                    date_from=date_from,
-                    date_to=date_to,
-                    limit=200,
-                )
-                results[status] = len(records)
-            except Exception as e:
-                logger.warning("[zoho] count_by_status failed for %s: %s", status, e)
-                results[status] = 0
+        # 日付フィルタ
+        filtered = self._filter_by_date(all_records, date_from, date_to)
+
+        # チャネルフィルタ
+        if channel:
+            filtered = [r for r in filtered if r.get(self.CHANNEL_FIELD_API) == channel]
+
+        # メモリ内でステータスごとに集計
+        results: Dict[str, int] = {st: 0 for st in statuses}
+        for r in filtered:
+            st = r.get(self.STATUS_FIELD_API)
+            if st in results:
+                results[st] += 1
 
         logger.info("[zoho] count_by_status results: total=%s", sum(results.values()))
         return results
