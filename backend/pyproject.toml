@@ -22,6 +22,10 @@ dependencies = [
     "openai-agents>=0.5.1",
     # Align with official ChatKit samples (1.4.x) to avoid item schema drift
     "openai-chatkit>=1.4.0",
+    # Local MCP servers (STDIO)
+    "analytics-mcp>=0.1.1", # GA4 MCP
+    "mcp>=1.0.0", # FastMCP for GSC
+    "meta-ads-mcp>=1.0.0", # Meta Ads MCP
 ]
 
 [dependency-groups]

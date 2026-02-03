@@ -3,6 +3,7 @@ import { GoogleAuth } from "google-auth-library";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // 5 minutes for Vercel Pro plan
 
 const DEFAULT_BACKEND_URL = "http://localhost:8000/api/v1/marketing/chatkit";
 const BACKEND_URL =
@@ -125,6 +126,7 @@ export async function POST(request: NextRequest) {
     responseHeaders.delete("content-length");
     responseHeaders.set("Cache-Control", "no-cache");
     responseHeaders.set("Connection", "keep-alive");
+    responseHeaders.set("X-Accel-Buffering", "no"); // Disable Nginx/proxy buffering
 
     return new NextResponse(backendResponse.body, {
       status: backendResponse.status,

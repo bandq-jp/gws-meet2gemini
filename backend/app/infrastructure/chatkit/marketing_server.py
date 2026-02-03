@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from contextlib import AsyncExitStack
 from functools import lru_cache
 from typing import AsyncIterator, List
 
@@ -211,6 +212,7 @@ class MarketingThreadItemConverter(ThreadItemConverter):
 
 from app.infrastructure.chatkit.context import MarketingRequestContext
 from app.infrastructure.chatkit.keepalive import with_keepalive
+from app.infrastructure.chatkit.mcp_manager import MCPSessionManager
 from app.infrastructure.chatkit.tool_events import (
     ToolUsageTracker,
     instrument_run_result,
@@ -225,7 +227,7 @@ from app.infrastructure.chatkit.seo_agent_factory import (
 )
 from app.infrastructure.chatkit.supabase_store import SupabaseChatStore
 from app.infrastructure.chatkit.attachment_store import SupabaseAttachmentStore
-from app.infrastructure.config.settings import get_settings
+from app.infrastructure.config.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -239,11 +241,15 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         attachment_store: SupabaseAttachmentStore,
         agent_factory: MarketingAgentFactory,
         workflow_id: str,
+        settings: Settings | None = None,
+        mcp_manager: MCPSessionManager | None = None,
     ):
         super().__init__(store=store, attachment_store=attachment_store)
         self._agent_factory = agent_factory
         self._workflow_id = workflow_id or MARKETING_WORKFLOW_ID
         self._converter = MarketingThreadItemConverter()
+        self._settings = settings or get_settings()
+        self._mcp_manager = mcp_manager
 
     @staticmethod
     def _collect_code_interpreter_file_ids(items: List[ThreadItem]) -> list[str]:
@@ -303,7 +309,27 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
         if not asset:
             logger.warning("model asset %s not found; falling back to standard", asset_id)
             asset = get_model_asset("standard", context=context)
-        agent = self._agent_factory.build_agent(asset=asset)
+
+        # Initialize local MCP servers if enabled
+        mcp_servers = []
+        mcp_stack = AsyncExitStack()
+        if self._mcp_manager and self._settings.use_local_mcp:
+            try:
+                pair = self._mcp_manager.create_server_pair()
+                if pair.ga4_server:
+                    await mcp_stack.enter_async_context(pair.ga4_server)
+                    mcp_servers.append(pair.ga4_server)
+                if pair.gsc_server:
+                    await mcp_stack.enter_async_context(pair.gsc_server)
+                    mcp_servers.append(pair.gsc_server)
+                if pair.meta_ads_server:
+                    await mcp_stack.enter_async_context(pair.meta_ads_server)
+                    mcp_servers.append(pair.meta_ads_server)
+            except Exception as e:
+                logger.warning(f"[Local MCP] Init failed: {e}, falling back to hosted")
+                mcp_servers = []
+
+        agent = self._agent_factory.build_agent(asset=asset, mcp_servers=mcp_servers)
 
         def mount_ci_files(target_agent) -> None:
             if not ci_file_ids:
@@ -368,7 +394,7 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
                     text=f"⚠️ {label}の初期化に失敗しました。該当ツールをスキップして続行します。"
                 )
                 fallback_agent = self._agent_factory.build_agent(
-                    asset=asset, disabled_mcp_servers={error_source}
+                    asset=asset, disabled_mcp_servers={error_source}, mcp_servers=mcp_servers
                 )
                 mount_ci_files(fallback_agent)
                 fallback_result = Runner.run_streamed(
@@ -405,6 +431,8 @@ class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
             )
         finally:
             await tracker.close()
+            # Cleanup local MCP servers
+            await mcp_stack.aclose()
 
     @staticmethod
     def _infer_mcp_source(message: str | None) -> str | None:
@@ -491,6 +519,14 @@ def get_marketing_chat_server() -> MarketingChatKitServer:
     store = SupabaseChatStore()
     attachment_store = SupabaseAttachmentStore()
     agent_factory = MarketingAgentFactory(settings)
+
+    # Initialize MCP manager for local MCP servers
+    mcp_manager = None
+    if settings.use_local_mcp:
+        mcp_manager = MCPSessionManager(settings)
+        logger.info("Local MCP manager initialized (GA4=%s, GSC=%s)",
+                    settings.local_mcp_ga4_enabled, settings.local_mcp_gsc_enabled)
+
     if settings.openai_api_key:
         # Runner respects OPENAI_API_KEY env; set proactively when settings change
         import os
@@ -501,4 +537,6 @@ def get_marketing_chat_server() -> MarketingChatKitServer:
         attachment_store=attachment_store,
         agent_factory=agent_factory,
         workflow_id=settings.marketing_workflow_id,
+        settings=settings,
+        mcp_manager=mcp_manager,
     )

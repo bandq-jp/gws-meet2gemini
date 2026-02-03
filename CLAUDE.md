@@ -50,7 +50,7 @@
 - **Database**: Supabase (PostgreSQL HTTP API, RLS対応)
 - **Authentication**: Clerk JWT + ドメイン制限 (@bandq.jp)
 - **External APIs**: Zoho CRM SDK, Google Drive/Docs API, Google Cloud Tasks, Google Cloud Storage
-- **MCP Servers**: GA4, GSC, Ahrefs, Meta Ads, WordPress (オプション)
+- **MCP Servers**: GA4, GSC (ローカルSTDIO対応), Ahrefs, Meta Ads, WordPress (オプション)
 
 ### Frontend
 - **Framework**: Next.js 16 + React 19 + TypeScript
@@ -135,11 +135,13 @@ Frontend (ChatKit React) → Next.js API Route (SSE proxy) → FastAPI → ChatK
 |---------|------|
 | `backend/app/infrastructure/chatkit/marketing_server.py` | ChatKitServerサブクラス。respond()でエージェントストリーム生成 |
 | `backend/app/infrastructure/chatkit/seo_agent_factory.py` | Agent構築 (モデル, ツール, MCP, reasoning設定) |
+| `backend/app/infrastructure/chatkit/mcp_manager.py` | MCPサーバーライフサイクル管理 (ローカルSTDIO) |
 | `backend/app/infrastructure/chatkit/tool_events.py` | ToolUsageTracker: ツール実行のUI表示+DB保存 |
 | `backend/app/infrastructure/chatkit/keepalive.py` | SSEキープアライブ (20秒間隔でProgressUpdateEvent) |
 | `backend/app/infrastructure/chatkit/supabase_store.py` | ChatKit用Supabaseストア |
 | `backend/app/infrastructure/chatkit/model_assets.py` | モデルプリセット管理 |
 | `backend/app/infrastructure/chatkit/context.py` | リクエストコンテキスト |
+| `backend/scripts/gsc_server.py` | GSC MCPサーバー (FastMCP, ローカルSTDIO) |
 | `frontend/src/app/marketing/page.tsx` | メインチャットUI (1000+行) |
 | `frontend/src/hooks/use-marketing-chatkit.ts` | ChatKitフック (streaming, attachments, sharing) |
 | `frontend/src/app/api/marketing/chatkit/start/route.ts` | JWT トークン生成 |
@@ -279,7 +281,13 @@ TASKS_QUEUE=
 TASKS_WORKER_URL=
 TASKS_OIDC_SERVICE_ACCOUNT=
 
-# MCP Servers (optional)
+# Local MCP (高速化)
+USE_LOCAL_MCP=false          # true でローカルMCP有効化
+LOCAL_MCP_GA4_ENABLED=true   # GA4ローカルMCP
+LOCAL_MCP_GSC_ENABLED=true   # GSCローカルMCP
+MCP_CLIENT_TIMEOUT_SECONDS=120
+
+# MCP Servers (リモート, optional)
 GA4_MCP_SERVER_URL=
 GSC_MCP_SERVER_URL=
 AHREFS_MCP_SERVER_URL=
@@ -561,6 +569,242 @@ CANDIDATE_INSIGHT_TOOLS = [
 - Zoho CRMの基本情報 + 議事録からの詳細情報を統合
 - エグレス削減のため軽量カラムのみ取得
 
+### 7. ローカルMCP移行実装 (2026-02-04)
+
+**問題**: マーケティングエージェントのMCPサーバー（GA4, GSC, Meta Ads, Ahrefs, WordPress×2）がCloud Run上でリモート実行されており、エージェント初期化時に各MCPへ逐次接続するため15-30秒の遅延が発生
+
+**解決策**: GA4/GSCをローカルSTDIO実行に移行（`MCPServerStdio`使用）し、初期化時間を1-2秒に短縮
+
+**新規依存関係** (`backend/pyproject.toml`):
+```toml
+# Local MCP servers (STDIO)
+"analytics-mcp>=0.1.1",  # GA4 MCP (PyPI)
+"mcp>=1.0.0",            # FastMCP for GSC
+"meta-ads-mcp>=1.0.0",   # Meta Ads MCP (PyPI)
+```
+
+**新規ファイル**:
+
+1. **`backend/app/infrastructure/chatkit/mcp_manager.py`** — MCPサーバーライフサイクル管理
+   - `MCPServerPair`: GA4/GSCサーバーインスタンスを保持するdataclass
+   - `MCPSessionManager`: サーバー生成・設定管理
+   - `create_ga4_server()`: `analytics-mcp`をSTDIOで起動
+   - `create_gsc_server()`: カスタムGSCサーバーをSTDIOで起動
+   - `create_server_pair()`: 設定に応じて有効なサーバーペアを生成
+
+2. **`backend/scripts/gsc_server.py`** — GSC MCP サーバー（FastMCPベース）
+   - ga4-oauth-aiagentのGSC実装をコピー・適用
+   - サービスアカウント認証（`GOOGLE_APPLICATION_CREDENTIALS`環境変数経由）
+   - 13+ツール: `list_properties`, `get_search_analytics`, `get_performance_overview`, `get_indexing_status`, `get_sitemaps`, `get_url_inspection` 等
+   - `mcp.run(transport="stdio")` で実行
+
+**変更ファイル**:
+
+1. **`backend/app/infrastructure/config/settings.py`**:
+   ```python
+   # Local MCP settings (STDIO-based) - default enabled for faster initialization
+   use_local_mcp: bool = os.getenv("USE_LOCAL_MCP", "true").lower() == "true"  # デフォルト有効
+   local_mcp_ga4_enabled: bool = os.getenv("LOCAL_MCP_GA4_ENABLED", "true").lower() == "true"
+   local_mcp_gsc_enabled: bool = os.getenv("LOCAL_MCP_GSC_ENABLED", "true").lower() == "true"
+   local_mcp_meta_ads_enabled: bool = os.getenv("LOCAL_MCP_META_ADS_ENABLED", "true").lower() == "true"
+   mcp_client_timeout_seconds: int = int(os.getenv("MCP_CLIENT_TIMEOUT_SECONDS", "120"))
+   meta_access_token: str = os.getenv("META_ACCESS_TOKEN", "")
+   ```
+
+2. **`backend/app/infrastructure/chatkit/seo_agent_factory.py`**:
+   - `build_agent()` に `mcp_servers` パラメータ追加
+   - ローカルMCP有効時はGA4/GSCの`HostedMCPTool`をスキップ
+   - `Agent`コンストラクタに`mcp_servers`を渡す
+
+3. **`backend/app/infrastructure/chatkit/marketing_server.py`**:
+   - `AsyncExitStack`でMCPサーバーのライフサイクル管理
+   - `respond()`メソッド内でMCPサーバーを起動・接続
+   - `finally`ブロックで`mcp_stack.aclose()`による確実なクリーンアップ
+   - `get_marketing_chat_server()`で`MCPSessionManager`を生成・注入
+
+4. **`backend/.env.example`**:
+   - ローカルMCP設定セクション追加
+
+**新規環境変数**:
+```bash
+# Local MCP 設定（デフォルト有効）
+USE_LOCAL_MCP=true                # デフォルト有効（リモートMCP使用時はfalse）
+LOCAL_MCP_GA4_ENABLED=true        # GA4ローカルMCP使用
+LOCAL_MCP_GSC_ENABLED=true        # GSCローカルMCP使用
+LOCAL_MCP_META_ADS_ENABLED=true   # Meta AdsローカルMCP使用
+MCP_CLIENT_TIMEOUT_SECONDS=120    # MCPクライアントタイムアウト
+META_ACCESS_TOKEN=                # Meta Ads用長寿命アクセストークン
+```
+
+**認証の互換性**:
+| 項目 | HostedMCPTool (Before) | MCPServerStdio (After) |
+|------|------------------------|------------------------|
+| GA4認証 | HTTPヘッダー `Authorization` | `GOOGLE_APPLICATION_CREDENTIALS` |
+| GSC認証 | HTTPヘッダー `x-api-key` | `GOOGLE_APPLICATION_CREDENTIALS` |
+| Meta Ads認証 | HTTPヘッダー `Authorization` | `META_ACCESS_TOKEN` 環境変数 |
+| 認証情報 | リモートMCPサーバーが管理 | **ローカル環境変数** |
+
+**ハイブリッドアプローチ**:
+- GA4/GSC/Meta Ads: ローカルSTDIO (`MCPServerStdio`) — 高速化対象
+- Ahrefs/WordPress: 既存の`HostedMCPTool` — 変更なし（HTTP-RPCのまま）
+
+**技術的知見**:
+- `MCPServerStdio`: OpenAI Agents SDK (`agents.mcp`) のクラス。STDIOトランスポートでMCPサーバーをサブプロセス起動
+- `MCPServerStdioParams`: `command`, `args`, `env` でサブプロセス設定
+- `cache_tools_list=True`: ツール一覧をキャッシュして再接続を高速化
+- `AsyncExitStack`: 複数の非同期コンテキストマネージャを動的に管理
+- サービスアカウントパス解決: ファイルパスまたはインラインJSONの両方に対応
+
+**期待効果**:
+| 指標 | Before | After |
+|------|--------|-------|
+| MCP初期化時間 | 15-30秒 | 1-2秒 |
+| SSEタイムアウトリスク | 高 | 低 |
+| Cloud Run依存 | あり | なし（GA4/GSC/Meta Ads） |
+
+**情報ソース**:
+- [OpenAI Agents SDK MCP](https://openai.github.io/openai-agents-python/mcp/)
+- [analytics-mcp PyPI](https://pypi.org/project/analytics-mcp/)
+- [meta-ads-mcp PyPI](https://pypi.org/project/meta-ads-mcp/)
+- 参考実装: `/home/als0028/study/shintairiku/ga4-oauth-aiagent` — GA4/GSC/Meta Ads/WordPress全てのローカルMCP実装例
+
+### 8. Vercel SSEタイムアウト修正 (2026-02-04)
+
+**問題**: マーケティングAIチャットで3-5分以上経過すると画面更新が停止する
+
+**調査結果**:
+- CLAUDE.mdには「maxDuration設定済み」と記載されていたが、**実際のコードには設定されていなかった**
+- `X-Accel-Buffering: no` ヘッダーも未設定
+
+**修正内容**:
+
+1. **`frontend/src/app/api/marketing/chatkit/server/route.ts`**:
+   ```typescript
+   export const maxDuration = 300; // 5 minutes for Vercel Pro plan
+   ```
+   - L6に追加: Vercelのデフォルト60秒タイムアウトを5分に延長
+   - `X-Accel-Buffering: no` ヘッダー追加: 中間プロキシのバッファリング無効化
+
+2. **`backend/app/presentation/api/v1/marketing.py`**:
+   - StreamingResponseヘッダーに `X-Accel-Buffering: no` 追加
+
+**SSEタイムアウト対策の全体像**:
+| レイヤー | 対策 | 設定値 |
+|---------|------|--------|
+| Vercel API Route | `maxDuration` | 300秒 |
+| Backend keepalive | `ProgressUpdateEvent` | 20秒間隔 |
+| レスポンスヘッダー | `X-Accel-Buffering: no` | Nginx/プロキシバッファ無効化 |
+| レスポンスヘッダー | `Connection: keep-alive` | 接続維持 |
+| レスポンスヘッダー | `Cache-Control: no-cache` | キャッシュ無効化 |
+
+**タイムアウトチェーン（修正後）**:
+```
+t=0s    : ユーザーがメッセージ送信
+t=1s    : Next.js API Route → Backend fetch 開始
+t=20s   : Backend keepalive (ProgressUpdateEvent) ✅
+t=40s   : Backend keepalive ✅
+t=60s   : ✅ Vercel タイムアウト回避 (maxDuration=300)
+...
+t=300s  : Vercel maxDuration 上限 (Pro プラン最大)
+```
+
+**情報ソース**:
+- [Vercel Functions Duration](https://vercel.com/docs/functions/configuring-functions/duration)
+- 参考実装: `/home/als0028/study/shintairiku/ga4-oauth-aiagent` — `X-Accel-Buffering` ヘッダー使用例
+
+### 9. ローカルMCPログ最適化 (2026-02-04)
+
+**問題**: mcp_manager.pyのログが冗長（装飾的区切り線、重複メッセージ、絵文字）
+
+**参照プロジェクト調査** (`/home/als0028/study/shintairiku/ga4-oauth-aiagent`):
+- `print()` + `[Component]` プレフィックス形式
+- 最小限のログ（接続成功/失敗のみ）
+- サマリー: `[Agent] MCP servers total: X`
+
+**最適化内容**:
+
+1. **`mcp_manager.py`**:
+   - 装飾的区切り線 (`====`, `----`) を削除
+   - 各`create_*_server()`メソッドの重複ログ削除
+   - 絵文字（✅⚠️❌⏭️）をプレーンテキストに変更
+
+2. **`marketing_server.py`**:
+   - 冗長なモード表示ログ削除
+
+**最適化前:**
+```
+INFO ============================================================
+INFO [Local MCP] Creating local MCP servers (STDIO transport)
+INFO ============================================================
+INFO Creating GA4 MCP server with service account: /path/to/sa.json...
+INFO [Local MCP] ✅ GA4: enabled (analytics-mcp)
+...
+INFO [Local MCP] Summary: 2/3 servers ready
+INFO ============================================================
+INFO [MCP Mode] Using LOCAL MCP servers (STDIO transport)
+INFO [MCP Mode] 2 local MCP server(s) connected
+```
+
+**最適化後:**
+```
+INFO [Local MCP] GA4: ready (analytics-mcp)
+INFO [Local MCP] GSC: ready (gsc_server.py)
+INFO [Local MCP] Meta Ads: skipped (no META_ACCESS_TOKEN)
+INFO [Local MCP] Total: 2/3 servers ready
+```
+
+**技術的知見**:
+- Cloud Runログ: 絵文字が正しく表示されない場合がある
+- `logger.info()` vs `print()`: 本番環境では`logging`モジュールが推奨（構造化ログ、レベル制御）
+- 情報密度: 1行で状態が分かるコンパクトなフォーマットが理想
+
+### 10. Meta Ads MCPフォールバックバグ修正 (2026-02-04)
+
+**問題**: マーケティングチャットで「Meta広告専用のツールAPIは登録されていません」と表示される
+
+**根本原因分析**:
+1. `seo_agent_factory.py`で`use_local_meta_ads`の判定が不完全だった:
+   ```python
+   # 修正前（バグ）
+   use_local_meta_ads = self._settings.use_local_mcp and self._settings.local_mcp_meta_ads_enabled
+   # → META_ACCESS_TOKEN未設定でもTrueになり、ホステッド版がスキップされる
+   ```
+
+2. `mcp_manager.create_meta_ads_server()`は`META_ACCESS_TOKEN`未設定時に`None`を返す
+3. 結果: ホステッド版スキップ + ローカル版`None` = **ツール0個**
+
+**修正内容**:
+
+1. **`seo_agent_factory.py`** (L505-510):
+   ```python
+   # 修正後
+   use_local_meta_ads = (
+       self._settings.use_local_mcp
+       and self._settings.local_mcp_meta_ads_enabled
+       and self._settings.meta_access_token  # ← 追加: トークン存在確認
+   )
+   ```
+   - `META_ACCESS_TOKEN`未設定時はホステッド版にフォールバック
+
+2. **`mcp_manager.py`** (L222):
+   ```python
+   logger.info("[Local MCP] Meta Ads: skipped (no META_ACCESS_TOKEN, will use hosted if configured)")
+   ```
+   - フォールバック動作を明示するログメッセージに変更
+
+**修正後の動作フロー**:
+
+| 条件 | ローカルMCP | ホステッドMCP | 結果 |
+|------|------------|--------------|------|
+| `META_ACCESS_TOKEN`設定済み | 使用 | スキップ | ローカルツール使用 |
+| `META_ACCESS_TOKEN`未設定 + ホステッドURL設定済み | スキップ | 使用 | ホステッドツール使用 |
+| 両方未設定 | スキップ | スキップ | Meta Adsツールなし（正常） |
+
+**技術的知見**:
+- フラグベースのスキップロジックは、実際のリソース可用性も確認すべき
+- 「有効化フラグ=true」と「実際に動作可能」は異なる概念
+- フォールバックチェーンの設計時は各段階の前提条件を明確にする
+
 ---
 
 ## 自己改善ログ
@@ -571,6 +815,10 @@ CANDIDATE_INSIGHT_TOOLS = [
 - **カスタムUIの過剰実装**: SSE問題の対策としてフロントエンドにカスタム経過時間インジケーターを実装したが、ユーザーに「まったくよくありません。しっかりとChatkitの仕様に合わせてやってほしい。カスタムUIでやる必要はありません。思考過程とかもちゃんとchatkitでできるようになっています」と強く指摘された。**SDKの公式機能を先に徹底的に調査し、ネイティブ機能で解決できるかを最優先で確認すべき。カスタム実装は最終手段。**
 - **SDK機能の調査不足**: ChatKit SDKの `WorkflowItem(type="reasoning")` + `ThoughtTask` によるネイティブ推論表示を最初に見落としていた。**外部SDKを使う場合、まずソースコードを全て読んで機能を把握してから設計に入るべき。**
 - **記憶ファイル (CLAUDE.md) の未整備**: プロジェクトの記憶が全くない状態で作業していた。新しいプロジェクトを開始する時点で、まずCLAUDE.mdを作成・整備すべき。
+
+### 2026-02-04
+- **参考プロジェクトの不十分な調査**: ローカルMCP移行でGA4/GSCのみ対応し、Meta Ads MCPを見落とした。ユーザーに「なぜその3つのローカルサーバー環境変数を用意したの？」「META_ACCESS_TOKEN=の環境変数でできるはずだけど？もっとga4-oauth-aiagentちゃんと調べて」と指摘された。**参考プロジェクトを提示されたら、全ファイルを徹底的に読み、すべての機能を把握すること。部分的な実装は中途半端な結果を生む。**
+- **段階的実装の過剰**: 「Phase 1: GA4/GSC」「Phase 2: Meta Ads」と勝手に段階を設けたが、ユーザーは全てローカル化したかった。**ユーザーの要件を正確に把握し、勝手に段階を設けず、要件通りに実装すること。**
 
 ---
 

@@ -334,6 +334,7 @@ class MarketingAgentFactory:
         self,
         asset: dict[str, Any] | None = None,
         disabled_mcp_servers: set[str] | None = None,
+        mcp_servers: list[Any] | None = None,
     ) -> Agent:
         tools: List[Any] = []
 
@@ -443,6 +444,8 @@ class MarketingAgentFactory:
             # if stop_at_tool_names
             # else "run_llm_again",
             tool_use_behavior="run_llm_again",
+            # Local MCP servers (GA4/GSC when USE_LOCAL_MCP=true)
+            mcp_servers=mcp_servers or [],
         )
         return agent
 
@@ -476,11 +479,14 @@ class MarketingAgentFactory:
         allow_gsc = asset is None or asset.get("enable_gsc", True)
         allow_wordpress = asset is None or asset.get("enable_wordpress", True)
 
+        # Skip GA4 HostedMCPTool when local MCP is enabled
+        use_local_ga4 = self._settings.use_local_mcp and self._settings.local_mcp_ga4_enabled
         if (
             self._settings.ga4_mcp_server_url
             and self._settings.ga4_mcp_authorization
             and allow_ga4
             and not is_disabled("ga4")
+            and not use_local_ga4  # Skip if using local MCP
         ):
             hosted.append(
                 HostedMCPTool(
@@ -496,11 +502,19 @@ class MarketingAgentFactory:
                     }
                 )
             )
+        # Skip Meta Ads HostedMCPTool when local MCP is enabled AND token is configured
+        # If META_ACCESS_TOKEN is not set, local MCP will return None, so we need hosted fallback
+        use_local_meta_ads = (
+            self._settings.use_local_mcp
+            and self._settings.local_mcp_meta_ads_enabled
+            and self._settings.meta_access_token  # Only skip hosted if local can actually work
+        )
         if (
             self._settings.meta_ads_mcp_server_url
             and self._settings.meta_ads_mcp_authorization
             and allow_meta_ads
             and not is_disabled("meta_ads")
+            and not use_local_meta_ads  # Skip if using local MCP
         ):
             hosted.append(
                 HostedMCPTool(
@@ -534,11 +548,14 @@ class MarketingAgentFactory:
                     }
                 )
             )
+        # Skip GSC HostedMCPTool when local MCP is enabled
+        use_local_gsc = self._settings.use_local_mcp and self._settings.local_mcp_gsc_enabled
         if (
             self._settings.gsc_mcp_server_url
             and self._settings.gsc_mcp_api_key
             and allow_gsc
             and not is_disabled("gsc")
+            and not use_local_gsc  # Skip if using local MCP
         ):
             hosted.append(
                 HostedMCPTool(

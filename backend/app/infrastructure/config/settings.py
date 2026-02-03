@@ -106,6 +106,16 @@ class Settings:
     # ブラウザがアップロード先にアクセスするときのベースURL（必須: スキーム/ホスト付き）
     marketing_upload_base_url: str = _default_marketing_upload_base_url()
 
+    # Local MCP settings (STDIO-based) - default enabled for faster initialization
+    use_local_mcp: bool = os.getenv("USE_LOCAL_MCP", "true").lower() == "true"
+    local_mcp_ga4_enabled: bool = os.getenv("LOCAL_MCP_GA4_ENABLED", "true").lower() == "true"
+    local_mcp_gsc_enabled: bool = os.getenv("LOCAL_MCP_GSC_ENABLED", "true").lower() == "true"
+    local_mcp_meta_ads_enabled: bool = os.getenv("LOCAL_MCP_META_ADS_ENABLED", "true").lower() == "true"
+    mcp_client_timeout_seconds: int = int(os.getenv("MCP_CLIENT_TIMEOUT_SECONDS", "120"))
+    # Meta Ads MCP authentication (long-lived access token)
+    meta_access_token: str = os.getenv("META_ACCESS_TOKEN", "")
+
+    # Hosted MCP settings (HTTP-based, remote Cloud Run)
     ga4_mcp_server_url: str = os.getenv("GA4_MCP_SERVER_URL", "")
     ga4_mcp_authorization: str = os.getenv("GA4_MCP_AUTHORIZATION", "")
     meta_ads_mcp_server_url: str = os.getenv("META_ADS_MCP_SERVER_URL", "")
