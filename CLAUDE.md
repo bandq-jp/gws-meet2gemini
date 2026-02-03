@@ -418,6 +418,38 @@ npx supabase db push
 
 **期待効果**: 908MB/日 → ~50-100MB/日 (Free Plan 5GB内に収まる見込み)
 
+### 4. Zoho CRM 日付フィルタリングバグ修正 (2026-02-03)
+**問題**: マーケティングチャットのZoho API統合で、日付フィルタ（date_from/date_to）を指定すると0件が返る
+
+**調査結果**:
+- Zoho CRM Search API は、カスタムモジュール（jobSeeker）で日付/日時フィールドの**比較演算子**（`greater_equal`, `less_equal`, `between`等）を**サポートしていない**
+- `equals` 演算子のみ動作する（完全一致のみ）
+- エラーメッセージ: `{"code":"INVALID_QUERY","details":{"reason":"invalid operator found","api_name":"Created_Time","operator":"greater_equal"}}`
+- COQL（CRM Object Query Language）はOAuthスコープ不足で使用不可
+
+**根本原因**:
+- `backend/app/infrastructure/zoho/client.py` L338-342 で `Created_Time:greater_equal:...` を使用していたが、Zoho Search APIがこの演算子をサポートしていない
+- Zohoドキュメントには「サポートされている」と記載があるが、実際にはカスタムモジュールでは動作しない
+
+**修正内容** (`backend/app/infrastructure/zoho/client.py`):
+- **新規メソッド**: `_fetch_all_records()` — Records APIで全件取得（ページング対応、max_pages=15）
+- **新規メソッド**: `_filter_by_date()` — `field18`（登録日）でクライアントサイドフィルタリング
+- **修正**: `search_by_criteria()` — 日付フィルタがある場合はRecords API + クライアントサイドフィルタに切り替え
+- **新規定数**: `DATE_FIELD_API = "field18"` — 登録日フィールド（YYYY-MM-DD形式）
+- **返却データ変更**: `登録日` を `Created_Time` から `field18` に変更（正しい登録日を返す）
+
+**修正前後の結果**:
+| クエリ | 修正前 | 修正後 |
+|--------|--------|--------|
+| 日付フィルタ (2026-01) | 0件 | 100件 |
+| paid_meta + 日付 (2026-01) | 0件 | **83件** |
+
+**技術的知見**:
+- Zoho CRM Search API (`/crm/v2/{module}/search`) は、システムフィールド・カスタムフィールド問わず、日付/日時型で比較演算子が動作しない場合がある（モジュール依存）
+- Records API (`/crm/v2/{module}`) + クライアントサイドフィルタは確実に動作する
+- `field18` は登録日（date型、YYYY-MM-DD形式）、`Created_Time` はシステム作成日時（datetime型、ISO8601形式）
+- **情報ソース**: [Zoho CRM API Search Records](https://www.zoho.com/crm/developer/docs/api/v8/search-records.html)
+
 ---
 
 ## 自己改善ログ

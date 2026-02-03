@@ -295,6 +295,83 @@ class ZohoClient:
     CHANNEL_FIELD_API = "field14"  # 流入経路
     STATUS_FIELD_API = "customer_status"  # 顧客ステータス
     NAME_FIELD_API = "Name"  # 求職者名（デフォルト）
+    DATE_FIELD_API = "field18"  # 登録日（date型、YYYY-MM-DD形式）
+
+    def _fetch_all_records(
+        self,
+        max_pages: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Records APIで全レコードを取得（ページング対応）
+
+        Note:
+            Zoho Search APIは日付フィールドの比較演算子(greater_equal等)を
+            サポートしていないため、日付フィルタが必要な場合はRecords APIで
+            全件取得し、クライアントサイドでフィルタリングする必要がある。
+
+        Args:
+            max_pages: 最大ページ数（200件/ページ、デフォルト10ページ=2000件）
+
+        Returns:
+            全レコードのリスト
+        """
+        module_api = self.settings.zoho_app_hc_module
+        all_records: List[Dict[str, Any]] = []
+        page = 1
+
+        while page <= max_pages:
+            params = {"per_page": 200, "page": page}
+            try:
+                result = self._get(f"/crm/v2/{module_api}", params) or {}
+                data = result.get("data", []) or []
+                info = result.get("info", {}) or {}
+
+                all_records.extend(data)
+
+                if not info.get("more_records"):
+                    break
+                page += 1
+            except Exception as e:
+                logger.warning("[zoho] _fetch_all_records page %d failed: %s", page, e)
+                break
+
+        logger.info("[zoho] _fetch_all_records: total=%d pages=%d", len(all_records), page)
+        return all_records
+
+    def _filter_by_date(
+        self,
+        records: List[Dict[str, Any]],
+        date_from: Optional[str],
+        date_to: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        """レコードを登録日（field18）でフィルタリング
+
+        Args:
+            records: フィルタ対象のレコード
+            date_from: 開始日（YYYY-MM-DD形式、この日を含む）
+            date_to: 終了日（YYYY-MM-DD形式、この日を含む）
+
+        Returns:
+            フィルタ後のレコード
+        """
+        if not date_from and not date_to:
+            return records
+
+        filtered = []
+        for r in records:
+            # field18（登録日）は YYYY-MM-DD 形式
+            reg_date = r.get(self.DATE_FIELD_API, "")
+            if not reg_date:
+                continue
+
+            # 日付比較（文字列比較でOK、YYYY-MM-DD形式なので）
+            if date_from and reg_date < date_from:
+                continue
+            if date_to and reg_date > date_to:
+                continue
+
+            filtered.append(r)
+
+        return filtered
 
     def search_by_criteria(
         self,
@@ -307,62 +384,91 @@ class ZohoClient:
     ) -> List[Dict[str, Any]]:
         """条件指定で求職者（APP-hc）を検索
 
+        Note:
+            Zoho CRM Search APIは日付フィールドの比較演算子(greater_equal,
+            less_equal, between等)をサポートしていない。そのため、日付フィルタが
+            指定された場合はRecords APIで全件取得後、クライアントサイドで
+            フィルタリングを行う。
+
         Args:
             channel: 流入経路（例: paid_meta, sco_bizreach, org_hitocareer）
             status: 顧客ステータス（例: 1. リード, 3. 面談待ち）
             name: 求職者名（部分一致）
-            date_from: 登録日開始（YYYY-MM-DD）
-            date_to: 登録日終了（YYYY-MM-DD）
+            date_from: 登録日開始（YYYY-MM-DD）- field18でフィルタ
+            date_to: 登録日終了（YYYY-MM-DD）- field18でフィルタ
             limit: 取得件数（最大200）
 
         Returns:
             検索結果のリスト
         """
         module_api = self.settings.zoho_app_hc_module
+        has_date_filter = bool(date_from or date_to)
 
-        # 検索条件を構築
-        criteria_parts: List[str] = []
+        # 日付フィルタがある場合: Records API + クライアントサイドフィルタ
+        # Zoho Search APIは日付の比較演算子をサポートしていないため
+        if has_date_filter:
+            logger.info(
+                "[zoho] search_by_criteria: using Records API + client-side filter "
+                "(date_from=%s, date_to=%s, channel=%s, status=%s)",
+                date_from, date_to, channel, status
+            )
 
-        if channel:
-            # 流入経路フィールド: field14
-            criteria_parts.append(f"({self.CHANNEL_FIELD_API}:equals:{channel})")
+            # 全レコード取得
+            all_records = self._fetch_all_records(max_pages=15)
 
-        if status:
-            # 顧客ステータスフィールド: customer_status
-            criteria_parts.append(f"({self.STATUS_FIELD_API}:equals:{status})")
+            # 日付フィルタ（field18: 登録日）
+            filtered = self._filter_by_date(all_records, date_from, date_to)
 
-        if name:
-            name_field = self.settings.zoho_app_hc_name_field_api or self.NAME_FIELD_API
-            criteria_parts.append(f"({name_field}:contains:{name})")
+            # 追加フィルタ（channel, status, name）
+            if channel:
+                filtered = [r for r in filtered if r.get(self.CHANNEL_FIELD_API) == channel]
+            if status:
+                filtered = [r for r in filtered if r.get(self.STATUS_FIELD_API) == status]
+            if name:
+                name_lower = name.lower()
+                filtered = [
+                    r for r in filtered
+                    if name_lower in (r.get("Name") or "").lower()
+                ]
 
-        if date_from:
-            criteria_parts.append(f"(Created_Time:greater_equal:{date_from}T00:00:00+09:00)")
+            # limit適用
+            data = filtered[:limit]
 
-        if date_to:
-            criteria_parts.append(f"(Created_Time:less_equal:{date_to}T23:59:59+09:00)")
-
-        # 条件がない場合は全件取得（limitで制限）
-        if not criteria_parts:
-            # 全件取得はSearch APIでは不可のため、Records APIを使用
-            params: Dict[str, Any] = {"per_page": min(limit, 200)}
-            try:
-                result = self._get(f"/crm/v2/{module_api}", params) or {}
-                data = result.get("data", []) or []
-            except Exception as e:
-                logger.warning("[zoho] search_by_criteria (all) failed: %s", e)
-                data = []
         else:
-            # 検索条件を AND で結合
-            criteria = "(" + "and".join(criteria_parts) + ")"
-            params = {"criteria": criteria, "per_page": min(limit, 200)}
+            # 日付フィルタなし: 従来のロジック（Search API or Records API）
+            criteria_parts: List[str] = []
 
-            logger.info("[zoho] search_by_criteria: criteria=%s", criteria)
-            try:
-                result = self._get(f"/crm/v2/{module_api}/search", params) or {}
-                data = result.get("data", []) or []
-            except Exception as e:
-                logger.warning("[zoho] search_by_criteria failed: %s", e)
-                data = []
+            if channel:
+                criteria_parts.append(f"({self.CHANNEL_FIELD_API}:equals:{channel})")
+
+            if status:
+                criteria_parts.append(f"({self.STATUS_FIELD_API}:equals:{status})")
+
+            if name:
+                name_field = self.settings.zoho_app_hc_name_field_api or self.NAME_FIELD_API
+                criteria_parts.append(f"({name_field}:contains:{name})")
+
+            if not criteria_parts:
+                # 条件なし: Records APIで取得
+                params: Dict[str, Any] = {"per_page": min(limit, 200)}
+                try:
+                    result = self._get(f"/crm/v2/{module_api}", params) or {}
+                    data = result.get("data", []) or []
+                except Exception as e:
+                    logger.warning("[zoho] search_by_criteria (all) failed: %s", e)
+                    data = []
+            else:
+                # 条件あり: Search APIで検索
+                criteria = "(" + "and".join(criteria_parts) + ")"
+                params = {"criteria": criteria, "per_page": min(limit, 200)}
+
+                logger.info("[zoho] search_by_criteria: criteria=%s", criteria)
+                try:
+                    result = self._get(f"/crm/v2/{module_api}/search", params) or {}
+                    data = result.get("data", []) or []
+                except Exception as e:
+                    logger.warning("[zoho] search_by_criteria failed: %s", e)
+                    data = []
 
         # 結果を整形（APIフィールド名を使用して取得）
         records = []
@@ -381,7 +487,7 @@ class ZohoClient:
                 "流入経路": r.get(self.CHANNEL_FIELD_API),
                 "顧客ステータス": r.get(self.STATUS_FIELD_API),
                 "PIC": pic,
-                "登録日": r.get("Created_Time"),
+                "登録日": r.get(self.DATE_FIELD_API),  # field18 (登録日) を使用
                 "更新日": r.get("Modified_Time"),
             })
 
