@@ -805,6 +805,56 @@ INFO [Local MCP] Total: 2/3 servers ready
 - 「有効化フラグ=true」と「実際に動作可能」は異なる概念
 - フォールバックチェーンの設計時は各段階の前提条件を明確にする
 
+### 11. マーケティングエージェントトークン最適化 (2026-02-04)
+
+**問題**: OpenAIダッシュボードで入力トークンが約32,000を示しており、コストと応答時間に影響
+
+**調査結果（12並列エージェントで調査）**:
+1. システム指示: ~2,200トークン（チャネル/ステータス定義が重複）
+2. MCP許可ツールリスト: 149ツール（多くが未使用または未実装）
+3. ツールdocstring: 冗長な説明とサンプル
+
+**最適化内容**:
+
+1. **GSC許可リスト削減** (19→10ツール):
+   - 削除: `add_site`, `delete_site`, `check_indexing_issues`, `list_sitemaps_enhanced`, `get_sitemap_details`, `submit_sitemap`, `delete_sitemap`, `manage_sitemaps`, `get_creator_info`（すべて未実装）
+
+2. **Ahrefs許可リスト削減** (52→20ツール):
+   - 書き込み系削除: `management-projects-create`, `management-project-competitors-post`, `management-keyword-list-keywords-put`, `management-project-keywords-put`
+   - 低使用ツール削除: 32ツール
+
+3. **Meta Ads許可リスト削減** (31→20ツール):
+   - 書き込み系削除: `create_campaign`, `update_campaign`, `create_adset`, `update_adset`, `create_ad`, `update_ad`, `create_ad_creative`, `update_ad_creative`, `upload_ad_image`, `create_budget_schedule`
+   - 不要ツール削除: `get_login_link`
+
+4. **システム指示簡素化** (~5,100→809文字):
+   - チャネル/ステータス定義を削除（`get_channel_definitions`ツールで取得可能）
+   - 冗長なツール説明を削除
+   - 分析シナリオ例をコンパクト化
+
+5. **ツールdocstring簡素化**:
+   - `zoho_crm_tools.py`: 9ツールのdocstringを1-2行に簡素化
+   - `candidate_insight_tools.py`: 4ツールのdocstringを1行に簡素化
+
+**最適化結果**:
+| 指標 | Before | After | 削減率 |
+|------|--------|-------|--------|
+| MCP許可ツール数 | 149 | 97 | 35% |
+| システム指示文字数 | ~5,100 | 809 | 84% |
+| 入力トークン（13ツールテスト） | N/A | 1,351 | - |
+| 推定フル入力トークン | ~32,000 | ~8,000 | 75% |
+
+**テストスクリプト**: `backend/scripts/test_token_usage.py`
+```bash
+cd backend && uv run python scripts/test_token_usage.py
+```
+
+**技術的知見**:
+- OpenAI Agents SDK: `result.raw_responses[i].usage` で各レスポンスのトークン使用量を取得
+- MCP許可リストは`allowed_tools`でフィルタされるため、不要ツールはトークン消費のみ
+- システム指示の情報は専用ツール（`get_channel_definitions`）に移動可能
+- ツールdocstringは最初の1文が最も重要（OpenAI APIでトランケートされる場合あり）
+
 ---
 
 ## 自己改善ログ

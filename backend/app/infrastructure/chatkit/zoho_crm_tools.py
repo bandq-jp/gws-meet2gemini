@@ -76,41 +76,15 @@ async def search_job_seekers(
     limit: int = 20,
 ) -> Dict[str, Any]:
     """
-    Zoho CRM APP-hc（求職者）を検索します。
-    流入経路やステータスでフィルタリングして、顧客情報を取得できます。
+    求職者を検索。channel/statusの定義はget_channel_definitionsで取得。
 
     Args:
-        channel: 流入経路でフィルタ。選択肢:
-            - paid_meta: Meta広告経由
-            - paid_google: Googleリスティング広告経由
-            - paid_affiliate: アフィリエイト広告経由
-            - sco_bizreach: BizReachスカウト経由
-            - sco_dodaX: dodaXスカウト経由
-            - sco_ambi: Ambiスカウト経由
-            - sco_rikunavi: リクナビスカウト経由
-            - sco_nikkei: 日経転職版スカウト経由
-            - sco_liiga: 外資就活ネクストスカウト経由
-            - sco_openwork: OpenWorkスカウト経由
-            - sco_carinar: Carinarスカウト経由
-            - sco_dodaX_D&P: dodaXダイヤモンド/プラチナスカウト経由
-            - org_hitocareer: SEOメディア経由
-            - org_jobs: 自社求人サイト経由
-            - feed_indeed: Indeed経由
-            - referral: 紹介経由
-            - other: その他
-        status: 顧客ステータスでフィルタ（番号とステータスの間にスペースあり）。選択肢:
-            - "1. リード", "2. コンタクト", "3. 面談待ち", "4. 面談済み"
-            - "5. 提案中", "6. 応募意思獲得", "7. 打診済み"
-            - "8. 一次面接待ち", "9. 一次面接済み", "10. 最終面接待ち", "11. 最終面接済み"
-            - "12. 内定", "13. 内定承諾", "14. 入社"
-            - "15. 入社後退職（入社前退職含む）", "16. クローズ", "17. 連絡禁止", "18. 中長期対応", "19. 他社送客"
-        name: 求職者名（部分一致）
-        date_from: 登録日の開始日（YYYY-MM-DD形式）
-        date_to: 登録日の終了日（YYYY-MM-DD形式）
-        limit: 取得件数（最大100、デフォルト20）
-
-    Returns:
-        検索結果（record_id, 求職者名, 流入経路, 顧客ステータス, PIC, 登録日）
+        channel: 流入経路(paid_meta, sco_bizreach等)
+        status: ステータス("1. リード"等、番号+スペース+名前)
+        name: 名前(部分一致)
+        date_from: 開始日(YYYY-MM-DD)
+        date_to: 終了日(YYYY-MM-DD)
+        limit: 件数(max100)
     """
     logger.info(
         "[zoho_crm_tools] search_job_seekers called: channel=%s, status=%s, name=%s, date_from=%s, date_to=%s",
@@ -161,16 +135,7 @@ async def get_job_seeker_detail(
     ctx: RunContextWrapper[Any],
     record_id: str,
 ) -> Dict[str, Any]:
-    """
-    特定の求職者の詳細情報を取得します。
-    search_job_seekersで取得したrecord_idを指定してください。
-
-    Args:
-        record_id: Zoho CRMのレコードID
-
-    Returns:
-        求職者の全フィールド情報
-    """
+    """特定求職者の詳細取得。record_idはsearch_job_seekersで取得。"""
     logger.info("[zoho_crm_tools] get_job_seeker_detail called: record_id=%s", record_id)
 
     if not record_id:
@@ -217,22 +182,7 @@ async def aggregate_by_channel(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    流入経路ごとの求職者数を集計します。
-    Meta広告やGA4のデータと組み合わせて、広告効果の分析に使用できます。
-
-    Args:
-        date_from: 集計期間の開始日（YYYY-MM-DD形式）
-        date_to: 集計期間の終了日（YYYY-MM-DD形式）
-
-    Returns:
-        流入経路ごとの件数と説明
-
-    使用例:
-        - 今月の流入経路別リード数を確認
-        - Meta広告経由の成約率をGA4/Meta Ads MCPと比較
-        - スカウト系 vs 広告系の効果比較
-    """
+    """流入経路別の求職者数を集計。広告効果分析に使用。"""
     logger.info(
         "[zoho_crm_tools] aggregate_by_channel called: date_from=%s, date_to=%s",
         date_from, date_to
@@ -304,24 +254,7 @@ async def count_job_seekers_by_status(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    ステータスごとの求職者数を集計します（ファネル分析用）。
-    特定の流入経路に絞った分析も可能です。
-
-    Args:
-        channel: 流入経路でフィルタ（省略時は全体）
-            選択肢: paid_meta, paid_google, sco_bizreach, org_hitocareer など
-        date_from: 集計期間の開始日（YYYY-MM-DD形式）
-        date_to: 集計期間の終了日（YYYY-MM-DD形式）
-
-    Returns:
-        ステータスごとの件数（ファネル分析用）
-
-    使用例:
-        - Meta広告経由のリードがどこまで進んでいるかを確認
-        - 流入経路別の成約率（入社/リード）を比較
-        - ボトルネックの特定（どのステータスで離脱が多いか）
-    """
+    """ステータス別集計(ファネル分析用)。channelで絞込可。"""
     logger.info(
         "[zoho_crm_tools] count_job_seekers_by_status called: channel=%s, date_from=%s, date_to=%s",
         channel, date_from, date_to
@@ -391,13 +324,7 @@ async def count_job_seekers_by_status(
 async def get_channel_definitions(
     ctx: RunContextWrapper[Any],
 ) -> Dict[str, Any]:
-    """
-    流入経路の定義一覧を取得します。
-    どの流入経路が何を意味するかを確認したいときに使用します。
-
-    Returns:
-        流入経路コードと説明の一覧
-    """
+    """流入経路(channel)とステータス(status)の定義一覧を取得。"""
     return {
         "success": True,
         "channels": CHANNEL_DEFINITIONS,
@@ -415,27 +342,7 @@ async def analyze_funnel_by_channel(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    特定流入経路のファネル分析を実行します。
-    各ステータス間の転換率を計算し、ボトルネックを特定します。
-
-    Args:
-        channel: 分析対象の流入経路（必須）
-            例: paid_meta, paid_google, sco_bizreach, org_hitocareer
-        date_from: 分析期間の開始日（YYYY-MM-DD形式）
-        date_to: 分析期間の終了日（YYYY-MM-DD形式）
-
-    Returns:
-        ファネル分析結果:
-        - funnel_data: 各ステータスの件数と転換率
-        - bottlenecks: 転換率が低いステップの特定
-        - recommendations: 改善提案
-
-    使用例:
-        - Meta広告経由のリードがどこで離脱しているか分析
-        - スカウト系と広告系の転換率パターンを比較
-        - 営業改善施策の優先順位付け
-    """
+    """特定channelのファネル分析。転換率とボトルネックを特定。"""
     logger.info(
         "[zoho_crm_tools] analyze_funnel_by_channel: channel=%s, date_from=%s, date_to=%s",
         channel, date_from, date_to
@@ -598,25 +505,7 @@ async def trend_analysis_by_period(
     months_back: int = 6,
     channel: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    期間別のトレンド分析を実行します。
-    流入数や転換率の時系列推移を確認できます。
-
-    Args:
-        period_type: 集計単位（"monthly" または "weekly"）
-        months_back: 何ヶ月分さかのぼるか（デフォルト6、最大12）
-        channel: 特定の流入経路でフィルタ（省略時は全体）
-
-    Returns:
-        期間別トレンドデータ:
-        - trend_data: 各期間の件数、前期比、トレンド方向
-        - summary: 平均件数、合計件数
-
-    使用例:
-        - 過去6ヶ月のMeta広告経由リード数推移
-        - 月次の全体リード獲得トレンド確認
-        - 季節性の分析
-    """
+    """期間別トレンド分析。月次/週次の推移と前期比を確認。"""
     from datetime import datetime, timedelta
 
     logger.info(
@@ -740,26 +629,7 @@ async def compare_channels(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    複数の流入経路を比較分析します。
-    各チャネルの獲得数と入社率を並べて比較できます。
-
-    Args:
-        channels: 比較する流入経路のリスト（2〜5個）
-            例: ["paid_meta", "paid_google", "org_hitocareer"]
-        date_from: 比較期間の開始日（YYYY-MM-DD形式）
-        date_to: 比較期間の終了日（YYYY-MM-DD形式）
-
-    Returns:
-        チャネル比較結果:
-        - comparison: 各チャネルの総数、入社数、入社率
-        - best_by_hire_rate: 入社率1位のチャネル
-        - best_by_volume: 獲得数1位のチャネル
-
-    使用例:
-        - 有料広告チャネル（Meta vs Google）の効率比較
-        - スカウト vs 広告の費用対効果分析
-    """
+    """複数チャネル(2-5個)の比較。獲得数・入社率をランキング。"""
     logger.info(
         "[zoho_crm_tools] compare_channels: channels=%s, date_from=%s, date_to=%s",
         channels, date_from, date_to
@@ -859,24 +729,7 @@ async def get_pic_performance(
     date_to: Optional[str] = None,
     channel: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    担当者（PIC）別のパフォーマンスを集計します。
-    各担当者の担当件数と成約率を確認できます。
-
-    Args:
-        date_from: 集計期間の開始日（YYYY-MM-DD形式）
-        date_to: 集計期間の終了日（YYYY-MM-DD形式）
-        channel: 特定の流入経路でフィルタ（省略時は全体）
-
-    Returns:
-        担当者別パフォーマンス:
-        - performance_data: 各PICの担当件数、入社数、入社率
-        - top_performer: 入社率1位の担当者
-
-    使用例:
-        - 担当者ごとの成約率ランキング
-        - Meta広告経由リードの担当者別パフォーマンス
-    """
+    """担当者(PIC)別パフォーマンス。成約率ランキング。"""
     logger.info(
         "[zoho_crm_tools] get_pic_performance: date_from=%s, date_to=%s, channel=%s",
         date_from, date_to, channel

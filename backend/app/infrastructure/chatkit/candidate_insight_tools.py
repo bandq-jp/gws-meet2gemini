@@ -64,29 +64,7 @@ async def analyze_competitor_risk(
     date_to: Optional[str] = None,
     limit: int = 50,
 ) -> Dict[str, Any]:
-    """
-    競合エージェント分析ツール。
-    候補者が利用している他社エージェントと選考状況から、
-    競合リスクを評価し、対応優先度を判定します。
-
-    Args:
-        channel: 流入経路でフィルタ（省略時は全体）
-        date_from: 分析期間の開始日（YYYY-MM-DD形式）
-        date_to: 分析期間の終了日（YYYY-MM-DD形式）
-        limit: 分析対象件数（最大100）
-
-    Returns:
-        競合リスク分析結果:
-        - high_risk_candidates: 即座に対応が必要な候補者
-        - competitor_agents: 競合エージェント出現頻度
-        - selection_in_progress: 選考中企業の傾向
-        - recommendations: 対応提案
-
-    使用例:
-        - Meta広告経由候補者の競合状況を把握
-        - 他社オファーがある候補者を優先対応
-        - 競合エージェントの強み・弱みを分析
-    """
+    """競合分析。他社エージェント利用・選考状況から高リスク候補者を特定。"""
     logger.info(
         "[candidate_insight_tools] analyze_competitor_risk: channel=%s, date_from=%s, date_to=%s",
         channel, date_from, date_to
@@ -234,28 +212,7 @@ async def assess_candidate_urgency(
     date_to: Optional[str] = None,
     limit: int = 50,
 ) -> Dict[str, Any]:
-    """
-    候補者の緊急度を評価し、対応優先順位を付けます。
-    転職希望時期、離職状況、選考進捗から緊急度スコアを算出します。
-
-    Args:
-        channel: 流入経路でフィルタ
-        status: 顧客ステータスでフィルタ
-        date_from: 分析期間の開始日（YYYY-MM-DD形式）
-        date_to: 分析期間の終了日（YYYY-MM-DD形式）
-        limit: 分析対象件数
-
-    Returns:
-        緊急度評価結果:
-        - priority_queue: 優先度順の候補者リスト
-        - urgency_distribution: 緊急度分布
-        - immediate_action_required: 即座のアクションが必要な候補者
-
-    使用例:
-        - 本日対応すべき候補者を確認
-        - 「すぐにでも転職したい」候補者を優先
-        - 離職済み候補者をフォローアップ
-    """
+    """緊急度評価。転職希望時期・離職状況・選考進捗から優先順位付け。"""
     logger.info(
         "[candidate_insight_tools] assess_candidate_urgency: channel=%s, status=%s",
         channel, status
@@ -391,25 +348,7 @@ async def analyze_transfer_patterns(
     channel: Optional[str] = None,
     group_by: str = "reason",
 ) -> Dict[str, Any]:
-    """
-    転職理由・動機のパターン分析を行います。
-    マーケティング施策やコンテンツ企画の参考データを提供します。
-
-    Args:
-        channel: 特定チャネルで分析（省略時は全体）
-        group_by: 集計軸 ("reason"=転職理由, "timing"=希望時期, "vision"=キャリアビジョン)
-
-    Returns:
-        パターン分析結果:
-        - distribution: 集計結果
-        - insights: インサイト
-        - marketing_suggestions: マーケティング施策提案
-
-    使用例:
-        - Meta広告経由の候補者の転職理由傾向を分析
-        - 「年収を上げたい」層の特徴を把握
-        - コンテンツ企画のための動機分析
-    """
+    """転職パターン分析。group_by: reason/timing/vision で集計。"""
     logger.info(
         "[candidate_insight_tools] analyze_transfer_patterns: channel=%s, group_by=%s",
         channel, group_by
@@ -537,27 +476,7 @@ async def generate_candidate_briefing(
     ctx: RunContextWrapper[Any],
     record_id: str,
 ) -> Dict[str, Any]:
-    """
-    面談前準備用の候補者ブリーフィングを生成します。
-    Zoho CRM情報と議事録から抽出した詳細情報を統合して表示します。
-
-    Args:
-        record_id: Zoho CRMのレコードID
-
-    Returns:
-        候補者ブリーフィング:
-        - basic_info: 基本情報（名前、流入経路、ステータス）
-        - transfer_profile: 転職プロファイル（理由、希望時期、軸）
-        - career_summary: キャリアサマリー（職歴、経験業界）
-        - conditions: 希望条件（年収、業界、職種）
-        - competition_status: 競合状況（他社エージェント、選考中企業）
-        - talking_points: 面談時のポイント
-
-    使用例:
-        - 面談前に候補者の詳細情報を確認
-        - 過去の議事録から抽出した情報を一覧
-        - 効果的な面談準備
-    """
+    """面談準備用ブリーフィング生成。Zoho+議事録データを統合表示。"""
     logger.info("[candidate_insight_tools] generate_candidate_briefing: record_id=%s", record_id)
 
     if not record_id:
