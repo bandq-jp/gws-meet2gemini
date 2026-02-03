@@ -24,6 +24,7 @@ from app.infrastructure.config.settings import Settings
 #     seo_update_canvas,
 # )
 from app.infrastructure.chatkit.zoho_crm_tools import ZOHO_CRM_TOOLS
+from app.infrastructure.chatkit.candidate_insight_tools import CANDIDATE_INSIGHT_TOOLS
 
 MARKETING_WORKFLOW_ID = (
     "wf_690a1d2e1ce881908e92b6826428f3af060621f24cf1b2bb"
@@ -130,6 +131,34 @@ MARKETING_INSTRUCTIONS = """
 - `17. 連絡禁止`: 連絡禁止
 - `18. 中長期対応`: 中長期対応
 - `19. 他社送客`: 他社送客
+
+## 候補者インサイトツール（議事録構造化データ連携）
+
+Zoho CRMデータとSupabase構造化データ（議事録から抽出）を組み合わせた高度な分析ツール。
+面談時の発言内容から抽出された詳細情報を活用できます。
+
+### 利用可能なツール（4個）
+
+**競合・緊急度分析**
+- `analyze_competitor_risk`: 競合エージェント分析。他社利用状況、選考中企業、他社オファーから高リスク候補者を特定
+- `assess_candidate_urgency`: 緊急度評価。転職希望時期、離職状況、選考進捗から優先順位付け
+
+**パターン分析・準備**
+- `analyze_transfer_patterns`: 転職理由・動機のパターン分析。マーケティング施策の参考データ
+- `generate_candidate_briefing`: 面談前準備用ブリーフィング生成。Zoho + 議事録データを統合
+
+### 分析シナリオ例
+1. **高リスク候補者特定**: `analyze_competitor_risk(channel="paid_meta")` → 他社オファーありの候補者を即フォロー
+2. **本日の優先対応**: `assess_candidate_urgency()` → 「すぐにでも」「離職中」の候補者を優先
+3. **転職理由傾向**: `analyze_transfer_patterns(group_by="reason")` → コンテンツ企画の参考
+4. **面談準備**: `generate_candidate_briefing(record_id="...")` → 議事録から抽出した詳細情報を確認
+
+### 構造化データで取得できる情報
+- **転職活動状況**: 他社エージェント利用、選考中企業、他社オファー年収
+- **転職理由・軸**: 転職検討理由（23種類のenum）、希望時期、転職軸
+- **職歴・経験**: 経験業界、現職業務、楽しかった/辛かった仕事
+- **希望条件**: 希望業界・職種、現年収・希望年収
+- **キャリアビジョン**: プレイヤー/マネージャー/独立 など
 
 Meta Ads MCPも使用できるため、Meta広告に関する分析・調査なども行える。ただしこれも書き込み編集系のツールは使用しない。
 """
@@ -361,6 +390,8 @@ class MarketingAgentFactory:
         enable_zoho_crm = asset is None or asset.get("enable_zoho_crm", True)
         if enable_zoho_crm and self._settings.zoho_refresh_token:
             tools.extend(ZOHO_CRM_TOOLS)
+            # 候補者インサイトツールも追加（Zoho + Supabase構造化データ連携）
+            tools.extend(CANDIDATE_INSIGHT_TOOLS)
 
         reasoning_effort = (
             asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort

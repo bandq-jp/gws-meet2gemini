@@ -517,6 +517,50 @@ ZOHO_CRM_TOOLS = [
 **エージェント指示更新** (`backend/app/infrastructure/chatkit/seo_agent_factory.py`):
 - MARKETING_INSTRUCTIONSに新ツール説明と分析シナリオ例を追加
 
+### 6. 候補者インサイトツール追加 (2026-02-03)
+
+**背景**: Supabase構造化データ（議事録から抽出）とZoho CRMデータを組み合わせた高度な転職エージェント業務向けツールを追加
+
+**Supabase構造化データスキーマ** (`backend/app/domain/schemas/structured_extraction_schema.py`):
+| グループ | 主要フィールド |
+|---------|--------------|
+| 転職活動状況 | `transfer_activity_status`, `current_agents`, `companies_in_selection`, `other_offer_salary` |
+| 転職理由・希望 | `transfer_reasons` (23種enum), `desired_timing`, `current_job_status`, `transfer_priorities` |
+| 職歴・経験 | `career_history`, `current_duties`, `experience_industry` |
+| 希望業界・職種 | `desired_industry`, `desired_position` |
+| 年収・待遇 | `current_salary`, `desired_first_year_salary` |
+| キャリアビジョン | `career_vision`, `business_vision` |
+
+**新規ツールモジュール** (`backend/app/infrastructure/chatkit/candidate_insight_tools.py`):
+
+| ツール名 | 説明 | 主な用途 |
+|---------|------|---------|
+| `analyze_competitor_risk` | 競合エージェント分析 | 他社利用状況、選考中企業、他社オファーから高リスク候補者特定 |
+| `assess_candidate_urgency` | 緊急度評価 | 転職希望時期、離職状況、選考進捗から優先順位付け |
+| `analyze_transfer_patterns` | 転職パターン分析 | 転職理由・動機の傾向分析（マーケティング施策参考） |
+| `generate_candidate_briefing` | 候補者ブリーフィング | 面談前準備用のZoho+議事録データ統合表示 |
+
+**ツール登録更新** (`CANDIDATE_INSIGHT_TOOLS`):
+```python
+CANDIDATE_INSIGHT_TOOLS = [
+    analyze_competitor_risk,
+    assess_candidate_urgency,
+    analyze_transfer_patterns,
+    generate_candidate_briefing,
+]
+```
+
+**分析シナリオ例**:
+1. **高リスク候補者特定**: `analyze_competitor_risk(channel="paid_meta")` → 他社オファーありの候補者を即フォロー
+2. **本日の優先対応**: `assess_candidate_urgency()` → 「すぐにでも」「離職中」の候補者を優先
+3. **転職理由傾向**: `analyze_transfer_patterns(group_by="reason")` → コンテンツ企画の参考
+4. **面談準備**: `generate_candidate_briefing(record_id="...")` → 議事録から抽出した詳細情報を確認
+
+**データアクセス設計**:
+- Supabaseから`zoho_record_id`で紐付けられた構造化データを取得
+- Zoho CRMの基本情報 + 議事録からの詳細情報を統合
+- エグレス削減のため軽量カラムのみ取得
+
 ---
 
 ## 自己改善ログ

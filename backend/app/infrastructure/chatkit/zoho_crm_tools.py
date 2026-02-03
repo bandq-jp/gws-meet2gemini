@@ -736,7 +736,7 @@ async def trend_analysis_by_period(
 @function_tool(name_override="compare_channels")
 async def compare_channels(
     ctx: RunContextWrapper[Any],
-    channels: list,
+    channels: List[str],
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
