@@ -4,7 +4,9 @@ import re
 import os
 import json
 import logging
+import httplib2
 from google.oauth2.service_account import Credentials
+from google_auth_httplib2 import AuthorizedHttp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.auth.exceptions import RefreshError
@@ -122,11 +124,15 @@ class DriveDocsCollector:
 
     def _build_drive(self, subject: Optional[str]):
         creds = self._build_credentials(subject)
-        return build("drive", "v3", credentials=creds, cache_discovery=False)
+        http = httplib2.Http(timeout=300)
+        authorized_http = AuthorizedHttp(creds, http=http)
+        return build("drive", "v3", http=authorized_http, cache_discovery=False)
 
     def _build_docs(self, subject: Optional[str]):
         creds = self._build_credentials(subject)
-        return build("docs", "v1", credentials=creds, cache_discovery=False)
+        http = httplib2.Http(timeout=300)
+        authorized_http = AuthorizedHttp(creds, http=http)
+        return build("docs", "v1", http=authorized_http, cache_discovery=False)
 
     def _build_credentials(self, subject: Optional[str]):
         val = (self.settings.service_account_json or "").strip()
