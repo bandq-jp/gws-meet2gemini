@@ -855,6 +855,71 @@ cd backend && uv run python scripts/test_token_usage.py
 - システム指示の情報は専用ツール（`get_channel_definitions`）に移動可能
 - ツールdocstringは最初の1文が最も重要（OpenAI APIでトランケートされる場合あり）
 
+### 12. マルチエージェントアーキテクチャ設計 (2026-02-04)
+
+**背景**: 単一エージェント（97ツール）のコンテキスト問題を解決するため、マルチエージェント化を検討
+
+**調査方法**: 8並列エージェントで大規模調査を実施
+1. OpenAI Agents SDK マルチエージェント機能
+2. Responses API マルチエージェント対応
+3. 現コードベース分析
+4. 群知能・Swarmアプローチ
+5. Handoffパターン詳細
+6. Tool Agentパターン詳細
+7. コンテキスト最適化戦略
+8. Claude Code内部アーキテクチャ
+
+**主要調査結果**:
+
+1. **OpenAI Agents SDK v0.7.0**:
+   - `Handoff`: エージェント間で会話を引き継ぐ（履歴継承）
+   - `Agent.as_tool()`: エージェントをツールとして呼び出す（制御維持）
+   - `nest_handoff_history=True`: 履歴要約でトークン40-60%削減
+   - `RunConfig`: グローバルハンドオフ設定
+
+2. **推奨アーキテクチャ**: Router + 専門エージェント
+   ```
+   Router Agent (gpt-4.1-mini, 軽量)
+     ├─ SEO Agent (GA4, GSC, Ahrefs, Web Search) - 37ツール
+     ├─ Ads Agent (Meta Ads, GA4) - 26ツール
+     ├─ CRM Agent (Zoho, Candidate Insight) - 13ツール
+     └─ Content Agent (WordPress, Web Search, Code) - 30ツール
+   ```
+
+3. **期待効果**:
+   | 指標 | 現状 | 目標 | 改善率 |
+   |------|------|------|--------|
+   | 入力トークン | ~11,000 | ~2,800 | -75% |
+   | ツール数/エージェント | 97 | 25-35 | -67% |
+   | レスポンス時間 | 8-12秒 | 2-4秒 | -70% |
+
+4. **実装パターン**:
+   - `handoff()`: 専門エージェントへの委譲
+   - `@function_tool`: Sub-Agent as Tool
+   - `asyncio.gather`: 独立タスクの並列実行
+   - `nest_handoff_history=True`: コンテキスト圧縮
+
+**設計ドキュメント**: `docs/multi-agent-architecture.md` (新規作成)
+
+**実装ロードマップ**:
+- Phase 1 (Week 1-2): Router + 専門エージェントファクトリー
+- Phase 2 (Week 3-4): Handoff統合
+- Phase 3 (Week 5-6): コンテキスト最適化
+- Phase 4 (Week 7-8): 並列実行
+- Phase 5 (Week 9-10): 本番デプロイ
+
+**技術的知見**:
+- `nest_handoff_history=False` がv0.7.0のデフォルト（明示的にTrue指定が必要）
+- OpenAI Swarm → Agents SDK への進化（Swarmは教育・実験目的）
+- Claude Codeはシングルエージェント + タスク管理パターン（サブエージェント分割ではない）
+- 群知能パターン: Router, Hierarchical, Sequential, Concurrent
+
+**情報ソース**:
+- [OpenAI Agents SDK Documentation](https://openai.github.io/openai-agents-python/)
+- [OpenAI Agents SDK Handoffs](https://openai.github.io/openai-agents-python/handoffs/)
+- [OpenAI Swarm GitHub](https://github.com/openai/swarm)
+- SDK ソースコード: `agents/handoffs/`, `agents/run.py`, `agents/_run_impl.py`
+
 ---
 
 ## 自己改善ログ
