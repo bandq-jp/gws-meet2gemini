@@ -61,12 +61,28 @@ MARKETING_INSTRUCTIONS = """
 
 ## Zoho CRM（APP-hc: 求職者データ）利用ガイド
 
-### 利用可能なツール
+### 利用可能なツール（9個、COQL最適化済み）
+
+**基本検索・取得**
 - `search_job_seekers`: 流入経路・ステータス等で顧客検索
 - `get_job_seeker_detail`: 特定顧客の詳細取得
+- `get_channel_definitions`: 流入経路・ステータスの定義一覧
+
+**集計・分析**
 - `aggregate_by_channel`: 流入経路別の集計
 - `count_job_seekers_by_status`: ステータス別の集計（ファネル分析）
-- `get_channel_definitions`: 流入経路・ステータスの定義一覧
+
+**高度な分析ツール**
+- `analyze_funnel_by_channel`: 特定チャネルのファネル分析、ボトルネック特定、改善提案
+- `trend_analysis_by_period`: 月次/週次のトレンド分析（前期比、上昇/下降判定）
+- `compare_channels`: 複数チャネル（2-5個）の比較分析
+- `get_pic_performance`: 担当者（PIC）別パフォーマンス分析
+
+### 分析シナリオ例
+1. **広告効果分析**: `aggregate_by_channel` → `compare_channels(["paid_meta", "paid_google"])` → Meta Ads MCPで費用確認
+2. **ファネル改善**: `analyze_funnel_by_channel(channel="paid_meta")` でボトルネック特定
+3. **トレンド監視**: `trend_analysis_by_period(months_back=6)` で獲得数推移確認
+4. **担当者評価**: `get_pic_performance()` で成約率ランキング確認
 
 ### 流入経路の種類
 **有料広告系**:

@@ -7,7 +7,7 @@ Meta Ads MCP / GA4 MCPと組み合わせた横断分析に使用されます。
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from agents import function_tool, RunContextWrapper
 
@@ -406,11 +406,563 @@ async def get_channel_definitions(
     }
 
 
+# --- 新規分析ツール (2026-02-03追加) ---
+
+@function_tool(name_override="analyze_funnel_by_channel")
+async def analyze_funnel_by_channel(
+    ctx: RunContextWrapper[Any],
+    channel: str,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    特定流入経路のファネル分析を実行します。
+    各ステータス間の転換率を計算し、ボトルネックを特定します。
+
+    Args:
+        channel: 分析対象の流入経路（必須）
+            例: paid_meta, paid_google, sco_bizreach, org_hitocareer
+        date_from: 分析期間の開始日（YYYY-MM-DD形式）
+        date_to: 分析期間の終了日（YYYY-MM-DD形式）
+
+    Returns:
+        ファネル分析結果:
+        - funnel_data: 各ステータスの件数と転換率
+        - bottlenecks: 転換率が低いステップの特定
+        - recommendations: 改善提案
+
+    使用例:
+        - Meta広告経由のリードがどこで離脱しているか分析
+        - スカウト系と広告系の転換率パターンを比較
+        - 営業改善施策の優先順位付け
+    """
+    logger.info(
+        "[zoho_crm_tools] analyze_funnel_by_channel: channel=%s, date_from=%s, date_to=%s",
+        channel, date_from, date_to
+    )
+
+    if not channel:
+        return {
+            "success": False,
+            "error": "流入経路（channel）を指定してください",
+        }
+
+    try:
+        zoho = ZohoClient()
+        status_counts = zoho.count_by_status(
+            channel=channel,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+        # ファネルステージ定義（順序重要）
+        funnel_stages = [
+            ("1. リード", "初期獲得"),
+            ("2. コンタクト", "連絡済み"),
+            ("3. 面談待ち", "面談予約"),
+            ("4. 面談済み", "面談完了"),
+            ("5. 提案中", "求人提案"),
+            ("6. 応募意思獲得", "応募意思"),
+            ("7. 打診済み", "企業打診"),
+            ("8. 一次面接待ち", "一次面接待ち"),
+            ("9. 一次面接済み", "一次面接完了"),
+            ("10. 最終面接待ち", "最終面接待ち"),
+            ("11. 最終面接済み", "最終面接完了"),
+            ("12. 内定", "内定"),
+            ("13. 内定承諾", "内定承諾"),
+            ("14. 入社", "入社決定"),
+        ]
+
+        # ファネル分析
+        funnel_data = []
+        prev_count = None
+        bottlenecks = []
+
+        for status, label in funnel_stages:
+            count = status_counts.get(status, 0)
+            conversion_rate = None
+            drop_rate = None
+
+            if prev_count is not None and prev_count > 0:
+                conversion_rate = round((count / prev_count) * 100, 1)
+                drop_rate = round(100 - conversion_rate, 1)
+
+                # ボトルネック判定: 転換率50%未満
+                if conversion_rate < 50 and count < prev_count:
+                    bottlenecks.append({
+                        "stage": label,
+                        "from_status": funnel_data[-1]["status"] if funnel_data else None,
+                        "to_status": status,
+                        "conversion_rate": conversion_rate,
+                        "drop_count": prev_count - count,
+                    })
+
+            funnel_data.append({
+                "status": status,
+                "label": label,
+                "count": count,
+                "conversion_rate_from_prev": f"{conversion_rate}%" if conversion_rate is not None else "N/A",
+                "drop_rate": f"{drop_rate}%" if drop_rate is not None else "N/A",
+            })
+
+            prev_count = count
+
+        # 全体KPI
+        total = sum(status_counts.values())
+        lead_count = status_counts.get("1. リード", 0)
+        hired_count = status_counts.get("14. 入社", 0)
+        interview_count = status_counts.get("4. 面談済み", 0)
+
+        kpis = {
+            "総数": total,
+            "リード数": lead_count,
+            "面談済み数": interview_count,
+            "入社数": hired_count,
+            "全体入社率": f"{(hired_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
+            "面談率": f"{(interview_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
+        }
+
+        # 改善提案を生成
+        recommendations = _generate_funnel_recommendations(bottlenecks)
+
+        return {
+            "success": True,
+            "channel": channel,
+            "channel_description": CHANNEL_DEFINITIONS.get(channel, "不明"),
+            "period": {
+                "from": date_from or "全期間",
+                "to": date_to or "現在",
+            },
+            "funnel_data": funnel_data,
+            "bottlenecks": bottlenecks,
+            "kpis": kpis,
+            "recommendations": recommendations,
+        }
+
+    except ZohoAuthError as e:
+        logger.error("[zoho_crm_tools] Zoho auth error: %s", e)
+        return {
+            "success": False,
+            "error": "Zoho認証エラーが発生しました。",
+            "error_detail": str(e),
+        }
+    except Exception as e:
+        logger.error("[zoho_crm_tools] analyze_funnel_by_channel error: %s", e)
+        return {
+            "success": False,
+            "error": f"ファネル分析中にエラーが発生しました: {str(e)}",
+        }
+
+
+def _generate_funnel_recommendations(bottlenecks: list) -> list:
+    """ボトルネックに基づく改善提案を生成"""
+    recommendations = []
+
+    for bn in bottlenecks:
+        stage = bn["stage"]
+        drop_count = bn["drop_count"]
+        conversion_rate = bn["conversion_rate"]
+
+        if "面談" in stage:
+            recommendations.append(
+                f"【{stage}】転換率{conversion_rate}%: "
+                f"面談設定プロセスの効率化や、リマインド強化を検討してください。"
+                f"（{drop_count}名離脱）"
+            )
+        elif "面接" in stage:
+            recommendations.append(
+                f"【{stage}】転換率{conversion_rate}%: "
+                f"面接対策サポートの充実や、企業とのマッチング精度向上を検討してください。"
+                f"（{drop_count}名離脱）"
+            )
+        elif "内定" in stage:
+            recommendations.append(
+                f"【{stage}】転換率{conversion_rate}%: "
+                f"内定後フォローアップの強化や、条件交渉サポートを検討してください。"
+                f"（{drop_count}名離脱）"
+            )
+        else:
+            recommendations.append(
+                f"【{stage}】転換率{conversion_rate}%: "
+                f"このステップでの離脱原因を分析し、プロセス改善を検討してください。"
+                f"（{drop_count}名離脱）"
+            )
+
+    return recommendations
+
+
+@function_tool(name_override="trend_analysis_by_period")
+async def trend_analysis_by_period(
+    ctx: RunContextWrapper[Any],
+    period_type: str = "monthly",
+    months_back: int = 6,
+    channel: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    期間別のトレンド分析を実行します。
+    流入数や転換率の時系列推移を確認できます。
+
+    Args:
+        period_type: 集計単位（"monthly" または "weekly"）
+        months_back: 何ヶ月分さかのぼるか（デフォルト6、最大12）
+        channel: 特定の流入経路でフィルタ（省略時は全体）
+
+    Returns:
+        期間別トレンドデータ:
+        - trend_data: 各期間の件数、前期比、トレンド方向
+        - summary: 平均件数、合計件数
+
+    使用例:
+        - 過去6ヶ月のMeta広告経由リード数推移
+        - 月次の全体リード獲得トレンド確認
+        - 季節性の分析
+    """
+    from datetime import datetime, timedelta
+
+    logger.info(
+        "[zoho_crm_tools] trend_analysis_by_period: period_type=%s, months_back=%s, channel=%s",
+        period_type, months_back, channel
+    )
+
+    # パラメータ制限
+    months_back = min(months_back, 12)
+
+    try:
+        zoho = ZohoClient()
+        today = datetime.now()
+        trend_data = []
+
+        for i in range(months_back - 1, -1, -1):
+            if period_type == "monthly":
+                # 月初〜月末
+                year = today.year
+                month = today.month - i
+                while month <= 0:
+                    month += 12
+                    year -= 1
+
+                period_start = datetime(year, month, 1)
+                # 次月の1日 - 1日 = 月末
+                if month == 12:
+                    period_end = datetime(year + 1, 1, 1) - timedelta(days=1)
+                else:
+                    period_end = datetime(year, month + 1, 1) - timedelta(days=1)
+                period_label = f"{year}年{month}月"
+            else:  # weekly
+                period_start = today - timedelta(weeks=i, days=today.weekday())
+                period_end = period_start + timedelta(days=6)
+                period_label = f"{period_start.strftime('%m/%d')}週"
+
+            date_from = period_start.strftime("%Y-%m-%d")
+            date_to = period_end.strftime("%Y-%m-%d")
+
+            # 流入経路別件数を取得
+            if channel:
+                results = zoho.search_by_criteria(
+                    channel=channel,
+                    date_from=date_from,
+                    date_to=date_to,
+                    limit=200,
+                )
+                count = len(results)
+            else:
+                channel_counts = zoho.count_by_channel(
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                count = sum(channel_counts.values())
+
+            trend_data.append({
+                "period": period_label,
+                "date_from": date_from,
+                "date_to": date_to,
+                "count": count,
+            })
+
+        # 前期比計算
+        for i, data in enumerate(trend_data):
+            if i == 0:
+                data["change"] = None
+                data["change_pct"] = None
+                data["trend"] = "基準"
+            else:
+                prev_count = trend_data[i - 1]["count"]
+                change = data["count"] - prev_count
+                change_pct = round((change / prev_count) * 100, 1) if prev_count > 0 else None
+
+                data["change"] = change
+                data["change_pct"] = f"{change_pct:+.1f}%" if change_pct is not None else "N/A"
+
+                if change_pct is not None:
+                    if change_pct > 10:
+                        data["trend"] = "上昇↑"
+                    elif change_pct < -10:
+                        data["trend"] = "下降↓"
+                    else:
+                        data["trend"] = "横ばい→"
+                else:
+                    data["trend"] = "N/A"
+
+        total_count = sum(d["count"] for d in trend_data)
+        avg_count = round(total_count / len(trend_data), 1) if trend_data else 0
+
+        return {
+            "success": True,
+            "period_type": period_type,
+            "channel_filter": channel or "全体",
+            "channel_description": CHANNEL_DEFINITIONS.get(channel) if channel else None,
+            "trend_data": trend_data,
+            "summary": {
+                "total_periods": len(trend_data),
+                "total_count": total_count,
+                "avg_count": avg_count,
+            },
+        }
+
+    except ZohoAuthError as e:
+        logger.error("[zoho_crm_tools] Zoho auth error: %s", e)
+        return {
+            "success": False,
+            "error": "Zoho認証エラーが発生しました。",
+        }
+    except Exception as e:
+        logger.error("[zoho_crm_tools] trend_analysis_by_period error: %s", e)
+        return {
+            "success": False,
+            "error": f"トレンド分析中にエラーが発生しました: {str(e)}",
+        }
+
+
+@function_tool(name_override="compare_channels")
+async def compare_channels(
+    ctx: RunContextWrapper[Any],
+    channels: list,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    複数の流入経路を比較分析します。
+    各チャネルの獲得数と入社率を並べて比較できます。
+
+    Args:
+        channels: 比較する流入経路のリスト（2〜5個）
+            例: ["paid_meta", "paid_google", "org_hitocareer"]
+        date_from: 比較期間の開始日（YYYY-MM-DD形式）
+        date_to: 比較期間の終了日（YYYY-MM-DD形式）
+
+    Returns:
+        チャネル比較結果:
+        - comparison: 各チャネルの総数、入社数、入社率
+        - best_by_hire_rate: 入社率1位のチャネル
+        - best_by_volume: 獲得数1位のチャネル
+
+    使用例:
+        - 有料広告チャネル（Meta vs Google）の効率比較
+        - スカウト vs 広告の費用対効果分析
+    """
+    logger.info(
+        "[zoho_crm_tools] compare_channels: channels=%s, date_from=%s, date_to=%s",
+        channels, date_from, date_to
+    )
+
+    if not channels or len(channels) < 2:
+        return {
+            "success": False,
+            "error": "比較には2つ以上の流入経路を指定してください",
+        }
+
+    if len(channels) > 5:
+        return {
+            "success": False,
+            "error": "比較は最大5チャネルまでです",
+        }
+
+    try:
+        zoho = ZohoClient()
+        comparison_data = []
+
+        for channel in channels:
+            # ステータス別件数を取得
+            status_counts = zoho.count_by_status(
+                channel=channel,
+                date_from=date_from,
+                date_to=date_to,
+            )
+
+            total = sum(status_counts.values())
+            hired = status_counts.get("14. 入社", 0)
+            interview_done = status_counts.get("4. 面談済み", 0)
+
+            comparison_data.append({
+                "channel": channel,
+                "description": CHANNEL_DEFINITIONS.get(channel, "不明"),
+                "total": total,
+                "hired": hired,
+                "interview_done": interview_done,
+                "hire_rate": f"{(hired / total * 100):.1f}%" if total > 0 else "N/A",
+                "interview_rate": f"{(interview_done / total * 100):.1f}%" if total > 0 else "N/A",
+            })
+
+        # ランキング作成（入社率順）
+        ranked_by_hire_rate = sorted(
+            comparison_data,
+            key=lambda x: x["hired"] / x["total"] if x["total"] > 0 else 0,
+            reverse=True,
+        )
+        for i, item in enumerate(ranked_by_hire_rate):
+            item["hire_rate_rank"] = i + 1
+
+        # ランキング（総数順）
+        ranked_by_total = sorted(comparison_data, key=lambda x: x["total"], reverse=True)
+        for i, item in enumerate(ranked_by_total):
+            item["volume_rank"] = i + 1
+
+        return {
+            "success": True,
+            "period": {
+                "from": date_from or "全期間",
+                "to": date_to or "現在",
+            },
+            "comparison": comparison_data,
+            "best_by_hire_rate": ranked_by_hire_rate[0]["channel"] if ranked_by_hire_rate else None,
+            "best_by_volume": ranked_by_total[0]["channel"] if ranked_by_total else None,
+            "insight": _generate_channel_comparison_insight(comparison_data),
+        }
+
+    except ZohoAuthError as e:
+        logger.error("[zoho_crm_tools] Zoho auth error: %s", e)
+        return {"success": False, "error": "Zoho認証エラーが発生しました。"}
+    except Exception as e:
+        logger.error("[zoho_crm_tools] compare_channels error: %s", e)
+        return {"success": False, "error": f"チャネル比較中にエラーが発生しました: {str(e)}"}
+
+
+def _generate_channel_comparison_insight(data: list) -> str:
+    """チャネル比較のインサイトを生成"""
+    if not data:
+        return "データなし"
+
+    best_hire = max(data, key=lambda x: x["hired"] / x["total"] if x["total"] > 0 else 0)
+    best_volume = max(data, key=lambda x: x["total"])
+
+    insights = []
+    insights.append(f"入社率が最も高いのは「{best_hire['description']}」({best_hire['hire_rate']})")
+    insights.append(f"獲得数が最も多いのは「{best_volume['description']}」({best_volume['total']}件)")
+
+    return " / ".join(insights)
+
+
+@function_tool(name_override="get_pic_performance")
+async def get_pic_performance(
+    ctx: RunContextWrapper[Any],
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    channel: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    担当者（PIC）別のパフォーマンスを集計します。
+    各担当者の担当件数と成約率を確認できます。
+
+    Args:
+        date_from: 集計期間の開始日（YYYY-MM-DD形式）
+        date_to: 集計期間の終了日（YYYY-MM-DD形式）
+        channel: 特定の流入経路でフィルタ（省略時は全体）
+
+    Returns:
+        担当者別パフォーマンス:
+        - performance_data: 各PICの担当件数、入社数、入社率
+        - top_performer: 入社率1位の担当者
+
+    使用例:
+        - 担当者ごとの成約率ランキング
+        - Meta広告経由リードの担当者別パフォーマンス
+    """
+    logger.info(
+        "[zoho_crm_tools] get_pic_performance: date_from=%s, date_to=%s, channel=%s",
+        date_from, date_to, channel
+    )
+
+    try:
+        zoho = ZohoClient()
+
+        # 全レコードを取得（PICでGROUP BYはCOQLで難しい場合があるため）
+        all_records = zoho._fetch_all_records(max_pages=15)
+        filtered = zoho._filter_by_date(all_records, date_from, date_to)
+
+        if channel:
+            filtered = [r for r in filtered if r.get(zoho.CHANNEL_FIELD_API) == channel]
+
+        # PIC別に集計
+        pic_stats: Dict[str, Dict[str, int]] = {}
+
+        for record in filtered:
+            owner = record.get("Owner")
+            pic_name = owner.get("name") if isinstance(owner, dict) else str(owner) if owner else "未割当"
+            status = record.get(zoho.STATUS_FIELD_API)
+
+            if pic_name not in pic_stats:
+                pic_stats[pic_name] = {"total": 0, "hired": 0, "interview_done": 0}
+
+            pic_stats[pic_name]["total"] += 1
+            if status == "14. 入社":
+                pic_stats[pic_name]["hired"] += 1
+            if status == "4. 面談済み":
+                pic_stats[pic_name]["interview_done"] += 1
+
+        # パフォーマンスデータ作成
+        performance_data = []
+        for pic_name, stats in pic_stats.items():
+            performance_data.append({
+                "pic": pic_name,
+                "total": stats["total"],
+                "hired": stats["hired"],
+                "interview_done": stats["interview_done"],
+                "hire_rate": f"{(stats['hired'] / stats['total'] * 100):.1f}%" if stats["total"] > 0 else "N/A",
+                "interview_rate": f"{(stats['interview_done'] / stats['total'] * 100):.1f}%" if stats["total"] > 0 else "N/A",
+            })
+
+        # 入社率でソート
+        performance_data.sort(
+            key=lambda x: x["hired"] / x["total"] if x["total"] > 0 else 0,
+            reverse=True,
+        )
+
+        # ランク付け
+        for i, item in enumerate(performance_data):
+            item["rank"] = i + 1
+
+        return {
+            "success": True,
+            "period": {
+                "from": date_from or "全期間",
+                "to": date_to or "現在",
+            },
+            "channel_filter": channel or "全体",
+            "pic_count": len(performance_data),
+            "performance_data": performance_data,
+            "top_performer": performance_data[0]["pic"] if performance_data else None,
+        }
+
+    except ZohoAuthError as e:
+        logger.error("[zoho_crm_tools] Zoho auth error: %s", e)
+        return {"success": False, "error": "Zoho認証エラーが発生しました。"}
+    except Exception as e:
+        logger.error("[zoho_crm_tools] get_pic_performance error: %s", e)
+        return {"success": False, "error": f"PICパフォーマンス集計中にエラーが発生しました: {str(e)}"}
+
+
 # エクスポート用のツールリスト
 ZOHO_CRM_TOOLS = [
+    # 基本検索・取得
     search_job_seekers,
     get_job_seeker_detail,
+    get_channel_definitions,
+    # 集計・分析（COQL最適化済み）
     aggregate_by_channel,
     count_job_seekers_by_status,
-    get_channel_definitions,
+    # 高度な分析ツール（2026-02-03追加）
+    analyze_funnel_by_channel,
+    trend_analysis_by_period,
+    compare_channels,
+    get_pic_performance,
 ]

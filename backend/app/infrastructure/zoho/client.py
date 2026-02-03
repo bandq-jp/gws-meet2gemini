@@ -116,6 +116,147 @@ class ZohoClient:
             # bubble up to caller; they decide whether to surface 400 or continue
             raise
 
+    # --- COQL (CRM Object Query Language) API ---
+    def _coql_query(
+        self,
+        select_query: str,
+        offset: int = 0,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """Execute COQL query against Zoho CRM.
+
+        COQL (CRM Object Query Language) enables SQL-like queries with:
+        - Server-side WHERE filtering (including date comparisons)
+        - GROUP BY aggregations with COUNT/SUM/AVG
+        - ORDER BY sorting
+        - LIMIT/OFFSET pagination
+
+        Reference: https://www.zoho.com/crm/developer/docs/api/v8/COQL-Overview.html
+
+        Args:
+            select_query: COQL SELECT statement
+                e.g., "SELECT Id, Name FROM jobSeeker WHERE field18 >= '2026-01-01'"
+            offset: Number of records to skip (default 0)
+            limit: Maximum records to return (default 200, max 2000)
+
+        Returns:
+            Dict with 'data' (list of records) and 'info' (pagination metadata)
+
+        Raises:
+            RuntimeError: If COQL query fails (scope missing, syntax error, etc.)
+        """
+        path = "/crm/v7/coql"
+        body = {
+            "select_query": select_query,
+        }
+
+        logger.debug("[zoho] COQL query: %s", select_query)
+
+        try:
+            result = self._post(path, body)
+            logger.info(
+                "[zoho] COQL query success: %d records",
+                len(result.get("data", []) or [])
+            )
+            return result
+        except RuntimeError as e:
+            error_str = str(e)
+            # Check for COQL scope error or invalid query
+            if "INVALID_QUERY" in error_str or "scope" in error_str.lower():
+                logger.warning("[zoho] COQL query failed (scope/syntax issue): %s", e)
+            raise
+
+    def _coql_aggregate(
+        self,
+        module: str,
+        group_field: str,
+        where_clause: Optional[str] = None,
+        count_field: str = "id",
+    ) -> Dict[str, int]:
+        """Execute COQL GROUP BY COUNT aggregation.
+
+        Args:
+            module: Module API name (e.g., "jobSeeker")
+            group_field: Field to group by (e.g., "field14" for channel)
+            where_clause: Optional WHERE clause (without "WHERE" keyword)
+            count_field: Field to count (default "id")
+
+        Returns:
+            Dict mapping group values to counts
+            e.g., {"paid_meta": 100, "paid_google": 50}
+
+        Note:
+            Zoho COQL REQUIRES a WHERE clause. If none is provided,
+            we use "id is not null" as a default to select all records.
+        """
+        # Build COQL query with GROUP BY
+        # IMPORTANT: Zoho COQL requires WHERE clause - use dummy condition if none provided
+        query = f"SELECT COUNT({count_field}), {group_field} FROM {module}"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        else:
+            query += " WHERE id is not null"
+        query += f" GROUP BY {group_field}"
+
+        logger.debug("[zoho] COQL aggregate query: %s", query)
+
+        try:
+            result = self._coql_query(query, limit=2000)
+            data = result.get("data", []) or []
+
+            # Parse aggregation results
+            # COQL returns: [{"count": 10, "field14": "paid_meta"}, ...]
+            # Note: The count field name varies based on the query
+            counts: Dict[str, int] = {}
+            for row in data:
+                group_value = row.get(group_field)
+                # Try multiple possible count field names
+                count = (
+                    row.get("count")
+                    or row.get("COUNT")
+                    or row.get(f"COUNT({count_field})")
+                    or 0
+                )
+                if group_value is not None:
+                    counts[str(group_value)] = int(count)
+
+            logger.info(
+                "[zoho] COQL aggregate success: %d groups, total=%d",
+                len(counts), sum(counts.values())
+            )
+            return counts
+
+        except RuntimeError as e:
+            logger.warning("[zoho] COQL aggregate failed: %s", e)
+            raise
+
+    def _with_coql_fallback(
+        self,
+        coql_func,
+        fallback_func,
+    ):
+        """Execute COQL query with automatic fallback to legacy method.
+
+        If COQL fails due to scope issues or unsupported operations,
+        automatically falls back to the legacy Records/Search API method.
+
+        Args:
+            coql_func: Primary function using COQL (callable returning T)
+            fallback_func: Fallback function using Records/Search API (callable returning T)
+
+        Returns:
+            Result from either COQL or fallback
+        """
+        try:
+            return coql_func()
+        except RuntimeError as e:
+            error_str = str(e).lower()
+            # Fallback for scope issues, syntax errors, or unsupported operations
+            if any(term in error_str for term in ["scope", "invalid_query", "unauthorized", "4422", "syntax_error"]):
+                logger.info("[zoho] COQL unavailable, using fallback: %s", e)
+                return fallback_func()
+            raise
+
     def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         base = self.settings.zoho_api_base_url.rstrip("/")
         url = f"{base}{path}"
@@ -384,11 +525,9 @@ class ZohoClient:
     ) -> List[Dict[str, Any]]:
         """条件指定で求職者（APP-hc）を検索
 
-        Note:
-            Zoho CRM Search APIは日付フィールドの比較演算子(greater_equal,
-            less_equal, between等)をサポートしていない。そのため、日付フィルタが
-            指定された場合はRecords APIで全件取得後、クライアントサイドで
-            フィルタリングを行う。
+        COQL APIを使用してサーバーサイドでフィルタリングを行います。
+        COQLが使用できない場合は従来のRecords API + クライアントサイドフィルタに
+        フォールバックします。
 
         Args:
             channel: 流入経路（例: paid_meta, sco_bizreach, org_hitocareer）
@@ -402,73 +541,83 @@ class ZohoClient:
             検索結果のリスト
         """
         module_api = self.settings.zoho_app_hc_module
-        has_date_filter = bool(date_from or date_to)
 
-        # 日付フィルタがある場合: Records API + クライアントサイドフィルタ
-        # Zoho Search APIは日付の比較演算子をサポートしていないため
-        if has_date_filter:
-            logger.info(
-                "[zoho] search_by_criteria: using Records API + client-side filter "
-                "(date_from=%s, date_to=%s, channel=%s, status=%s)",
-                date_from, date_to, channel, status
-            )
+        def _coql_search() -> List[Dict[str, Any]]:
+            """COQLを使用した検索（サーバーサイドフィルタリング）
 
-            # 全レコード取得
-            all_records = self._fetch_all_records(max_pages=15)
+            Note: Zoho COQL has limitations:
+            - WHERE clause is REQUIRED
+            - LIKE operator is NOT supported
+            - Mixing picklist (field14) and date (field18) fields in WHERE may fail
+            - ORDER BY requires WHERE clause
 
-            # 日付フィルタ（field18: 登録日）
-            filtered = self._filter_by_date(all_records, date_from, date_to)
+            Strategy:
+            - Use COQL for date filter only (most effective for large datasets)
+            - Apply other filters (channel, status, name) in memory
+            """
+            # SELECT句
+            fields = [
+                "id", "Name",
+                self.CHANNEL_FIELD_API,
+                self.STATUS_FIELD_API,
+                self.DATE_FIELD_API,
+                "Modified_Time", "Owner"
+            ]
+            select_fields = ", ".join(fields)
 
-            # 追加フィルタ（channel, status, name）
+            # WHERE句を構築（日付フィルタのみCOQLで処理）
+            # 理由: Zoho COQLはfield14(picklist) + field18(date)の組み合わせでエラーになる
+            where_parts: List[str] = []
+
+            if date_from:
+                where_parts.append(f"{self.DATE_FIELD_API} >= '{date_from}'")
+
+            if date_to:
+                where_parts.append(f"{self.DATE_FIELD_API} <= '{date_to}'")
+
+            # クエリ構築（WHERE句がない場合はダミー条件を追加）
+            query = f"SELECT {select_fields} FROM {module_api}"
+            if where_parts:
+                query += " WHERE " + " AND ".join(where_parts)
+            else:
+                query += " WHERE id is not null"
+
+            # 注意: ORDER BY はCOQLの制限により、WHERE句がある場合のみ動作
+            # LIMIT を十分大きくして後でソート＆カットする
+            query += f" LIMIT {min(limit * 10, 2000)}"  # 多めに取得してフィルタ後にカット
+
+            logger.info("[zoho] search_by_criteria COQL: %s", query)
+
+            result = self._coql_query(query)
+            data = result.get("data", []) or []
+
+            # メモリ内でフィルタリング（channel, status, name）
             if channel:
-                filtered = [r for r in filtered if r.get(self.CHANNEL_FIELD_API) == channel]
+                data = [r for r in data if r.get(self.CHANNEL_FIELD_API) == channel]
             if status:
-                filtered = [r for r in filtered if r.get(self.STATUS_FIELD_API) == status]
+                data = [r for r in data if r.get(self.STATUS_FIELD_API) == status]
             if name:
                 name_lower = name.lower()
-                filtered = [
-                    r for r in filtered
-                    if name_lower in (r.get("Name") or "").lower()
-                ]
+                data = [r for r in data if name_lower in (r.get("Name") or "").lower()]
 
-            # limit適用
-            data = filtered[:limit]
+            # ソートしてlimit件に絞る
+            data.sort(key=lambda r: r.get(self.DATE_FIELD_API, ""), reverse=True)
+            return data[:limit]
 
-        else:
-            # 日付フィルタなし: 従来のロジック（Search API or Records API）
-            criteria_parts: List[str] = []
+        def _legacy_search() -> List[Dict[str, Any]]:
+            """従来のRecords/Search API（フォールバック用）"""
+            return self._search_by_criteria_legacy(
+                channel, status, name, date_from, date_to, limit
+            )
 
-            if channel:
-                criteria_parts.append(f"({self.CHANNEL_FIELD_API}:equals:{channel})")
-
-            if status:
-                criteria_parts.append(f"({self.STATUS_FIELD_API}:equals:{status})")
-
-            if name:
-                name_field = self.settings.zoho_app_hc_name_field_api or self.NAME_FIELD_API
-                criteria_parts.append(f"({name_field}:contains:{name})")
-
-            if not criteria_parts:
-                # 条件なし: Records APIで取得
-                params: Dict[str, Any] = {"per_page": min(limit, 200)}
-                try:
-                    result = self._get(f"/crm/v2/{module_api}", params) or {}
-                    data = result.get("data", []) or []
-                except Exception as e:
-                    logger.warning("[zoho] search_by_criteria (all) failed: %s", e)
-                    data = []
-            else:
-                # 条件あり: Search APIで検索
-                criteria = "(" + "and".join(criteria_parts) + ")"
-                params = {"criteria": criteria, "per_page": min(limit, 200)}
-
-                logger.info("[zoho] search_by_criteria: criteria=%s", criteria)
-                try:
-                    result = self._get(f"/crm/v2/{module_api}/search", params) or {}
-                    data = result.get("data", []) or []
-                except Exception as e:
-                    logger.warning("[zoho] search_by_criteria failed: %s", e)
-                    data = []
+        # COQL優先、失敗時はフォールバック
+        try:
+            data = self._with_coql_fallback(_coql_search, _legacy_search)
+        except Exception as e:
+            logger.warning("[zoho] search_by_criteria failed: %s, using legacy", e)
+            data = self._search_by_criteria_legacy(
+                channel, status, name, date_from, date_to, limit
+            )
 
         # 結果を整形（APIフィールド名を使用して取得）
         records = []
@@ -494,6 +643,99 @@ class ZohoClient:
         logger.info("[zoho] search_by_criteria results: count=%s", len(records))
         return records
 
+    def _search_by_criteria_legacy(
+        self,
+        channel: Optional[str] = None,
+        status: Optional[str] = None,
+        name: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """従来のRecords/Search APIを使用した検索（COQLフォールバック用）
+
+        日付フィルタがある場合は全レコードを取得してクライアントサイドで
+        フィルタリングを行う。
+        """
+        module_api = self.settings.zoho_app_hc_module
+        has_date_filter = bool(date_from or date_to)
+
+        if has_date_filter:
+            logger.info(
+                "[zoho] _search_by_criteria_legacy: Records API + client-side filter "
+                "(date_from=%s, date_to=%s, channel=%s, status=%s)",
+                date_from, date_to, channel, status
+            )
+
+            # 全レコード取得
+            all_records = self._fetch_all_records(max_pages=15)
+
+            # 日付フィルタ
+            filtered = self._filter_by_date(all_records, date_from, date_to)
+
+            # 追加フィルタ
+            if channel:
+                filtered = [r for r in filtered if r.get(self.CHANNEL_FIELD_API) == channel]
+            if status:
+                filtered = [r for r in filtered if r.get(self.STATUS_FIELD_API) == status]
+            if name:
+                name_lower = name.lower()
+                filtered = [
+                    r for r in filtered
+                    if name_lower in (r.get("Name") or "").lower()
+                ]
+
+            return filtered[:limit]
+
+        else:
+            criteria_parts: List[str] = []
+
+            if channel:
+                criteria_parts.append(f"({self.CHANNEL_FIELD_API}:equals:{channel})")
+            if status:
+                criteria_parts.append(f"({self.STATUS_FIELD_API}:equals:{status})")
+            if name:
+                name_field = self.settings.zoho_app_hc_name_field_api or self.NAME_FIELD_API
+                criteria_parts.append(f"({name_field}:contains:{name})")
+
+            if not criteria_parts:
+                params: Dict[str, Any] = {"per_page": min(limit, 200)}
+                try:
+                    result = self._get(f"/crm/v2/{module_api}", params) or {}
+                    return result.get("data", []) or []
+                except Exception as e:
+                    logger.warning("[zoho] _search_by_criteria_legacy (all) failed: %s", e)
+                    return []
+            else:
+                criteria = "(" + "and".join(criteria_parts) + ")"
+                params = {"criteria": criteria, "per_page": min(limit, 200)}
+                logger.info("[zoho] _search_by_criteria_legacy: criteria=%s", criteria)
+                try:
+                    result = self._get(f"/crm/v2/{module_api}/search", params) or {}
+                    return result.get("data", []) or []
+                except Exception as e:
+                    logger.warning("[zoho] _search_by_criteria_legacy failed: %s", e)
+                    return []
+
+    # チャネル・ステータスマスタ（クラス定数として定義）
+    CHANNELS = [
+        "sco_bizreach", "sco_dodaX", "sco_ambi", "sco_rikunavi",
+        "sco_nikkei", "sco_liiga", "sco_openwork", "sco_carinar", "sco_dodaX_D&P",
+        "paid_google", "paid_meta", "paid_affiliate",
+        "org_hitocareer", "org_jobs",
+        "feed_indeed", "referral", "other",
+    ]
+
+    STATUSES = [
+        "1. リード", "2. コンタクト", "3. 面談待ち", "4. 面談済み",
+        "5. 提案中", "6. 応募意思獲得", "7. 打診済み",
+        "8. 一次面接待ち", "9. 一次面接済み",
+        "10. 最終面接待ち", "11. 最終面接済み",
+        "12. 内定", "13. 内定承諾", "14. 入社",
+        "15. 入社後退職（入社前退職含む）", "16. クローズ",
+        "17. 連絡禁止", "18. 中長期対応", "19. 他社送客",
+    ]
+
     def count_by_channel(
         self,
         date_from: Optional[str] = None,
@@ -501,9 +743,10 @@ class ZohoClient:
     ) -> Dict[str, int]:
         """流入経路ごとの求職者数を集計
 
-        Note:
-            最適化: 全レコードを1回取得し、メモリ内で集計する。
-            以前の実装では各チャネルごとにAPIを呼び出していたため非効率だった。
+        COQL GROUP BY を使用してサーバーサイドで集計します。
+        COQLが使用できない場合は従来のRecords API + メモリ集計にフォールバック。
+
+        期待されるパフォーマンス改善: ~12秒 → <1秒
 
         Args:
             date_from: 集計期間開始（YYYY-MM-DD）
@@ -512,33 +755,64 @@ class ZohoClient:
         Returns:
             流入経路ごとの件数辞書
         """
-        # 流入経路マスタ
-        channels = [
-            "sco_bizreach", "sco_dodaX", "sco_ambi", "sco_rikunavi",
-            "sco_nikkei", "sco_liiga", "sco_openwork", "sco_carinar", "sco_dodaX_D&P",
-            "paid_google", "paid_meta", "paid_affiliate",
-            "org_hitocareer", "org_jobs",
-            "feed_indeed", "referral", "other",
-        ]
+        module_api = self.settings.zoho_app_hc_module
 
-        # 全レコードを1回取得（日付フィルタ適用）
+        # WHERE句を構築
+        where_parts: List[str] = []
+        if date_from:
+            where_parts.append(f"{self.DATE_FIELD_API} >= '{date_from}'")
+        if date_to:
+            where_parts.append(f"{self.DATE_FIELD_API} <= '{date_to}'")
+        where_clause = " AND ".join(where_parts) if where_parts else None
+
+        def _coql_aggregate() -> Dict[str, int]:
+            """COQLでGROUP BY集計"""
+            return self._coql_aggregate(
+                module=module_api,
+                group_field=self.CHANNEL_FIELD_API,
+                where_clause=where_clause,
+            )
+
+        def _legacy_aggregate() -> Dict[str, int]:
+            """従来のRecords API + メモリ集計"""
+            return self._count_by_channel_legacy(date_from, date_to)
+
         logger.info(
-            "[zoho] count_by_channel: fetching all records (date_from=%s, date_to=%s)",
+            "[zoho] count_by_channel: date_from=%s, date_to=%s",
+            date_from, date_to
+        )
+
+        try:
+            raw_counts = self._with_coql_fallback(_coql_aggregate, _legacy_aggregate)
+        except Exception as e:
+            logger.warning("[zoho] count_by_channel failed: %s, using legacy", e)
+            raw_counts = self._count_by_channel_legacy(date_from, date_to)
+
+        # 全チャネルを結果に含める（存在しないチャネルは0）
+        results: Dict[str, int] = {ch: raw_counts.get(ch, 0) for ch in self.CHANNELS}
+
+        logger.info("[zoho] count_by_channel results: total=%s", sum(results.values()))
+        return results
+
+    def _count_by_channel_legacy(
+        self,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """従来のRecords API + メモリ集計（COQLフォールバック用）"""
+        logger.info(
+            "[zoho] _count_by_channel_legacy: fetching all records (date_from=%s, date_to=%s)",
             date_from, date_to
         )
         all_records = self._fetch_all_records(max_pages=15)
-
-        # 日付フィルタ
         filtered = self._filter_by_date(all_records, date_from, date_to)
 
-        # メモリ内で流入経路ごとに集計
-        results: Dict[str, int] = {ch: 0 for ch in channels}
+        results: Dict[str, int] = {ch: 0 for ch in self.CHANNELS}
         for r in filtered:
             ch = r.get(self.CHANNEL_FIELD_API)
             if ch in results:
                 results[ch] += 1
 
-        logger.info("[zoho] count_by_channel results: total=%s", sum(results.values()))
         return results
 
     def count_by_status(
@@ -549,9 +823,14 @@ class ZohoClient:
     ) -> Dict[str, int]:
         """ステータスごとの求職者数を集計（ファネル分析用）
 
-        Note:
-            最適化: 全レコードを1回取得し、メモリ内で集計する。
-            以前の実装では各ステータスごとにAPIを呼び出していたため非効率だった。
+        COQL GROUP BY を使用してサーバーサイドで集計します。
+        COQLが使用できない場合は従来のRecords API + メモリ集計にフォールバック。
+
+        Note: Zoho COQLはpicklistフィールド(field14)と日付フィールド(field18)を
+        同時にWHERE句で使用するとエラーになるため、channelフィルタがある場合は
+        日付フィルタのみCOQLで行い、channelはメモリ内でフィルタリングする。
+
+        期待されるパフォーマンス改善: ~12秒 → <1秒
 
         Args:
             channel: 流入経路でフィルタ（省略時は全体）
@@ -561,39 +840,104 @@ class ZohoClient:
         Returns:
             ステータスごとの件数辞書
         """
-        # ステータスマスタ（実際のZoho設定に合わせる - 番号とステータスの間にスペースあり）
-        statuses = [
-            "1. リード", "2. コンタクト", "3. 面談待ち", "4. 面談済み",
-            "5. 提案中", "6. 応募意思獲得", "7. 打診済み",
-            "8. 一次面接待ち", "9. 一次面接済み",
-            "10. 最終面接待ち", "11. 最終面接済み",
-            "12. 内定", "13. 内定承諾", "14. 入社",
-            "15. 入社後退職（入社前退職含む）", "16. クローズ",
-            "17. 連絡禁止", "18. 中長期対応", "19. 他社送客",
-        ]
+        module_api = self.settings.zoho_app_hc_module
 
-        # 全レコードを1回取得（日付フィルタ適用）
+        # Zoho COQLはpicklist(field14) + date(field18)の混合でエラーになる
+        # channelがある場合は日付フィルタのみCOQLで行い、channelはメモリでフィルタ
+        has_channel_filter = bool(channel)
+
+        # WHERE句を構築（日付フィルタのみ）
+        where_parts: List[str] = []
+        if date_from:
+            where_parts.append(f"{self.DATE_FIELD_API} >= '{date_from}'")
+        if date_to:
+            where_parts.append(f"{self.DATE_FIELD_API} <= '{date_to}'")
+        where_clause = " AND ".join(where_parts) if where_parts else None
+
+        def _coql_with_memory_filter() -> Dict[str, int]:
+            """COQLで日付フィルタ + メモリ内でチャネルフィルタ＆集計"""
+            # 日付フィルタのみでレコードを取得
+            query = f"SELECT id, {self.CHANNEL_FIELD_API}, {self.STATUS_FIELD_API} FROM {module_api}"
+            if where_clause:
+                query += f" WHERE {where_clause}"
+            else:
+                query += " WHERE id is not null"
+            query += " LIMIT 2000"
+
+            logger.debug("[zoho] count_by_status COQL: %s", query)
+            result = self._coql_query(query)
+            data = result.get("data", []) or []
+
+            # チャネルフィルタ（メモリ内）
+            if channel:
+                data = [r for r in data if r.get(self.CHANNEL_FIELD_API) == channel]
+
+            # ステータス別に集計
+            counts: Dict[str, int] = {}
+            for r in data:
+                st = r.get(self.STATUS_FIELD_API)
+                if st:
+                    counts[st] = counts.get(st, 0) + 1
+
+            return counts
+
+        def _coql_aggregate() -> Dict[str, int]:
+            """COQLでGROUP BY集計（channelフィルタなし時のみ使用）"""
+            return self._coql_aggregate(
+                module=module_api,
+                group_field=self.STATUS_FIELD_API,
+                where_clause=where_clause,
+            )
+
+        def _legacy_aggregate() -> Dict[str, int]:
+            """従来のRecords API + メモリ集計"""
+            return self._count_by_status_legacy(channel, date_from, date_to)
+
         logger.info(
-            "[zoho] count_by_status: fetching all records (channel=%s, date_from=%s, date_to=%s)",
+            "[zoho] count_by_status: channel=%s, date_from=%s, date_to=%s",
+            channel, date_from, date_to
+        )
+
+        try:
+            if has_channel_filter:
+                # チャネルフィルタがある場合: COQL取得 + メモリフィルタ
+                raw_counts = self._with_coql_fallback(_coql_with_memory_filter, _legacy_aggregate)
+            else:
+                # チャネルフィルタがない場合: 純粋なCOQL GROUP BY
+                raw_counts = self._with_coql_fallback(_coql_aggregate, _legacy_aggregate)
+        except Exception as e:
+            logger.warning("[zoho] count_by_status failed: %s, using legacy", e)
+            raw_counts = self._count_by_status_legacy(channel, date_from, date_to)
+
+        # 全ステータスを結果に含める（存在しないステータスは0）
+        results: Dict[str, int] = {st: raw_counts.get(st, 0) for st in self.STATUSES}
+
+        logger.info("[zoho] count_by_status results: total=%s", sum(results.values()))
+        return results
+
+    def _count_by_status_legacy(
+        self,
+        channel: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """従来のRecords API + メモリ集計（COQLフォールバック用）"""
+        logger.info(
+            "[zoho] _count_by_status_legacy: fetching all records (channel=%s, date_from=%s, date_to=%s)",
             channel, date_from, date_to
         )
         all_records = self._fetch_all_records(max_pages=15)
-
-        # 日付フィルタ
         filtered = self._filter_by_date(all_records, date_from, date_to)
 
-        # チャネルフィルタ
         if channel:
             filtered = [r for r in filtered if r.get(self.CHANNEL_FIELD_API) == channel]
 
-        # メモリ内でステータスごとに集計
-        results: Dict[str, int] = {st: 0 for st in statuses}
+        results: Dict[str, int] = {st: 0 for st in self.STATUSES}
         for r in filtered:
             st = r.get(self.STATUS_FIELD_API)
             if st in results:
                 results[st] += 1
 
-        logger.info("[zoho] count_by_status results: total=%s", sum(results.values()))
         return results
 
     def get_channel_definitions(self) -> Dict[str, str]:

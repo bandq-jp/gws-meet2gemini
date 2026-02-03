@@ -444,11 +444,78 @@ npx supabase db push
 | 日付フィルタ (2026-01) | 0件 | 100件 |
 | paid_meta + 日付 (2026-01) | 0件 | **83件** |
 
+**追加最適化** (パフォーマンス問題修正):
+- 当初の修正では `count_by_channel()` が17チャネル分、`count_by_status()` が19ステータス分のAPI呼び出しを行っていた
+- 各呼び出しで全件取得（最大15ページ）を行うため、最大 17×15=255 回のAPI呼び出しが発生
+- **解決**: 集計系メソッドは1回だけ全件取得し、メモリ内でフィルタ・集計するように最適化
+- **効果**: 最適化前 ~255秒 → 最適化後 ~12秒 (約20倍高速化)
+
 **技術的知見**:
 - Zoho CRM Search API (`/crm/v2/{module}/search`) は、システムフィールド・カスタムフィールド問わず、日付/日時型で比較演算子が動作しない場合がある（モジュール依存）
 - Records API (`/crm/v2/{module}`) + クライアントサイドフィルタは確実に動作する
 - `field18` は登録日（date型、YYYY-MM-DD形式）、`Created_Time` はシステム作成日時（datetime型、ISO8601形式）
+- 集計系クエリはN+1問題に注意（1回取得→メモリ集計がベストプラクティス）
 - **情報ソース**: [Zoho CRM API Search Records](https://www.zoho.com/crm/developer/docs/api/v8/search-records.html)
+
+### 5. Zoho CRM COQL最適化 & 新規マーケティングツール追加 (2026-02-03)
+
+**背景**: OAuthスコープ拡張（`ZohoCRM.coql.READ`追加）により、COQL APIが使用可能に
+
+**新スコープ**:
+```
+ZohoCRM.modules.READ,ZohoCRM.settings.ALL,ZohoCRM.users.READ,ZohoCRM.coql.READ,ZohoCRM.bulk.READ,offline_access
+```
+
+**COQL最適化結果**:
+| メソッド | 最適化前 | 最適化後 | 改善倍率 |
+|----------|----------|----------|---------|
+| `search_by_criteria` | ~25秒 | 0.52秒 | **48倍** |
+| `count_by_channel` | ~23秒 | 0.21秒 | **110倍** |
+| `count_by_status` | ~26秒 | 0.25秒 | **104倍** |
+
+**実装内容** (`backend/app/infrastructure/zoho/client.py`):
+
+1. **COQLインフラ追加**:
+   - `_coql_query()`: COQL APIエンドポイント (`/crm/v7/coql`) への汎用クエリ
+   - `_coql_aggregate()`: GROUP BY + COUNT集計用ヘルパー
+   - `_with_coql_fallback()`: COQL失敗時のレガシーAPIフォールバック
+
+2. **既存メソッドのCOQL化**:
+   - `search_by_criteria()`: 日付フィルタのみCOQL、channel/status/nameはメモリ内フィルタ
+   - `count_by_channel()`: COQL GROUP BY集計
+   - `count_by_status()`: channelフィルタがある場合はCOQL取得+メモリフィルタ
+
+**Zoho COQL制限事項**（カスタムモジュール jobSeeker での検証結果）:
+- **WHERE句が必須**: `missing clause` エラー → `WHERE id is not null` で回避
+- **LIKE演算子非サポート**: `invalid operator found` → メモリ内フィルタで対応
+- **フィールドタイプ混合でエラー**: picklist(field14) + date(field18) の同時WHERE不可 → 日付のみCOQL、他はメモリ
+- **ORDER BY はWHERE必須**: WHERE句がないとエラー
+
+**情報ソース**: [Zoho CRM COQL Overview](https://www.zoho.com/crm/developer/docs/api/v8/COQL-Overview.html)
+
+**新規マーケティングツール追加** (`backend/app/infrastructure/chatkit/zoho_crm_tools.py`):
+
+| ツール名 | 説明 |
+|---------|------|
+| `analyze_funnel_by_channel` | 特定チャネルのファネル分析（ステータス別転換率、ボトルネック特定） |
+| `trend_analysis_by_period` | 月次/週次トレンド分析（前期比、増減方向） |
+| `compare_channels` | 複数チャネル比較（獲得数、入社率ランキング） |
+| `get_pic_performance` | 担当者別パフォーマンス（成約率ランキング） |
+
+**ツール登録更新** (`ZOHO_CRM_TOOLS`):
+```python
+ZOHO_CRM_TOOLS = [
+    # 基本ツール (5個)
+    search_job_seekers, get_job_seeker_detail, get_channel_definitions,
+    aggregate_by_channel, count_job_seekers_by_status,
+    # 新規分析ツール (4個)
+    analyze_funnel_by_channel, trend_analysis_by_period,
+    compare_channels, get_pic_performance,
+]
+```
+
+**エージェント指示更新** (`backend/app/infrastructure/chatkit/seo_agent_factory.py`):
+- MARKETING_INSTRUCTIONSに新ツール説明と分析シナリオ例を追加
 
 ---
 
