@@ -1,8 +1,8 @@
 # マルチエージェントアーキテクチャ設計書
 
-> **Version**: 1.0.0
+> **Version**: 2.0.0
 > **Date**: 2026-02-04
-> **Status**: 設計完了・実装待ち
+> **Status**: Sub-Agent as Tool方式に更新
 
 ## エグゼクティブサマリー
 
@@ -23,8 +23,8 @@
 
 1. [現状分析](#1-現状分析)
 2. [技術調査結果](#2-技術調査結果)
-3. [アーキテクチャ設計](#3-アーキテクチャ設計)
-4. [実装パターン](#4-実装パターン)
+3. [Sub-Agent as Tool アーキテクチャ](#3-sub-agent-as-tool-アーキテクチャ) ⭐ **推奨**
+4. [実装コード](#4-実装コード)
 5. [コンテキスト最適化](#5-コンテキスト最適化)
 6. [エラーハンドリング](#6-エラーハンドリング)
 7. [実装ロードマップ](#7-実装ロードマップ)
@@ -156,277 +156,503 @@ main_agent = Agent(tools=[search_tool])
 
 ---
 
-## 3. アーキテクチャ設計
+## 3. Sub-Agent as Tool アーキテクチャ
 
-### 3.1 推奨アーキテクチャ: Router + 専門エージェント
+> ⭐ **推奨方式**: Handoff方式ではなく、Sub-Agent as Tool方式を採用
+
+### 3.1 Handoff vs Sub-Agent as Tool
+
+| 特性 | Handoff | Sub-Agent as Tool |
+|------|---------|-------------------|
+| **制御権** | 子エージェントに完全移譲 | 親エージェントが保持 ✅ |
+| **並列実行** | 不可（1対1の引き継ぎ） | 可能 ✅ |
+| **エラー復旧** | 困難（制御が戻らない） | 親で対応可能 ✅ |
+| **対話継続** | 途切れる（子が引き継ぐ） | 継続可能 ✅ |
+| **履歴共有** | 完全継承 | LLM生成入力のみ |
+| **用途** | オープンエンドな会話委任 | 明確なサブタスク実行 |
+
+**結論**: マーケティングAIでは「親が制御を保持」「並列実行」「エラー復旧」が重要なため、**Sub-Agent as Tool方式を採用**。
+
+### 3.2 推奨アーキテクチャ
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                     Router Agent (トリアージ)                 │
-│  Model: gpt-4.1-mini (軽量・高速)                            │
-│  Instructions: ~300 tokens                                   │
-│  Tools: なし                                                 │
-│  Role: 意図分類 → 適切なエージェントへのhandoff              │
-└────────────────────────┬─────────────────────────────────────┘
-                         │
-         ┌───────────────┼───────────────┬────────────────┐
-         ▼               ▼               ▼                ▼
-┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-│ SEO Agent   │  │ Ads Agent   │  │ CRM Agent   │  │Content Agent│
-│             │  │             │  │             │  │             │
-│ Tools:      │  │ Tools:      │  │ Tools:      │  │ Tools:      │
-│ -GA4 (6)    │  │ -Meta Ads   │  │ -Zoho (9)   │  │ -WordPress  │
-│ -GSC (10)   │  │  (20)       │  │ -Candidate  │  │  (28)       │
-│ -Ahrefs(20) │  │ -GA4 (6)    │  │  Insight(4) │  │ -Web Search │
-│ -Web Search │  │             │  │             │  │ -Code Int.  │
-│             │  │             │  │             │  │             │
-│ Total: 37   │  │ Total: 26   │  │ Total: 13   │  │ Total: 30   │
-└─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                  Orchestrator Agent (GPT-5.2)                   │
+│                                                                 │
+│  役割:                                                          │
+│  - ユーザーとの対話管理                                          │
+│  - タスク分解・サブエージェント振り分け                          │
+│  - 結果統合・最終回答生成                                        │
+│                                                                 │
+│  ネイティブツール: Web Search, Code Interpreter                 │
+│  サブエージェントツール: SEO, Zoho, Candidate                   │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             │ 並列/順次実行 (asyncio.gather / TaskGroup)
+                             │
+         ┌───────────────────┼───────────────────┐
+         ▼                   ▼                   ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  SEO Analysis   │  │  Zoho CRM       │  │  Candidate      │
+│  Agent          │  │  Agent          │  │  Insight Agent  │
+│                 │  │                 │  │                 │
+│ Model: GPT-5-mini│  │ Model: GPT-5-mini│  │ Model: GPT-5-mini│
+│                 │  │                 │  │                 │
+│ Tools:          │  │ Tools:          │  │ Tools:          │
+│ - GA4 MCP (6)   │  │ - search (1)    │  │ - competitor (1)│
+│ - GSC MCP (10)  │  │ - aggregate (4) │  │ - urgency (1)   │
+│ - Ahrefs MCP(20)│  │ - funnel (1)    │  │ - patterns (1)  │
+│ - Web Search    │  │ - trend (1)     │  │ - briefing (1)  │
+│                 │  │ - compare (1)   │  │                 │
+│ Total: 37       │  │ Total: 9        │  │ Total: 4        │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
 ```
 
-### 3.2 エージェント責務分離
+### 3.3 Agent.as_tool() API詳細
 
-| エージェント | 責務 | ツール群 | トークン予算 |
-|-------------|------|---------|-------------|
-| **Router** | 意図分類・ルーティング | なし | 300T |
-| **SEO Agent** | 検索順位最適化・競合分析 | GA4, GSC, Ahrefs, Web Search | 3,000T |
-| **Ads Agent** | 広告パフォーマンス分析 | Meta Ads, GA4 | 2,200T |
-| **CRM Agent** | 求職者管理・営業支援 | Zoho CRM, Candidate Insight | 1,200T |
-| **Content Agent** | 記事作成・編集 | WordPress, Web Search, Code | 2,500T |
-
-### 3.3 ルーティングロジック
+OpenAI Agents SDK v0.7.0 の `Agent.as_tool()` メソッド:
 
 ```python
-ROUTING_RULES = {
-    "seo": [
-        "検索順位", "SEO", "キーワード", "競合分析", "被リンク",
-        "オーガニック", "GSC", "Ahrefs", "ランキング"
-    ],
-    "ads": [
-        "広告", "Meta Ads", "Facebook", "Instagram", "ROAS", "CPA",
-        "コンバージョン", "キャンペーン", "クリエイティブ"
-    ],
-    "crm": [
-        "求職者", "候補者", "チャネル", "ステータス", "パイプライン",
-        "成約", "ファネル", "担当者", "Zoho"
-    ],
-    "content": [
-        "記事", "ブログ", "WordPress", "コンテンツ", "執筆",
-        "編集", "下書き", "公開"
-    ]
-}
+def as_tool(
+    self,
+    tool_name: str | None = None,              # ツール名 (デフォルト: エージェント名)
+    tool_description: str | None = None,        # ツール説明
+    custom_output_extractor: Callable | None = None,  # 結果加工関数
+    on_stream: Callable | None = None,          # ストリーミングコールバック
+    max_turns: int = 10,                        # 最大ターン数
+) -> FunctionTool:
 ```
+
+**使用例**:
+```python
+seo_agent = Agent(name="SEOAnalyst", instructions="...", tools=[...])
+
+# ツールとして登録
+seo_tool = seo_agent.as_tool(
+    tool_name="run_seo_analysis",
+    tool_description="SEO分析を実行（GA4, GSC, Ahrefs連携）",
+    custom_output_extractor=lambda result: {
+        "analysis": result.final_output,
+        "tokens": result.usage.total_tokens,
+    },
+    max_turns=20,
+)
+
+# オーケストレーターに登録
+orchestrator = Agent(
+    name="Orchestrator",
+    model="gpt-5.2",
+    tools=[seo_tool, zoho_tool, candidate_tool],
+)
+```
+
+### 3.4 並列実行パターン
+
+Python 3.11+ の `asyncio.TaskGroup` を使用した構造化並列処理:
+
+```python
+async def run_parallel_subagents(tasks: list[dict]) -> list[dict]:
+    """複数サブエージェントを並列実行"""
+    async with asyncio.TaskGroup() as tg:
+        futures = [
+            tg.create_task(
+                Runner.run(task["agent"], input=task["input"]),
+                name=task["name"],
+            )
+            for task in tasks
+        ]
+    return [f.result() for f in futures]
+
+# 使用例
+results = await run_parallel_subagents([
+    {"name": "seo", "agent": seo_agent, "input": "トラフィック分析"},
+    {"name": "zoho", "agent": zoho_agent, "input": "チャネル別集計"},
+    {"name": "candidate", "agent": candidate_agent, "input": "緊急度評価"},
+])
+```
+
+**並列実行のメリット**:
+- 3つのサブエージェントを同時実行 → レイテンシ 1/3
+- 親エージェントは結果を待機後、統合回答を生成
+- 1つが失敗しても他は継続（エラー伝搬オプション可）
+
+### 3.5 コスト分析
+
+| クエリ種別 | 割合 | 構成 | コスト/クエリ |
+|-----------|------|------|--------------|
+| 単純クエリ | 60% | GPT-5-mini 単体 | ¥0.96 |
+| 中程度クエリ | 30% | GPT-5-mini × 2並列 | ¥1.5 |
+| 複雑クエリ | 10% | GPT-5.2 + mini × 2 | ¥5.5 |
+| **加重平均** | - | - | **¥1.5/クエリ** |
+
+現在の単一エージェント方式（¥3-5/クエリ）と比較して**50-70%削減**。
+
+### 3.6 エージェント責務分離
+
+| エージェント | 責務 | モデル | ツール数 |
+|-------------|------|--------|---------|
+| **Orchestrator** | 対話管理・タスク分解・結果統合 | GPT-5.2 | 3 (サブエージェント) |
+| **SEO Agent** | 検索順位・競合分析・トラフィック | GPT-5-mini | 37 |
+| **Zoho Agent** | 求職者検索・チャネル集計・ファネル | GPT-5-mini | 9 |
+| **Candidate Agent** | 競合リスク・緊急度・転職パターン | GPT-5-mini | 4 |
 
 ---
 
-## 4. 実装パターン
+## 4. 実装コード
 
-### 4.1 Router Agent実装
+### 4.1 Orchestrator Agent
 
 ```python
-# backend/app/infrastructure/chatkit/router_agent.py
+# backend/app/infrastructure/chatkit/orchestrator_agent.py
 
-from agents import Agent, handoff, Runner, ModelSettings
-from typing import Literal
+from agents import Agent, Runner, ModelSettings, Reasoning
+from agents.tool import WebSearchTool, CodeInterpreterTool
 
-class RouterAgentFactory:
-    """意図分類専用の軽量エージェント"""
+class OrchestratorAgentFactory:
+    """メインオーケストレーターエージェント (GPT-5.2)"""
 
-    def build_router(
+    def __init__(self, settings: Settings):
+        self._settings = settings
+
+    def build_agent(
         self,
-        seo_agent: Agent,
-        ads_agent: Agent,
-        crm_agent: Agent,
-        content_agent: Agent,
+        asset: dict,
+        mcp_servers: list,
     ) -> Agent:
+        """
+        オーケストレーターエージェントを構築
+        """
+        # サブエージェントをツールとして登録
+        subagent_tools = self._build_subagent_tools(mcp_servers)
+
+        # ネイティブツール
+        native_tools = [
+            WebSearchTool(),
+            CodeInterpreterTool(),
+        ]
+
         return Agent(
-            name="MarketingRouter",
-            instructions="""
-            ユーザーのリクエストを分析し、適切な専門エージェントにルーティング:
-
-            - SEO・検索分析・競合調査 → transfer_to_seo_agent
-            - 広告パフォーマンス・ROI分析 → transfer_to_ads_agent
-            - 求職者・CRM・チャネル分析 → transfer_to_crm_agent
-            - 記事・コンテンツ作成・編集 → transfer_to_content_agent
-
-            複数の意図が混在する場合、主たる意図を判定してルーティング。
-            """,
-            model="gpt-4.1-mini",
+            name="MarketingOrchestrator",
+            instructions=self._build_instructions(asset),
+            model="gpt-5.2",
             model_settings=ModelSettings(
-                temperature=0.3,  # 確実な分類
-                store=False,      # ルーター履歴は不要
+                reasoning=Reasoning(
+                    effort=asset.get("reasoning_effort", "high"),
+                    summary="detailed",
+                ),
             ),
-            handoffs=[
-                handoff(
-                    seo_agent,
-                    tool_name_override="transfer_to_seo_agent",
-                    tool_description_override="SEO・検索分析・競合調査を担当"
-                ),
-                handoff(
-                    ads_agent,
-                    tool_name_override="transfer_to_ads_agent",
-                    tool_description_override="広告パフォーマンス・ROI分析を担当"
-                ),
-                handoff(
-                    crm_agent,
-                    tool_name_override="transfer_to_crm_agent",
-                    tool_description_override="求職者・CRM・チャネル分析を担当"
-                ),
-                handoff(
-                    content_agent,
-                    tool_name_override="transfer_to_content_agent",
-                    tool_description_override="記事・コンテンツ作成・編集を担当"
-                ),
-            ],
+            tools=native_tools + subagent_tools,
         )
+
+    def _build_subagent_tools(self, mcp_servers: list) -> list:
+        """サブエージェントをツールとして構築"""
+        from .subagent_tools import (
+            run_seo_analysis_agent,
+            run_zoho_analysis_agent,
+            run_candidate_insight_agent,
+        )
+        return [
+            run_seo_analysis_agent,
+            run_zoho_analysis_agent,
+            run_candidate_insight_agent,
+        ]
+
+    def _build_instructions(self, asset: dict) -> str:
+        return """
+あなたはマーケティング分析のオーケストレーターです。
+
+## 利用可能なサブエージェント
+
+1. **run_seo_analysis_agent**: SEO・検索分析（GA4, GSC, Ahrefs連携）
+2. **run_zoho_analysis_agent**: Zoho CRM分析（求職者、チャネル、ファネル）
+3. **run_candidate_insight_agent**: 候補者インサイト（競合リスク、緊急度）
+
+## 行動原則
+
+- ユーザーの質問を分析し、必要なサブエージェントを選択
+- 複数データソースが必要な場合、並列でサブエージェントを呼び出し
+- サブエージェントの結果を統合し、アクショナブルな回答を生成
+- 単純な質問（挨拶、一般知識）はサブエージェントを使わず直接回答
+
+## 並列実行の例
+
+ユーザー: 「今月の採用状況と、どのチャネルからの応募が多いか教えて」
+→ run_zoho_analysis_agent + run_candidate_insight_agent を並列呼び出し
+→ 結果を統合して回答
+        """
 ```
 
-### 4.2 専門エージェント実装
+### 4.2 サブエージェントツール
 
 ```python
-# backend/app/infrastructure/chatkit/specialist_agents.py
+# backend/app/infrastructure/chatkit/subagent_tools.py
 
-class SEOAgentFactory:
-    """SEO分析専門エージェント"""
+from agents import function_tool, RunContextWrapper, Agent, Runner
+from typing import Optional, Any
+import asyncio
 
-    def build_agent(self, mcp_servers: list) -> Agent:
-        return Agent(
-            name="SEOSpecialist",
-            instructions="""
-            SEO・検索分析の専門家。以下を担当:
-            - GA4でのトラフィック分析
-            - GSCでの検索クエリ・掲載順位分析
-            - Ahrefsでの競合・被リンク分析
-            - Web検索での最新情報取得
-
-            分析結果は常にアクショナブルな提案を含めて回答。
-            """,
-            model="gpt-5-mini",
-            model_settings=ModelSettings(
-                reasoning=Reasoning(effort="high", summary="detailed"),
-            ),
-            tools=[WebSearchTool()],
-            mcp_servers=mcp_servers,  # GA4, GSC, Ahrefs
-        )
-
-
-class CRMAgentFactory:
-    """CRM・候補者分析専門エージェント"""
-
-    def build_agent(self) -> Agent:
-        return Agent(
-            name="CRMAnalyst",
-            instructions="""
-            Zoho CRM + 議事録データの分析専門家。以下を担当:
-            - 求職者の検索・詳細取得
-            - チャネル別獲得分析
-            - ステータス別ファネル分析
-            - 競合リスク・緊急度評価
-            - 担当者パフォーマンス分析
-
-            データドリブンな洞察を提供。
-            """,
-            model="gpt-5-mini",
-            model_settings=ModelSettings(
-                reasoning=Reasoning(effort="medium"),
-            ),
-            tools=[
-                *ZOHO_CRM_TOOLS,
-                *CANDIDATE_INSIGHT_TOOLS,
-            ],
-        )
-```
-
-### 4.3 Sub-Agent as Tool パターン
-
-複雑な分析タスクでサブエージェントをツールとして呼び出す：
-
-```python
-# backend/app/infrastructure/chatkit/sub_agent_tools.py
-
-from agents import function_tool, RunContextWrapper, Runner
-
-@function_tool(name_override="deep_competitive_analysis")
-async def call_competitive_analysis_agent(
-    ctx: RunContextWrapper,
-    domain: str,
-    analysis_depth: Literal["quick", "standard", "comprehensive"] = "standard",
+@function_tool(name_override="run_seo_analysis_agent")
+async def run_seo_analysis_agent(
+    ctx: RunContextWrapper[Any],
+    query: str,
+    property_name: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> dict:
     """
-    競合分析サブエージェントを呼び出し。
-    Ahrefs + Web検索を組み合わせた詳細分析を実行。
-    """
-    sub_agent = Agent(
-        name="CompetitiveAnalyzer",
-        instructions=f"""
-        ドメイン {domain} の競合分析を実行:
-        1. Ahrefsでトラフィック・被リンク取得
-        2. Web検索で最新ニュース・動向を調査
-        3. 強み・弱みを分析
-        4. アクションプランを提案
+    SEO分析サブエージェントを実行。
+    GA4, GSC, Ahrefsを使用してトラフィック・検索順位・競合分析を行う。
 
-        分析深度: {analysis_depth}
+    Args:
+        query: 分析クエリ（例: "トラフィック推移を分析"）
+        property_name: GA4/GSCプロパティ名（省略可）
+        date_from: 開始日（YYYY-MM-DD形式、省略可）
+        date_to: 終了日（YYYY-MM-DD形式、省略可）
+    """
+    from app.infrastructure.config.settings import get_settings
+    settings = get_settings()
+
+    # サブエージェント構築
+    agent = Agent(
+        name="SEOAnalysisAgent",
+        instructions=f"""
+SEO分析の専門家として以下を実行:
+- GA4: トラフィック分析
+- GSC: 検索クエリ・掲載順位分析
+- Ahrefs: 競合・被リンク分析
+
+対象プロパティ: {property_name or "デフォルト"}
+期間: {date_from or "直近"} 〜 {date_to or "現在"}
+
+分析後、具体的な改善提案を含めて回答。
         """,
-        model="gpt-4.1-mini",
-        tools=[ahrefs_mcp, WebSearchTool()],
+        model="gpt-5-mini",
+        tools=[WebSearchTool()],
+        # mcp_serversはコンテキストから取得
     )
 
+    # 実行
     result = await Runner.run(
-        sub_agent,
-        input=f"Analyze {domain}",
-        max_turns=5,
+        agent,
+        input=query,
+        max_turns=20,
     )
 
     return {
-        "domain": domain,
+        "success": True,
         "analysis": result.final_output,
-        "tokens_used": result.usage.total_tokens,
+        "tokens_used": result.usage.total_tokens if result.usage else 0,
+    }
+
+
+@function_tool(name_override="run_zoho_analysis_agent")
+async def run_zoho_analysis_agent(
+    ctx: RunContextWrapper[Any],
+    query: str,
+    channel: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> dict:
+    """
+    Zoho CRM分析サブエージェントを実行。
+    求職者データの検索・集計・ファネル分析を行う。
+
+    Args:
+        query: 分析クエリ（例: "チャネル別の応募数を集計"）
+        channel: フィルタするチャネル（省略可）
+        date_from: 開始日（YYYY-MM-DD形式、省略可）
+        date_to: 終了日（YYYY-MM-DD形式、省略可）
+    """
+    from .zoho_crm_tools import ZOHO_CRM_TOOLS
+
+    agent = Agent(
+        name="ZohoAnalysisAgent",
+        instructions=f"""
+Zoho CRM分析の専門家として以下を実行:
+- 求職者の検索・詳細取得
+- チャネル別獲得分析
+- ステータス別ファネル分析
+- トレンド分析・チャネル比較
+
+フィルタ条件:
+- チャネル: {channel or "全て"}
+- 期間: {date_from or "全期間"} 〜 {date_to or "現在"}
+
+データドリブンな洞察を提供。
+        """,
+        model="gpt-5-mini",
+        tools=list(ZOHO_CRM_TOOLS),
+    )
+
+    result = await Runner.run(
+        agent,
+        input=query,
+        max_turns=15,
+    )
+
+    return {
+        "success": True,
+        "analysis": result.final_output,
+        "tokens_used": result.usage.total_tokens if result.usage else 0,
+    }
+
+
+@function_tool(name_override="run_candidate_insight_agent")
+async def run_candidate_insight_agent(
+    ctx: RunContextWrapper[Any],
+    query: str,
+    analysis_type: Optional[str] = None,
+) -> dict:
+    """
+    候補者インサイトサブエージェントを実行。
+    競合リスク・緊急度評価・転職パターン分析を行う。
+
+    Args:
+        query: 分析クエリ（例: "高リスク候補者を特定"）
+        analysis_type: 分析種別（competitor_risk, urgency, patterns, briefing）
+    """
+    from .candidate_insight_tools import CANDIDATE_INSIGHT_TOOLS
+
+    agent = Agent(
+        name="CandidateInsightAgent",
+        instructions=f"""
+候補者インサイト分析の専門家として以下を実行:
+- 競合エージェント利用状況の分析
+- 緊急度評価（転職希望時期、離職状況）
+- 転職パターン・動機の分析
+- 面談準備用ブリーフィング生成
+
+分析タイプ: {analysis_type or "自動判定"}
+
+アクショナブルな提案を含めて回答。
+        """,
+        model="gpt-5-mini",
+        tools=list(CANDIDATE_INSIGHT_TOOLS),
+    )
+
+    result = await Runner.run(
+        agent,
+        input=query,
+        max_turns=10,
+    )
+
+    return {
+        "success": True,
+        "analysis": result.final_output,
+        "tokens_used": result.usage.total_tokens if result.usage else 0,
     }
 ```
 
-### 4.4 並列実行パターン
+### 4.3 並列実行ユーティリティ
 
 ```python
 # backend/app/infrastructure/chatkit/parallel_executor.py
 
 import asyncio
-from typing import Any
+from typing import Any, Callable, Coroutine, TypeVar
+import logging
 
-class ParallelTaskExecutor:
-    """独立タスクの並列実行"""
+logger = logging.getLogger(__name__)
 
-    async def execute_parallel(
-        self,
-        tasks: list[dict],
-    ) -> list[dict]:
-        """
-        依存関係のないタスクを並列実行
-        """
-        # 依存関係チェック
-        independent = [t for t in tasks if not t.get("blocked_by")]
-        dependent = [t for t in tasks if t.get("blocked_by")]
+T = TypeVar("T")
 
-        # 独立タスクを並列実行
-        results = await asyncio.gather(*[
-            self._execute_task(t) for t in independent
-        ], return_exceptions=True)
 
-        # 結果をマージ
-        completed = {t["id"]: r for t, r in zip(independent, results)}
+async def run_parallel_subagents(
+    tasks: list[dict],
+    timeout: int = 300,
+) -> list[dict]:
+    """
+    複数のサブエージェントを並列実行。
 
-        # 依存タスクを順次実行
-        for task in dependent:
-            if all(completed.get(dep) for dep in task["blocked_by"]):
-                result = await self._execute_task(task)
-                completed[task["id"]] = result
+    Args:
+        tasks: [{"name": str, "coro": Coroutine}, ...]
+        timeout: タイムアウト秒数
 
-        return list(completed.values())
+    Returns:
+        [{"name": str, "result": Any, "success": bool, "error": str?}, ...]
+    """
+    async def _run_with_timeout(
+        coro: Coroutine,
+        name: str,
+    ) -> dict:
+        try:
+            result = await asyncio.wait_for(coro, timeout=timeout)
+            return {
+                "name": name,
+                "result": result,
+                "success": True,
+            }
+        except asyncio.TimeoutError:
+            logger.warning(f"Subagent {name} timed out after {timeout}s")
+            return {
+                "name": name,
+                "result": None,
+                "success": False,
+                "error": f"タイムアウト ({timeout}秒)",
+            }
+        except Exception as e:
+            logger.error(f"Subagent {name} failed: {e}")
+            return {
+                "name": name,
+                "result": None,
+                "success": False,
+                "error": str(e),
+            }
 
-    async def _execute_task(self, task: dict) -> Any:
-        """個別タスクの実行"""
-        agent = task["agent"]
-        input_text = task["input"]
-        return await Runner.run(agent, input=input_text)
+    # Python 3.11+ TaskGroup
+    async with asyncio.TaskGroup() as tg:
+        futures = [
+            tg.create_task(
+                _run_with_timeout(task["coro"], task["name"]),
+                name=task["name"],
+            )
+            for task in tasks
+        ]
+
+    return [f.result() for f in futures]
+
+
+def merge_subagent_results(
+    results: list[dict],
+    include_tokens: bool = True,
+) -> dict:
+    """
+    サブエージェント結果をマージ。
+
+    Args:
+        results: run_parallel_subagents の結果
+        include_tokens: トークン使用量を集計するか
+
+    Returns:
+        {
+            "analyses": {name: analysis},
+            "total_tokens": int,
+            "success_count": int,
+            "failure_count": int,
+            "errors": {name: error},
+        }
+    """
+    analyses = {}
+    errors = {}
+    total_tokens = 0
+
+    for r in results:
+        name = r["name"]
+        if r["success"]:
+            result = r["result"]
+            analyses[name] = result.get("analysis", result)
+            if include_tokens:
+                total_tokens += result.get("tokens_used", 0)
+        else:
+            errors[name] = r.get("error", "Unknown error")
+
+    return {
+        "analyses": analyses,
+        "total_tokens": total_tokens,
+        "success_count": len(analyses),
+        "failure_count": len(errors),
+        "errors": errors if errors else None,
+    }
 ```
 
 ---

@@ -920,6 +920,104 @@ cd backend && uv run python scripts/test_token_usage.py
 - [OpenAI Swarm GitHub](https://github.com/openai/swarm)
 - SDK ソースコード: `agents/handoffs/`, `agents/run.py`, `agents/_run_impl.py`
 
+### 9. Sub-Agent as Tool マルチエージェント調査 (2026-02-04)
+
+**背景**: Router + Handoff方式の調査後、ユーザーからSub-Agent as Tool方式の提案があり、大規模調査を実施
+
+**調査結果**: Sub-Agent as Tool方式を**推奨**
+
+**Handoff vs Sub-Agent as Tool 比較**:
+| 特性 | Handoff | Sub-Agent as Tool |
+|------|---------|-------------------|
+| 制御権 | 子に完全移譲 | 親が保持 ✅ |
+| 並列実行 | 不可 | 可能 ✅ |
+| エラー復旧 | 困難 | 親で対応可能 ✅ |
+| 対話継続 | 途切れる | 継続可能 ✅ |
+
+**結論**: マーケティングAIでは「親が制御を保持」「並列実行」「エラー復旧」が重要なため、Sub-Agent as Tool方式を採用
+
+**推奨アーキテクチャ**:
+```
+Orchestrator (GPT-5.2) ─┬─ SEO Agent (GPT-5-mini)
+                        ├─ Zoho Agent (GPT-5-mini)
+                        └─ Candidate Agent (GPT-5-mini)
+```
+
+**Agent.as_tool() API**:
+```python
+sub_agent.as_tool(
+    tool_name="run_seo_analysis",
+    tool_description="SEO分析を実行",
+    custom_output_extractor=lambda result: result.final_output,
+    max_turns=20,
+)
+```
+
+**並列実行パターン**:
+```python
+async with asyncio.TaskGroup() as tg:
+    futures = [tg.create_task(run_agent(a)) for a in agents]
+results = [f.result() for f in futures]
+```
+
+**コスト分析**:
+- 単純クエリ (60%): GPT-5-mini単体 → ¥0.96/クエリ
+- 中程度クエリ (30%): mini×2並列 → ¥1.5/クエリ
+- 複雑クエリ (10%): 5.2 + mini×2 → ¥5.5/クエリ
+- **加重平均**: ¥1.5/クエリ（現在の¥3-5から**50-70%削減**）
+
+**ドキュメント更新**: `docs/multi-agent-architecture.md` → v2.0.0 (Sub-Agent as Tool方式)
+
+**情報ソース**:
+- SDK ソースコード: `agents/extensions/handoff_prompt.py` (as_tool実装)
+- SDK ソースコード: `agents/tool.py` (FunctionTool)
+- SDK ソースコード: `agents/run.py` (Runner.run)
+
+### 10. Sub-Agent as Tool マルチエージェント実装 (2026-02-04)
+
+**実装完了**: Sub-Agent as Tool アーキテクチャをマーケティングAIに統合
+
+**新規ファイル** (`backend/app/infrastructure/chatkit/agents/`):
+| ファイル | 説明 | ツール数 |
+|---------|------|---------|
+| `__init__.py` | モジュール初期化 | - |
+| `base.py` | SubAgentFactory基底クラス（ネイティブツール共有） | - |
+| `orchestrator.py` | OrchestratorAgentFactory (GPT-5.2) | 8 (6 sub-agent + 2 native) |
+| `analytics_agent.py` | AnalyticsAgentFactory (GA4 + GSC) | 18 |
+| `ad_platform_agent.py` | AdPlatformAgentFactory (Meta Ads) | 22 |
+| `seo_agent.py` | SEOAgentFactory (Ahrefs) | 22 |
+| `wordpress_agent.py` | WordPressAgentFactory (WP×2) | 54 |
+| `zoho_crm_agent.py` | ZohoCRMAgentFactory | 11 |
+| `candidate_insight_agent.py` | CandidateInsightAgentFactory | 6 |
+
+**変更ファイル**:
+- `marketing_server.py`: `MarketingAgentFactory` → `OrchestratorAgentFactory` に変更
+
+**アーキテクチャ**:
+```
+Orchestrator (GPT-5.2) ─┬─ AnalyticsAgent (GA4+GSC, 16 MCP)
+                        ├─ AdPlatformAgent (Meta, 20 MCP)
+                        ├─ SEOAgent (Ahrefs, 20 MCP)
+                        ├─ WordPressAgent (WP×2, 52 MCP)
+                        ├─ ZohoCRMAgent (9 function)
+                        └─ CandidateInsightAgent (4 function)
+```
+
+**全エージェントに共通のネイティブツール**:
+- WebSearchTool (日本向け設定)
+- CodeInterpreterTool
+
+**期待効果**:
+- ツール定義トークン: ~12,100 → ~800 (93%削減)
+- 複合クエリ応答時間: 30-60秒 → 10-20秒 (並列実行)
+- コスト: サブエージェントがGPT-5-miniを使用（大幅削減）
+
+**検証コマンド**:
+```bash
+cd backend
+uv run python -c "from app.infrastructure.chatkit.agents import OrchestratorAgentFactory; print('OK')"
+```
+
 ---
 
 ## 自己改善ログ

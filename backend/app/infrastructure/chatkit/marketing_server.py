@@ -221,10 +221,9 @@ from app.infrastructure.chatkit.model_assets import (
     get_model_asset,
     set_thread_model_asset,
 )
-from app.infrastructure.chatkit.seo_agent_factory import (
-    MARKETING_WORKFLOW_ID,
-    MarketingAgentFactory,
-)
+# Multi-agent architecture: OrchestratorAgentFactory coordinates sub-agents
+from app.infrastructure.chatkit.agents import OrchestratorAgentFactory
+from app.infrastructure.chatkit.seo_agent_factory import MARKETING_WORKFLOW_ID
 from app.infrastructure.chatkit.supabase_store import SupabaseChatStore
 from app.infrastructure.chatkit.attachment_store import SupabaseAttachmentStore
 from app.infrastructure.config.settings import Settings, get_settings
@@ -233,13 +232,13 @@ logger = logging.getLogger(__name__)
 
 
 class MarketingChatKitServer(ChatKitServer[MarketingRequestContext]):
-    """ChatKit server wired to the SEO marketing agent runner."""
+    """ChatKit server using multi-agent orchestrator architecture."""
 
     def __init__(
         self,
         store: Store[MarketingRequestContext],
         attachment_store: SupabaseAttachmentStore,
-        agent_factory: MarketingAgentFactory,
+        agent_factory: OrchestratorAgentFactory,
         workflow_id: str,
         settings: Settings | None = None,
         mcp_manager: MCPSessionManager | None = None,
@@ -518,7 +517,8 @@ def get_marketing_chat_server() -> MarketingChatKitServer:
     settings = get_settings()
     store = SupabaseChatStore()
     attachment_store = SupabaseAttachmentStore()
-    agent_factory = MarketingAgentFactory(settings)
+    # Use multi-agent orchestrator architecture
+    agent_factory = OrchestratorAgentFactory(settings)
 
     # Initialize MCP manager for local MCP servers
     mcp_manager = None
