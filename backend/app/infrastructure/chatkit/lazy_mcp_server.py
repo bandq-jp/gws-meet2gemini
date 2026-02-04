@@ -13,12 +13,18 @@ With LazyMCPServer:
 - No connection at initialization
 - Connection happens on first list_tools() or call_tool()
 - Saves 2-3 seconds per MCP server for non-tool queries
+
+With CompactMCPServer integration:
+- GA4 report outputs are compressed from JSON to TSV (~76% reduction)
+- Prevents context window overflow
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Awaitable
+
+from .compact_mcp import CompactMCPServer
 
 if TYPE_CHECKING:
     from agents.mcp import MCPServer
@@ -54,6 +60,8 @@ class LazyMCPServer:
         server_factory: Callable[[], "MCPServer"],
         name: str = "lazy-mcp",
         cache_tools_list: bool = True,
+        use_compact_wrapper: bool = False,
+        max_output_chars: int = 16000,
     ):
         """
         Initialize lazy MCP server wrapper.
@@ -63,10 +71,14 @@ class LazyMCPServer:
                            Called lazily on first use.
             name: Server name (for logging).
             cache_tools_list: Whether to cache tool list after first fetch.
+            use_compact_wrapper: Whether to wrap with CompactMCPServer (for GA4).
+            max_output_chars: Max chars for tool output (CompactMCPServer).
         """
         self._server_factory = server_factory
         self._name = name
         self._cache_tools_list = cache_tools_list
+        self._use_compact_wrapper = use_compact_wrapper
+        self._max_output_chars = max_output_chars
         self._server: "MCPServer" | None = None
         self._connected = False
         self._connecting = False
@@ -104,7 +116,14 @@ class LazyMCPServer:
                 logger.info(f"[LazyMCP] Connecting {self._name}...")
 
                 # Create server instance
-                self._server = self._server_factory()
+                inner_server = self._server_factory()
+
+                # Wrap with CompactMCPServer if enabled (for GA4)
+                if self._use_compact_wrapper:
+                    self._server = CompactMCPServer(inner_server, self._max_output_chars)
+                    logger.info(f"[LazyMCP] {self._name} wrapped with CompactMCPServer")
+                else:
+                    self._server = inner_server
 
                 # Connect (this is the expensive operation)
                 await self._server.__aenter__()

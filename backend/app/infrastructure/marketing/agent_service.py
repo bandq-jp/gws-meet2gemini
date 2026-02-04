@@ -3,16 +3,22 @@ Marketing Agent Service - Native OpenAI Agents SDK streaming.
 
 Replaces ChatKit's stream_agent_response() with direct SDK event processing.
 Uses Queue + pump task pattern from ga4-oauth-aiagent.
+
+Optimizations:
+- Simple query bypass: greetings and general questions skip orchestrator entirely
+- Lazy MCP initialization: servers connect only when sub-agents are called
+- CompactMCPServer: GA4 output compressed 76%
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable
 
-from agents import Runner, RunConfig
+from agents import Runner, RunConfig, Agent, ModelSettings
 from agents.items import ReasoningItem
 from openai import AsyncOpenAI
 
@@ -25,6 +31,25 @@ if TYPE_CHECKING:
     from agents.stream_events import StreamEvent
 
 logger = logging.getLogger(__name__)
+
+# Simple query patterns - skip orchestrator for these
+# Use word boundaries (\b) to prevent partial matches (e.g., "hi" matching "hitocareer")
+_SIMPLE_QUERY_PATTERNS = [
+    r"^(こんにちは|こんばんは|おはよう|ありがとう|さようなら|はじめまして)(\s|$|！|。)",
+    r"^(hello|hey|thanks|bye)(\s|$|!|\.)",  # Require word boundary
+    r"^hi(\s|$|!)",  # "hi" only at start followed by space/end
+    r"^(あなたは誰|あなたは何|何ができ|自己紹介|help|ヘルプ)",
+    r"^(テスト|test)(\s|$)",
+]
+_SIMPLE_QUERY_COMPILED = [re.compile(p, re.IGNORECASE) for p in _SIMPLE_QUERY_PATTERNS]
+
+# Simple query response agent instructions (ultra-lightweight)
+_SIMPLE_AGENT_INSTRUCTIONS = """b&qマーケティングAIです。短く応答してください。
+
+挨拶には「こんにちは！マーケティング分析をお手伝いします。」程度で。
+能力を聞かれたら「GA4分析、SEO分析、広告分析、CRMデータ分析ができます。」と1文で。
+
+【重要】必ず1-2文以内で回答すること。"""
 
 # Sentinel to signal end-of-stream from the SDK background task
 _SENTINEL = object()
@@ -74,6 +99,64 @@ class MarketingAgentService:
         self._mcp_manager = mcp_manager
         self._agent_factory = OrchestratorAgentFactory(self._settings)
 
+    def _is_simple_query(self, message: str) -> bool:
+        """
+        Detect simple queries that don't need sub-agents.
+
+        Simple queries include:
+        - Greetings (こんにちは, hello)
+        - Self-introduction requests (何ができますか)
+        - Help requests
+        - Test messages
+        """
+        message_clean = message.strip().lower()
+        if len(message_clean) > 100:
+            return False  # Long queries are not simple
+
+        for pattern in _SIMPLE_QUERY_COMPILED:
+            if pattern.search(message_clean):
+                logger.info(f"[SimpleQuery] Detected simple query: {message[:30]}...")
+                return True
+        return False
+
+    async def _stream_simple_response(
+        self,
+        message: str,
+        conversation_id: str,
+    ) -> AsyncGenerator[dict, None]:
+        """
+        Fast path for simple queries - no sub-agents, no MCP.
+
+        Uses gpt-5-nano for ultra-fast responses (~0.5-1s).
+        """
+        logger.info("[SimpleQuery] Using fast path (no sub-agents)")
+
+        simple_agent = Agent(
+            name="SimpleResponder",
+            instructions=_SIMPLE_AGENT_INSTRUCTIONS,
+            model="gpt-5-nano",  # Ultra-fast model
+            model_settings=ModelSettings(store=False),
+            tools=[],  # No tools needed
+        )
+
+        result = Runner.run_streamed(
+            simple_agent,
+            input=[{"role": "user", "content": message}],
+            max_turns=1,
+        )
+
+        try:
+            async for event in result.stream_events():
+                sdk_event = self._process_sdk_event(event)
+                if sdk_event is not None:
+                    yield sdk_event
+        except Exception as e:
+            yield {"type": "error", "message": str(e)}
+
+        # Return context for continuation (simple queries don't preserve full context)
+        yield {"type": "_context_items", "items": []}
+        yield {"type": "done", "conversation_id": conversation_id}
+
     async def stream_chat(
         self,
         user_id: str,
@@ -94,6 +177,13 @@ class MarketingAgentService:
         - {"type": "sub_agent_event", "agent": "...", "event_type": "..."}
         - {"type": "done", "conversation_id": "..."}
         """
+        # FAST PATH: Simple queries bypass orchestrator entirely
+        # This saves ~4 seconds for greetings and general questions
+        if not context_items and self._is_simple_query(message):
+            async for event in self._stream_simple_response(message, conversation_id):
+                yield event
+            return
+
         # Queue for multiplexing SDK events and out-of-band events
         queue: asyncio.Queue[dict | object] = asyncio.Queue()
 

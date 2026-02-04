@@ -250,14 +250,16 @@ class MCPSessionManager:
         gsc_server = None
         meta_ads_server = None
 
-        # GA4 MCP (lazy)
+        # GA4 MCP (lazy) - with CompactMCPServer for ~76% token reduction
         if self._settings.local_mcp_ga4_enabled:
             ga4_server = LazyMCPServer(
                 server_factory=self.create_ga4_server,
                 name="ga4",
                 cache_tools_list=True,
+                use_compact_wrapper=True,  # Compress GA4 JSON to TSV
+                max_output_chars=16000,
             )
-            logger.info("[Local MCP] GA4: lazy wrapper created")
+            logger.info("[Local MCP] GA4: lazy + compact wrapper")
 
         # GSC MCP (lazy)
         if self._settings.local_mcp_gsc_enabled:

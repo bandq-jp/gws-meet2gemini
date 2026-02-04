@@ -3,12 +3,16 @@ Orchestrator Agent - Main coordinator for marketing AI.
 
 Coordinates sub-agents and manages user interaction.
 Tools: 6 sub-agent tools + native tools (Web Search, Code Interpreter)
+
+Performance Optimizations:
+- Native tools are cached to avoid re-instantiation
+- Sub-agent factories are reused across requests
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Tuple
 
 from agents import Agent, CodeInterpreterTool, ModelSettings, WebSearchTool
 from openai.types.shared.reasoning import Reasoning
@@ -25,15 +29,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Module-level cache for orchestrator native tools
+# Key: (country, enable_web_search, enable_code_interpreter)
+_ORCHESTRATOR_NATIVE_TOOLS_CACHE: Dict[Tuple[str, bool, bool], List[Any]] = {}
+
 
 ORCHESTRATOR_INSTRUCTIONS = """
 あなたはb&qマーケティングAIオーケストレーターです。
+
+## 重要ルール（必ず従うこと）
+1. 【必須】データや分析が必要な質問には、必ずサブエージェントを呼び出すこと
+2. 自分でデータを推測・捏造してはならない
+3. 「トラフィック」「分析」「データ」「数値」を含む質問は、サブエージェントが必要
+4. 挨拶や一般知識のみ、サブエージェント不要
 
 ## 役割
 - ユーザーの質問を分析し、適切なサブエージェントを選択
 - 複数ドメインにまたがる質問は並列でサブエージェントを呼び出し
 - サブエージェントの結果を統合し、アクショナブルな回答を生成
-- 単純な質問（挨拶、一般知識）はサブエージェントを使わず直接回答
+- 単純な質問（挨拶、一般知識）のみサブエージェントを使わず直接回答
 
 ## 利用可能なサブエージェント
 
@@ -173,17 +187,15 @@ class OrchestratorAgentFactory:
             model_settings = ModelSettings()
             logger.info("[Orchestrator] LiteLLM model - using minimal model settings")
         else:
-            # OpenAI: Full settings
+            # OpenAI: Full settings with parallel tool calls enabled
+            # Note: verbosity and response_include are NOT valid ModelSettings params
             model_settings = ModelSettings(
                 store=True,
+                parallel_tool_calls=True,  # Enable parallel sub-agent execution
                 reasoning=Reasoning(
                     effort=reasoning_effort,
                     summary="detailed",
                 ),
-                verbosity=self._normalize_verbosity(
-                    asset.get("verbosity") if asset else None
-                ),
-                response_include=["code_interpreter_call.outputs"],
             )
 
         return Agent(
@@ -206,6 +218,8 @@ class OrchestratorAgentFactory:
 
         For OpenAI models: WebSearchTool, CodeInterpreterTool
         For LiteLLM models: Empty (these are Responses API only)
+
+        Performance: Tools are cached based on settings to avoid re-instantiation.
         """
         # WebSearchTool and CodeInterpreterTool are OpenAI Responses API features
         # They are not available via ChatCompletions API (LiteLLM/Gemini)
@@ -213,14 +227,24 @@ class OrchestratorAgentFactory:
             logger.info("[Orchestrator] LiteLLM model detected - native tools disabled")
             return []
 
-        tools: List[Any] = []
-
         enable_web_search = self._settings.marketing_enable_web_search and (
             asset is None or asset.get("enable_web_search", True)
         )
         enable_code_interpreter = self._settings.marketing_enable_code_interpreter and (
             asset is None or asset.get("enable_code_interpreter", True)
         )
+
+        # Check cache
+        cache_key = (
+            self._settings.marketing_search_country,
+            enable_web_search,
+            enable_code_interpreter,
+        )
+        if cache_key in _ORCHESTRATOR_NATIVE_TOOLS_CACHE:
+            return _ORCHESTRATOR_NATIVE_TOOLS_CACHE[cache_key]
+
+        # Build and cache tools
+        tools: List[Any] = []
 
         if enable_web_search:
             tools.append(
@@ -246,6 +270,8 @@ class OrchestratorAgentFactory:
                 )
             )
 
+        _ORCHESTRATOR_NATIVE_TOOLS_CACHE[cache_key] = tools
+        logger.debug(f"[Orchestrator] Native tools cached: key={cache_key}")
         return tools
 
     def _build_instructions(self, asset: Dict[str, Any] | None = None) -> str:

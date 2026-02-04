@@ -835,7 +835,9 @@ async def chat_stream(
                         logger.info(f"[DB] Saved context_items for: {conversation_id}")
                     except Exception as e:
                         logger.warning(f"[DB] Failed to save context_items: {e}")
-                    continue  # Don't send to client
+                    # Send to client so frontend can maintain context for next turn
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    continue
 
                 # Translate reasoning summary from English to Japanese
                 if event.get("_needs_translation"):

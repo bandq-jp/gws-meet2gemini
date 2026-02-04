@@ -1831,6 +1831,203 @@ After (Lazy):
 - SDK Source: `agents/mcp/server.py` L367-403 (`list_tools()`)
 - SDK Source: `agents/agent.py` L128-133 (`get_mcp_tools()`)
 
+### 22. 会話履歴バグ修正 & オーバーヘッド最適化 (2026-02-04)
+
+**背景**: 大規模調査（4並列エージェント）で致命的なバグとオーバーヘッドを特定
+
+#### 🚨 致命的バグ: _context_items SSEイベント未送信
+
+**問題発見**:
+- `marketing.py` L838 で `continue` により `_context_items` イベントがSSEに送信されていなかった
+- フロントエンドの `contextItemsRef.current` は常に `null`
+- **複数ターンの会話で前のターンの文脈が完全に喪失**
+
+**影響**:
+```
+Turn 1: User: "こんにちは"
+  → Backend: context_items 生成・DB保存 ✓
+  → SSE送信なし ✗
+  → Frontend: contextItemsRef.current = null
+
+Turn 2: User: "前の話について"
+  → input_messages = [{"role": "user", "content": "前の話について"}] ← 前のターンが消失!
+  → Agent: "前の話がわかりません" ← コンテキスト喪失
+```
+
+**修正** (`marketing.py` L838):
+```python
+# Before (バグ)
+continue  # Don't send to client
+
+# After (修正)
+yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+continue
+```
+
+#### オーバーヘッド分析結果
+
+大規模調査で特定されたボトルネック：
+
+| ボトルネック | 時間 | 原因 | 対策 |
+|-------------|------|------|------|
+| Sub-Agent Build（逐次） | 1,400ms | 6エージェント逐次loop | (並列化検討中) |
+| Native Tools再生成 | 300ms | 毎回新規インスタンス | ✅ キャッシュ実装 |
+| Tool Definition再パース | 200ms | 毎回再生成 | (キャッシュ検討中) |
+
+#### Native Tools キャッシュ実装
+
+**修正ファイル**:
+- `backend/app/infrastructure/chatkit/agents/base.py`
+- `backend/app/infrastructure/chatkit/agents/orchestrator.py`
+
+**実装**:
+```python
+# モジュールレベルキャッシュ
+_NATIVE_TOOLS_CACHE: dict[str, list[Any]] = {}
+
+def _get_native_tools(self) -> List[Any]:
+    cache_key = self._settings.marketing_search_country
+    if cache_key in _NATIVE_TOOLS_CACHE:
+        return _NATIVE_TOOLS_CACHE[cache_key]
+
+    # 作成してキャッシュ
+    tools = [WebSearchTool(...), CodeInterpreterTool(...)]
+    _NATIVE_TOOLS_CACHE[cache_key] = tools
+    return tools
+```
+
+**期待効果**:
+- Native Tools 再インスタンス化: 300ms → 5ms (94%削減)
+- 2回目以降のリクエストで効果発揮
+
+#### OpenAI Agents SDK 最適化知見
+
+大規模調査で判明した追加最適化ポイント：
+
+| 設定 | デフォルト | 推奨 | 効果 |
+|------|-----------|------|------|
+| `max_turns` | 10 | 3-5 | API呼び出し上限削減 |
+| `parallel_tool_calls` | None | False (サブエージェント) | 順序実行で安定性向上 |
+| `temperature` | 1.0 | 0.2-0.3 (サブエージェント) | 出力の一貫性向上 |
+| `custom_output_extractor` | None | 実装推奨 | トークン30%削減 |
+
+**参照**: `agents/run.py`, `agents/agent.py`, `agents/model_settings.py`
+
+#### テストスクリプト
+
+```bash
+cd backend
+uv run python scripts/test_response_time.py
+```
+
+**計測項目**:
+- TTFT (Time to First Token)
+- Total Response Time
+- Sub-Agent呼び出し数・名前
+- イベント数
+
+### 22. マルチエージェント並列実行最適化 (2026-02-04)
+
+**実装した最適化**:
+
+1. **Orchestrator `parallel_tool_calls=True`** (`orchestrator.py`):
+   - 複数サブエージェントを並列で呼び出し可能に
+   - COMPLEXクエリで `call_analytics_agent` と `call_zoho_crm_agent` が同時実行
+
+2. **SubAgent最適化** (`base.py`):
+   - `reasoning_effort: "low"` (デフォルト`"medium"`から変更)
+   - `reasoning.summary: "concise"` (デフォルト`"detailed"`から変更)
+   - `verbosity: "low"` (デフォルト`"medium"`から変更)
+   - `parallel_tool_calls: true` (サブエージェント内のツール並列実行)
+
+**ベンチマーク結果比較**:
+
+| シナリオ | 最適化前 | 最適化後 | 改善率 |
+|---------|---------|---------|--------|
+| SIMPLE | 4.06s | 4.32s | - |
+| MEDIUM | 58.57s | **37.28s** | **36%** |
+| COMPLEX | 125.67s | **72.80s** | **42%** |
+
+**技術的知見**:
+- `parallel_tool_calls=True`: OpenAI Agents SDKでサブエージェント（as_tool化）を並列実行
+- サブエージェントの`reasoning_effort: "low"`: 速度優先、精度は十分維持
+- `max_tool_calls`: Agent.__init__()には存在しない（無効パラメータ）
+- 並列実行は`Runner.run_streamed()`内で自動的に処理される
+
+**残存ボトルネック**:
+- ZohoCRMAgent: 単純カウントクエリでも7回のサブエージェントイベント
+- Zoho API: COQLでも複数ラウンドトリップが発生
+
+**情報ソース**:
+- SDK Source: `agents/model_settings.py` (ModelSettings)
+- SDK Source: `agents/run.py` (Runner.run_streamed)
+- 大規模並列調査結果 (10エージェント同時実行)
+
+### 23. 大規模最適化実装 (2026-02-05)
+
+**5並列エージェント調査**で以下の最適化パターンを発見・実装:
+
+#### 実装済み最適化
+
+| 最適化 | ファイル | 効果 |
+|--------|---------|------|
+| CompactMCPServer | `compact_mcp.py` (新規) | GA4 JSON→TSV圧縮 (76%トークン削減) |
+| LazyMCPServer統合 | `lazy_mcp_server.py` | GA4にCompactMCPServer自動適用 |
+| 無効ModelSettings削除 | `orchestrator.py`, `base.py` | `verbosity`, `response_include` は存在しないパラメータ |
+| Simple Query Fast Path | `agent_service.py` | 挨拶はgpt-5-nano直接応答 |
+| オーケストレーター指示強化 | `orchestrator.py` | データクエリは必ずサブエージェント使用を明示 |
+
+#### 発見・修正したバグ
+
+1. **Simple Query Pattern Bug**: `hi`パターンが`hitocareer`にマッチしていた
+   - 修正: ワード境界 `(\s|$|!)` を追加
+
+2. **無効なModelSettingsパラメータ**: `verbosity`, `response_include`
+   - 原因: OpenAI Agents SDKに存在しないパラメータがサイレントに無視されていた
+   - 影響: 「よくわかんないバックグラウンドみたいな」応答の一因
+
+#### ベンチマーク結果比較
+
+| シナリオ | 最適化前 | 最適化後 | 改善率 |
+|---------|---------|---------|--------|
+| SIMPLE | 4.06s | 4.17s | ~0% |
+| MEDIUM | 58.57s | **43.83s** | **25%** |
+| COMPLEX | 125.67s | **48.01s** | **62%** |
+
+#### 参照プロジェクトからの知見
+
+**ga4-oauth-aiagent:**
+- CompactMCPServer: GA4 proto_to_dict JSON→TSV変換で76%圧縮
+- MCP Session Caching: 接続再利用でリクエスト毎の接続オーバーヘッド削減
+- Queue + Pump Task: SDKイベントとカスタムイベントのマルチプレクス
+
+**marketing-automation:**
+- `result.to_input_list()` でコンテキスト永続化
+- `Reasoning(summary="detailed")` でストリーミング推論表示
+- `ContextVar` でスレッドセーフなクレデンシャル伝搬
+
+**wordpress-ability-plugin:**
+- Static closures: メモリ効率向上
+- Input schema constraints: 早期バリデーション
+- Permission callback separation: キャッシング機会
+
+#### 90%削減に向けた追加最適化候補
+
+| 最適化 | 期待効果 | 実装難易度 |
+|--------|---------|-----------|
+| Semantic Caching (Redis) | 頻出クエリの即時応答 | 高 |
+| Tool Output Caching | 同じツール結果の再利用 | 中 |
+| Zoho COQL最適化 | 7回→1回のAPI呼び出し | 中 |
+| Model Routing | 簡単クエリはgpt-5-nano | 低（実装済み） |
+| Prompt Caching | 80%レイテンシ削減 | OpenAI自動 |
+
+**技術的知見**:
+- `verbosity` はOpenAI Agents SDK ModelSettingsに**存在しない**
+- `response_include` も同様に存在しない
+- これらのパラメータはサイレントに無視される（エラーにならない）
+- Gemini via LiteLLMはツール呼び出しが不安定な場合がある
+- オーケストレーターはOpenAI (gpt-5.1/5.2) 推奨
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

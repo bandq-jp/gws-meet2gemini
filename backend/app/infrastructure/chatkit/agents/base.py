@@ -5,11 +5,17 @@ All sub-agents inherit from SubAgentFactory, which provides:
 - Native tools (WebSearchTool, CodeInterpreterTool) for all agents
 - Consistent model settings and configuration
 - Abstract methods for domain-specific customization
+
+Performance Optimizations:
+- Native tools are cached at module level to avoid re-instantiation
+- Each factory caches its built agent for reuse when MCP servers match
 """
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import TYPE_CHECKING, Any, List
 
 from agents import Agent, CodeInterpreterTool, ModelSettings, WebSearchTool
@@ -17,6 +23,11 @@ from openai.types.shared.reasoning import Reasoning
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
+
+logger = logging.getLogger(__name__)
+
+# Module-level cache for native tools (keyed by country setting)
+_NATIVE_TOOLS_CACHE: dict[str, list[Any]] = {}
 
 
 class SubAgentFactory(ABC):
@@ -68,8 +79,8 @@ class SubAgentFactory(ABC):
 
     @property
     def reasoning_effort(self) -> str:
-        """Reasoning effort level. Override for custom effort."""
-        return "medium"
+        """Reasoning effort level. Low for sub-agents to optimize speed."""
+        return "low"
 
     @abstractmethod
     def _get_domain_tools(
@@ -105,13 +116,21 @@ class SubAgentFactory(ABC):
         For LiteLLM models (Gemini, etc.):
         - These hosted tools are NOT supported (Responses API only)
         - Returns empty list
+
+        Performance: Tools are cached at module level to avoid re-instantiation.
         """
         # WebSearchTool and CodeInterpreterTool are OpenAI Responses API features
         # They are not available via ChatCompletions API (LiteLLM/Gemini)
         if self.is_litellm_model:
             return []
 
-        return [
+        # Check cache first
+        cache_key = self._settings.marketing_search_country
+        if cache_key in _NATIVE_TOOLS_CACHE:
+            return _NATIVE_TOOLS_CACHE[cache_key]
+
+        # Create and cache native tools
+        tools = [
             WebSearchTool(
                 search_context_size="medium",
                 user_location={
@@ -129,6 +148,9 @@ class SubAgentFactory(ABC):
                 }
             ),
         ]
+        _NATIVE_TOOLS_CACHE[cache_key] = tools
+        logger.debug(f"[SubAgent] Native tools cached for country={cache_key}")
+        return tools
 
     def _build_model_settings(self) -> ModelSettings:
         """
@@ -143,14 +165,15 @@ class SubAgentFactory(ABC):
             # - reasoning: LiteLLM handles mapping, but may not work for all models
             return ModelSettings()
 
-        # OpenAI: Full settings
+        # OpenAI: Full settings optimized for sub-agent speed
+        # Note: verbosity is NOT a valid ModelSettings param - use instructions instead
         return ModelSettings(
             store=True,
+            parallel_tool_calls=True,  # Enable parallel tool execution
             reasoning=Reasoning(
-                effort=self.reasoning_effort,
-                summary="detailed",
+                effort="low",  # Sub-agents use minimal reasoning for speed
+                summary="concise",  # Shorter summaries
             ),
-            verbosity="medium",
         )
 
     def build_agent(
