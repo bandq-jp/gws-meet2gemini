@@ -1730,7 +1730,7 @@ if (textIdx !== -1) {
 - `useEffect`でコールバック実行を次のレンダリングサイクルに遅延させることで解決
 - エッジケース（item not found）のハンドリングは静かに失敗するのではなく、フォールバック処理を入れるべき
 
-### 21. レスポンス速度最適化 (2026-02-04)
+### 21. レスポンス速度最適化 - LazyMCPServer実装 (2026-02-04)
 
 **報告された症状**: 単純な「こんにちは」でも約5秒かかる
 
@@ -1741,69 +1741,95 @@ if (textIdx !== -1) {
 22:03:46,014 - LiteLLM completion started
 ```
 
-**問題**: MCP初期化が逐次実行 + 不要なクエリでも初期化
+**根本原因分析**（大規模調査結果）:
+- MCPサーバーは**サブエージェントが呼び出されたときだけ**使用される
+- サブエージェントは**オーケストレーターがLLM判断で呼び出す**ときだけ実行される
+- 単純クエリ（「こんにちは」）→ サブエージェント不要 → **MCP初期化が完全に無駄**
 
-**最適化1: MCP初期化の並列化**
+**解決策: LazyMCPServerラッパー**
 
-**修正前** (`agent_service.py`):
+**新規ファイル**: `backend/app/infrastructure/chatkit/lazy_mcp_server.py`
+
 ```python
-# 逐次初期化 (~2.8秒)
-if pair.ga4_server:
-    await mcp_stack.enter_async_context(pair.ga4_server)  # 待機
-if pair.gsc_server:
-    await mcp_stack.enter_async_context(pair.gsc_server)  # 待機
-if pair.meta_ads_server:
-    await mcp_stack.enter_async_context(pair.meta_ads_server)  # 待機
+class LazyMCPServer:
+    """
+    MCP接続をサブエージェントが実際に使用するまで遅延するラッパー.
+
+    - 初期化時: 接続なし（即座に完了）
+    - list_tools()呼び出し時: 初めて接続
+    - call_tool()呼び出し時: 初めて接続
+    """
+    def __init__(self, server_factory, name, cache_tools_list=True):
+        self._server_factory = server_factory
+        self._server = None
+        self._connected = False
+
+    async def _ensure_connected(self):
+        if not self._connected:
+            self._server = self._server_factory()
+            await self._server.__aenter__()
+            self._connected = True
+        return self._server
+
+    async def list_tools(self, ...):
+        server = await self._ensure_connected()  # ここで初めて接続
+        return await server.list_tools(...)
 ```
 
-**修正後**:
-```python
-# 並列初期化 (~0.8-1.0秒)
-async def init_server(server):
-    if server is None:
-        return None
-    await mcp_stack.enter_async_context(server)
-    return server
+**変更ファイル**:
 
-results = await asyncio.gather(
-    init_server(pair.ga4_server),
-    init_server(pair.gsc_server),
-    init_server(pair.meta_ads_server),
-)
-mcp_servers = [s for s in results if s is not None]
+1. **`mcp_manager.py`**:
+   - `create_lazy_server_pair()` メソッド追加
+   - LazyMCPServerでラップしたサーバーペアを返す
+
+2. **`agent_service.py`**:
+   - `create_server_pair()` → `create_lazy_server_pair()` に変更
+   - キーワード検出ロジック削除（LazyLoadingで自動的にスキップ）
+   - `AsyncExitStack` → `lazy_pair.cleanup_all()` に変更
+
+**動作フロー**:
+
 ```
+Before (Eager):
+リクエスト開始
+  ↓
+[GA4接続] ~1秒
+[GSC接続] ~1秒
+[Meta接続] ~1秒
+  ↓
+オーケストレーター開始
+  ↓ (単純クエリなら)
+サブエージェント呼び出しなし → 3秒無駄
 
-**効果**: ~2秒短縮
-
-**最適化2: 単純クエリでMCPスキップ**
-
-**キーワード検出**:
-```python
-_TOOL_KEYWORDS = {
-    # Analytics: "ga4", "analytics", "traffic", "検索", "アクセス"...
-    # SEO: "ahrefs", "backlink", "keyword", "競合"...
-    # Ads: "meta", "facebook", "広告", "キャンペーン"...
-    # WordPress: "wordpress", "記事", "article"...
-    # Zoho: "zoho", "crm", "求職者", "候補者"...
-}
-
-def _needs_mcp_tools(message: str) -> bool:
-    lower = message.lower()
-    return any(kw in lower for kw in _TOOL_KEYWORDS)
+After (Lazy):
+リクエスト開始
+  ↓
+[LazyWrapper作成] ~0ms (接続なし)
+  ↓
+オーケストレーター開始
+  ↓ (単純クエリなら)
+サブエージェント呼び出しなし → 0秒オーバーヘッド ✅
+  ↓ (複雑クエリなら)
+サブエージェント呼び出し → [ここで初めてMCP接続]
 ```
-
-**効果**: 単純クエリ（「こんにちは」等）で~3秒短縮
 
 **期待される改善**:
 | クエリタイプ | Before | After | 改善 |
 |------------|--------|-------|------|
-| 単純クエリ | ~5秒 | ~2秒 | **-60%** |
-| ツール使用クエリ | ~5秒 | ~3秒 | **-40%** |
+| 単純クエリ（こんにちは） | ~5秒 | **~1.5秒** | **-70%** |
+| サブエージェント1つ | ~5秒 | ~3秒 | **-40%** |
+| サブエージェント複数 | ~6秒 | ~4秒 | **-33%** |
 
 **技術的知見**:
-- `MCPServerStdio`の`enter_async_context()`がサブプロセス起動で最も時間がかかる
-- `asyncio.gather()`で並列化することで、最も遅いサーバーの初期化時間まで短縮
-- キーワード検出は完璧である必要はない（エージェントが必要に応じてツールを呼び出す）
+- OpenAI Agents SDK: `Agent.mcp_servers`に渡されたサーバーは、`list_tools()`が呼ばれるまで接続不要
+- `list_tools()`は`Runner.run_streamed()`内でサブエージェントが実行される時に初めて呼ばれる
+- LazyMCPServerは`asyncio.Lock()`で複数呼び出し時の重複接続を防止
+- 参考: https://openai.github.io/openai-agents-python/mcp/
+
+**情報ソース**:
+- OpenAI Agents SDK MCP Documentation
+- SDK Source: `agents/mcp/server.py` L367-403 (`list_tools()`)
+- SDK Source: `agents/agent.py` L128-133 (`get_mcp_tools()`)
 
 ---
 

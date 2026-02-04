@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING
 from agents.mcp import MCPServerStdio
 from agents.mcp.server import MCPServerStdioParams
 
+from app.infrastructure.chatkit.lazy_mcp_server import LazyMCPServer, LazyMCPServerPair
+
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
 
@@ -228,6 +230,57 @@ class MCPSessionManager:
         logger.info(f"[Local MCP] Total: {enabled_count}/3 servers ready")
 
         return MCPServerPair(
+            ga4_server=ga4_server,
+            gsc_server=gsc_server,
+            meta_ads_server=meta_ads_server,
+        )
+
+    def create_lazy_server_pair(self) -> LazyMCPServerPair:
+        """
+        Create lazy MCP servers that connect only when first used.
+
+        This dramatically improves response time for queries that don't
+        require MCP tools (e.g., simple greetings). Connection is deferred
+        until the sub-agent actually needs the MCP server.
+
+        Returns:
+            LazyMCPServerPair with lazy-loading GA4, GSC, and/or Meta Ads servers.
+        """
+        ga4_server = None
+        gsc_server = None
+        meta_ads_server = None
+
+        # GA4 MCP (lazy)
+        if self._settings.local_mcp_ga4_enabled:
+            ga4_server = LazyMCPServer(
+                server_factory=self.create_ga4_server,
+                name="ga4",
+                cache_tools_list=True,
+            )
+            logger.info("[Local MCP] GA4: lazy wrapper created")
+
+        # GSC MCP (lazy)
+        if self._settings.local_mcp_gsc_enabled:
+            gsc_server = LazyMCPServer(
+                server_factory=self.create_gsc_server,
+                name="gsc",
+                cache_tools_list=True,
+            )
+            logger.info("[Local MCP] GSC: lazy wrapper created")
+
+        # Meta Ads MCP (lazy)
+        if self._settings.local_mcp_meta_ads_enabled and self._settings.meta_access_token:
+            meta_ads_server = LazyMCPServer(
+                server_factory=self.create_meta_ads_server,
+                name="meta_ads",
+                cache_tools_list=True,
+            )
+            logger.info("[Local MCP] Meta Ads: lazy wrapper created")
+
+        enabled_count = sum(1 for s in [ga4_server, gsc_server, meta_ads_server] if s is not None)
+        logger.info(f"[Local MCP] {enabled_count} lazy servers prepared (will connect on-demand)")
+
+        return LazyMCPServerPair(
             ga4_server=ga4_server,
             gsc_server=gsc_server,
             meta_ads_server=meta_ads_server,
