@@ -52,8 +52,19 @@ class SubAgentFactory(ABC):
 
     @property
     def model(self) -> str:
-        """Model to use for this sub-agent. Override for custom model."""
-        return "gpt-5-mini"
+        """
+        Model to use for this sub-agent. Configurable via SUB_AGENT_MODEL env.
+
+        Supports:
+        - OpenAI models: "gpt-5-mini", "gpt-5.1"
+        - Gemini via LiteLLM: "litellm/gemini/gemini-3-flash-preview"
+        """
+        return self._settings.sub_agent_model
+
+    @property
+    def is_litellm_model(self) -> bool:
+        """Check if the model is a LiteLLM model (non-OpenAI)."""
+        return self.model.startswith("litellm/")
 
     @property
     def reasoning_effort(self) -> str:
@@ -87,10 +98,19 @@ class SubAgentFactory(ABC):
         """
         Return native tools shared by all sub-agents.
 
-        All sub-agents get:
+        For OpenAI models:
         - WebSearchTool: For real-time web search
         - CodeInterpreterTool: For data analysis and visualization
+
+        For LiteLLM models (Gemini, etc.):
+        - These hosted tools are NOT supported (Responses API only)
+        - Returns empty list
         """
+        # WebSearchTool and CodeInterpreterTool are OpenAI Responses API features
+        # They are not available via ChatCompletions API (LiteLLM/Gemini)
+        if self.is_litellm_model:
+            return []
+
         return [
             WebSearchTool(
                 search_context_size="medium",
@@ -109,6 +129,29 @@ class SubAgentFactory(ABC):
                 }
             ),
         ]
+
+    def _build_model_settings(self) -> ModelSettings:
+        """
+        Build model settings appropriate for the model type.
+
+        OpenAI models: Full settings including reasoning
+        LiteLLM models: Minimal settings (hosted features not supported)
+        """
+        if self.is_litellm_model:
+            # LiteLLM/Gemini: Minimal settings
+            # - store: Not supported via ChatCompletions API
+            # - reasoning: LiteLLM handles mapping, but may not work for all models
+            return ModelSettings()
+
+        # OpenAI: Full settings
+        return ModelSettings(
+            store=True,
+            reasoning=Reasoning(
+                effort=self.reasoning_effort,
+                summary="detailed",
+            ),
+            verbosity="medium",
+        )
 
     def build_agent(
         self,
@@ -133,13 +176,6 @@ class SubAgentFactory(ABC):
             instructions=self._build_instructions(),
             tools=tools,
             model=self.model,
-            model_settings=ModelSettings(
-                store=True,
-                reasoning=Reasoning(
-                    effort=self.reasoning_effort,
-                    summary="detailed",
-                ),
-                verbosity="medium",
-            ),
+            model_settings=self._build_model_settings(),
             tool_use_behavior="run_llm_again",
         )

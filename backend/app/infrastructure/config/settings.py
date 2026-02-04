@@ -95,6 +95,13 @@ class Settings:
     # Marketing chat / ChatKit
     marketing_agent_model: str = os.getenv("MARKETING_AGENT_MODEL", "gpt-5.1")
     marketing_reasoning_effort: str = os.getenv("MARKETING_REASONING_EFFORT", "high")
+    # Sub-agent model (for multi-agent architecture)
+    # Default: gpt-5-mini (OpenAI)
+    # NOTE: LiteLLM/Gemini models (litellm/gemini/...) are NOT recommended due to:
+    # - HostedMCPTool not supported (Responses API only)
+    # - WebSearchTool, CodeInterpreterTool not supported
+    # - Only FunctionTool and MCPServerStdio work with ChatCompletions API
+    sub_agent_model: str = os.getenv("SUB_AGENT_MODEL", "gpt-5-mini")
     marketing_search_country: str = os.getenv("MARKETING_SEARCH_COUNTRY", "JP")
     # Reasoning summary translation model (lightweight for speed)
     reasoning_translate_model: str = os.getenv("REASONING_TRANSLATE_MODEL", "gpt-5-nano")

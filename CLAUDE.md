@@ -1521,6 +1521,215 @@ class AgentToolStreamEvent(TypedDict):
 
 **ビルドステータス**: ✅ 成功 (Backend + Frontend)
 
+### 19. サブエージェント Gemini 移行対応 (2026-02-04)
+
+**背景**: マーケティングAIのサブエージェント（GPT-5-mini）をGemini 3 Flash Previewに移行可能にする
+
+**調査結果**: OpenAI Agents SDK v0.7.0 は **LiteLLM 統合**で Gemini を完全サポート
+
+**技術的詳細**:
+- `agents.extensions.models.litellm_provider.LitellmProvider` がSDK組み込み済み
+- `MultiProvider` がプレフィックスでルーティング（`litellm/` → LitellmProvider）
+- `LitellmModel` にGemini固有処理実装済み:
+  - `_fix_tool_message_ordering()`: ツールメッセージ順序修正
+  - `_convert_gemini_extra_content_to_provider_specific_fields()`: thought_signature処理
+
+**モデル指定形式**:
+```python
+# OpenAI (デフォルト)
+model = "gpt-5-mini"
+
+# Gemini via LiteLLM
+model = "litellm/gemini/gemini-3-flash-preview"
+```
+
+**変更ファイル**:
+| ファイル | 変更内容 |
+|---------|---------|
+| `backend/pyproject.toml` | `litellm>=1.55.0` 依存関係追加 |
+| `backend/app/infrastructure/config/settings.py` | `sub_agent_model` 環境変数追加 |
+| `backend/app/infrastructure/chatkit/agents/base.py` | `model` プロパティを設定から取得 |
+| `backend/.env.example` | `SUB_AGENT_MODEL` ドキュメント追加 |
+
+**環境変数**:
+```bash
+# Gemini サブエージェント有効化
+SUB_AGENT_MODEL=litellm/gemini/gemini-3-flash-preview
+GEMINI_API_KEY=your-gemini-api-key
+
+# OpenAI のまま（デフォルト）
+SUB_AGENT_MODEL=gpt-5-mini
+```
+
+**アーキテクチャ**:
+```
+Orchestrator (gpt-5.1, OpenAI)
+    ├─ AnalyticsAgent ──→ Gemini 3 Flash (LiteLLM)
+    ├─ SEOAgent ────────→ Gemini 3 Flash (LiteLLM)
+    ├─ AdPlatformAgent ─→ Gemini 3 Flash (LiteLLM)
+    ├─ WordPressAgent ──→ Gemini 3 Flash (LiteLLM)
+    ├─ ZohoCRMAgent ────→ Gemini 3 Flash (LiteLLM)
+    └─ CandidateAgent ──→ Gemini 3 Flash (LiteLLM)
+```
+
+**コスト比較**:
+| モデル | 入力 | 出力 | 削減率 |
+|--------|------|------|--------|
+| gpt-5-mini | $1.10/1M | $4.40/1M | - |
+| gemini-3-flash-preview | $0.50/1M | $3.00/1M | **~45%** |
+
+**検証コマンド**:
+```bash
+# LiteLLM統合確認
+uv run python -c "
+from agents.models.multi_provider import MultiProvider
+provider = MultiProvider()
+model = provider.get_model('litellm/gemini/gemini-3-flash-preview')
+print(f'{model.__class__.__name__}: {model.model}')
+"
+# 出力: LitellmModel: gemini/gemini-3-flash-preview
+```
+
+**発見した問題と修正** (2026-02-04 追記):
+
+**大規模調査結果: Geminiサブエージェントは現時点で実用的ではない**
+
+OpenAI Agents SDK の `chatcmpl_converter.py` L735-750 で、ChatCompletions API（LiteLLM/Gemini使用時）では以下が**明示的に拒否**される：
+
+| ツール | Responses API (OpenAI) | ChatCompletions API (LiteLLM/Gemini) |
+|--------|------------------------|-------------------------------------|
+| `HostedMCPTool` (HTTP-RPC MCP) | ✅ | ❌ **拒否** |
+| `WebSearchTool` | ✅ | ❌ **拒否** |
+| `CodeInterpreterTool` | ✅ | ❌ **拒否** |
+| `FileSearchTool` | ✅ | ❌ **拒否** |
+| `FunctionTool` | ✅ | ✅ |
+| `MCPServerStdio` (ローカルSTDIO) | ✅ | ✅ |
+
+**現在のサブエージェント互換性**:
+| エージェント | 使用ツール | Gemini対応 |
+|-------------|-----------|-----------|
+| AnalyticsAgent | `HostedMCPTool` | ❌ |
+| SEOAgent | `HostedMCPTool` | ❌ |
+| AdPlatformAgent | `HostedMCPTool` | ❌ |
+| WordPressAgent | `HostedMCPTool` | ❌ |
+| ZohoCRMAgent | `FunctionTool` | ✅ |
+| CandidateInsightAgent | `FunctionTool` | ✅ |
+
+**結論**: 6つ中4つのサブエージェントが `HostedMCPTool` を使用しているため、Gemini移行は不可。
+
+**追加の制限事項** (LiteLLM GitHub Issues):
+- Issue #13597: Responses API + MCP で認証エラー
+- Issue #236: Tool calling + Structured Output 同時使用不可
+- Gemini Sub-Agent as Tool パターンが動作しない
+
+**修正内容**:
+| メソッド | 変更 |
+|---------|------|
+| `is_litellm_model` | 新規プロパティ追加（`model.startswith("litellm/")` で判定） |
+| `_get_native_tools()` | LiteLLMモデルの場合は空リストを返す |
+| `_build_model_settings()` | 新規メソッド追加。LiteLLMモデルの場合はデフォルト設定を使用 |
+
+**推奨**: `SUB_AGENT_MODEL` 環境変数を設定せず、デフォルト `gpt-5-mini` を使用
+
+**情報ソース**:
+- [OpenAI Agents SDK Models](https://openai.github.io/openai-agents-python/models/)
+- [LiteLLM Integration](https://docs.litellm.ai/docs/projects/openai-agents)
+- SDKソース: `agents/extensions/models/litellm_model.py`
+- SDKソース: `agents/models/multi_provider.py`
+
+### 20. リアルタイム表示バグ修正 (2026-02-04)
+
+**報告された症状**:
+1. Reactコンソールエラー: `Cannot update a component (MarketingPage) while rendering a different component (MarketingChat)`
+2. メインエージェントの最終出力がDBには保存されるが、リアルタイムでは表示されない
+
+**大規模調査結果**: 3並列エージェントで調査し、2つの重大なバグを特定
+
+**問題1: React setState-during-render**
+
+**原因** (`use-marketing-chat.ts` L356-357):
+```typescript
+case "done": {
+  if (event.conversation_id) {
+    setConversationId(event.conversation_id);
+    onConversationChangeRef.current?.(event.conversation_id);  // ← 同期的に親state更新
+  }
+  break;
+}
+```
+
+SSEストリーム処理中に`processEvent()`が呼ばれ、`onConversationChangeRef.current?.()`が同期的に親コンポーネントのsetStateを呼び出し、子コンポーネントのレンダリング中に親stateが更新される。
+
+**修正**: `pendingConversationId` stateを追加し、`useEffect`で遅延実行
+
+```typescript
+// 新規state追加
+const [pendingConversationId, setPendingConversationId] = useState<string | null | undefined>(undefined);
+
+// 遅延実行useEffect
+useEffect(() => {
+  if (pendingConversationId !== undefined) {
+    onConversationChangeRef.current?.(pendingConversationId);
+    setPendingConversationId(undefined);
+  }
+}, [pendingConversationId]);
+
+// processEvent内: 直接コールバックではなくstateをセット
+case "done":
+  setPendingConversationId(event.conversation_id);  // 遅延実行
+```
+
+**問題2: text_delta の silent no-op（致命的）**
+
+**原因** (`use-marketing-chat.ts` L139-151):
+```typescript
+case "text_delta": {
+  if (currentTextIdRef.current) {
+    const textIdx = items.findIndex((i) => i.id === currentTextIdRef.current);
+    if (textIdx !== -1) {
+      // 更新
+    }
+    // ← textIdx === -1 の場合、何もしない！（silent no-op）
+  } else {
+    // 新規作成
+  }
+}
+```
+
+`currentTextIdRef.current`が設定されているが、`items.findIndex()`でそのIDが見つからない場合（エッジケース）、何も処理されずテキストが消失する。
+
+**修正**: `textIdx === -1` の場合も新規item作成
+
+```typescript
+if (textIdx !== -1) {
+  // 更新
+} else {
+  // ← 追加: item が見つからない場合は新規作成
+  const newId = generateId();
+  currentTextIdRef.current = newId;
+  items.push({ id: newId, kind: "text", ... });
+}
+```
+
+**修正対象ファイル**: `frontend/src/hooks/use-marketing-chat.ts`
+
+**修正箇所**:
+| 行 | 変更内容 |
+|----|---------|
+| L65 | `pendingConversationId` state追加 |
+| L94-100 | 遅延実行useEffect追加 |
+| L163-172 | text_delta の else 分岐追加 |
+| L379 | `done` case で `setPendingConversationId` 使用 |
+| L558 | `clearMessages` で `setPendingConversationId` 使用 |
+| L565 | `handleSetConversationId` で `setPendingConversationId` 使用 |
+| L635 | `loadConversation` で `setPendingConversationId` 使用 |
+
+**技術的知見**:
+- Reactでは子コンポーネントのレンダリング中に親コンポーネントのstateを更新してはならない
+- コールバックを同期的に呼び出すと、その中のsetStateが親更新を引き起こす
+- `useEffect`でコールバック実行を次のレンダリングサイクルに遅延させることで解決
+- エッジケース（item not found）のハンドリングは静かに失敗するのではなく、フォールバック処理を入れるべき
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

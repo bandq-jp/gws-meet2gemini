@@ -26,6 +26,8 @@ dependencies = [
     "analytics-mcp>=0.1.1", # GA4 MCP
     "mcp>=1.0.0", # FastMCP for GSC
     "meta-ads-mcp>=1.0.0", # Meta Ads MCP
+    # LiteLLM for multi-provider support (Gemini sub-agents)
+    "litellm>=1.55.0",
 ]
 
 [dependency-groups]

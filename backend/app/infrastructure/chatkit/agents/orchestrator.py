@@ -93,9 +93,12 @@ class OrchestratorAgentFactory:
 
     The Orchestrator:
     - Exposes sub-agents as tools via Agent.as_tool()
-    - Has native tools (WebSearch, CodeInterpreter)
-    - Uses GPT-5.2 for high-quality reasoning
+    - Has native tools (WebSearch, CodeInterpreter) - OpenAI only
     - Coordinates parallel/sequential sub-agent calls
+
+    Model Support:
+    - OpenAI (gpt-5.1, gpt-5.2): Full features including WebSearch, CodeInterpreter
+    - LiteLLM/Gemini: Sub-agent tools only (WebSearch, CodeInterpreter not supported)
     """
 
     def __init__(self, settings: "Settings"):
@@ -164,12 +167,14 @@ class OrchestratorAgentFactory:
         # Build final instructions
         instructions = self._build_instructions(asset)
 
-        return Agent(
-            name="MarketingOrchestrator",
-            instructions=instructions,
-            tools=native_tools + sub_agent_tools,
-            model=self._settings.marketing_agent_model,
-            model_settings=ModelSettings(
+        # Build model settings based on model type
+        if self.is_litellm_model:
+            # LiteLLM/Gemini: Minimal settings (Responses API features not available)
+            model_settings = ModelSettings()
+            logger.info("[Orchestrator] LiteLLM model - using minimal model settings")
+        else:
+            # OpenAI: Full settings
+            model_settings = ModelSettings(
                 store=True,
                 reasoning=Reasoning(
                     effort=reasoning_effort,
@@ -179,12 +184,35 @@ class OrchestratorAgentFactory:
                     asset.get("verbosity") if asset else None
                 ),
                 response_include=["code_interpreter_call.outputs"],
-            ),
+            )
+
+        return Agent(
+            name="MarketingOrchestrator",
+            instructions=instructions,
+            tools=native_tools + sub_agent_tools,
+            model=self._settings.marketing_agent_model,
+            model_settings=model_settings,
             tool_use_behavior="run_llm_again",
         )
 
+    @property
+    def is_litellm_model(self) -> bool:
+        """Check if the orchestrator model is a LiteLLM model (non-OpenAI)."""
+        return self._settings.marketing_agent_model.startswith("litellm/")
+
     def _get_native_tools(self, asset: Dict[str, Any] | None = None) -> List[Any]:
-        """Return native tools for the orchestrator."""
+        """
+        Return native tools for the orchestrator.
+
+        For OpenAI models: WebSearchTool, CodeInterpreterTool
+        For LiteLLM models: Empty (these are Responses API only)
+        """
+        # WebSearchTool and CodeInterpreterTool are OpenAI Responses API features
+        # They are not available via ChatCompletions API (LiteLLM/Gemini)
+        if self.is_litellm_model:
+            logger.info("[Orchestrator] LiteLLM model detected - native tools disabled")
+            return []
+
         tools: List[Any] = []
 
         enable_web_search = self._settings.marketing_enable_web_search and (

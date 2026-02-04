@@ -61,6 +61,9 @@ export function useMarketingChat(
     options.initialConversationId ?? null
   );
 
+  // Pending conversation ID for deferred callback (fixes React setState-during-render)
+  const [pendingConversationId, setPendingConversationId] = useState<string | null | undefined>(undefined);
+
   // Track if initial conversation has been loaded
   const initialLoadDoneRef = useRef(false);
 
@@ -87,6 +90,14 @@ export function useMarketingChat(
     onConversationChangeRef.current = options.onConversationChange;
     onErrorRef.current = options.onError;
   }, [options.onConversationChange, options.onError]);
+
+  // Deferred callback execution (fixes React setState-during-render)
+  useEffect(() => {
+    if (pendingConversationId !== undefined) {
+      onConversationChangeRef.current?.(pendingConversationId);
+      setPendingConversationId(undefined);
+    }
+  }, [pendingConversationId]);
 
   // Ensure we have a valid token
   const ensureToken = useCallback(async (): Promise<string> => {
@@ -143,11 +154,22 @@ export function useMarketingChat(
                 (i) => i.id === currentTextIdRef.current
               );
               if (textIdx !== -1) {
+                // Update existing text item
                 const textItem = items[textIdx] as TextActivityItem;
                 items[textIdx] = {
                   ...textItem,
                   content: textItem.content + event.content,
                 };
+              } else {
+                // Item not found (edge case) - create new item to prevent silent no-op
+                const newId = generateId();
+                currentTextIdRef.current = newId;
+                items.push({
+                  id: newId,
+                  kind: "text",
+                  sequence: seqRef.current++,
+                  content: event.content,
+                } as TextActivityItem);
               }
             } else {
               // Create new text item
@@ -351,10 +373,10 @@ export function useMarketingChat(
           }
 
           case "done": {
-            // Update conversation ID
+            // Update conversation ID (defer callback to avoid setState-during-render)
             if (event.conversation_id) {
               setConversationId(event.conversation_id);
-              onConversationChangeRef.current?.(event.conversation_id);
+              setPendingConversationId(event.conversation_id);
             }
             break;
           }
@@ -532,13 +554,15 @@ export function useMarketingChat(
       abortControllerRef.current = null;
     }
 
-    onConversationChangeRef.current?.(null);
+    // Defer callback to avoid setState-during-render
+    setPendingConversationId(null);
   }, []);
 
   // Update conversation ID
   const handleSetConversationId = useCallback((id: string | null) => {
     setConversationId(id);
-    onConversationChangeRef.current?.(id);
+    // Defer callback to avoid setState-during-render
+    setPendingConversationId(id);
   }, []);
 
   // Load conversation from DB
@@ -607,7 +631,8 @@ export function useMarketingChat(
           contextItemsRef.current = data.context_items;
         }
 
-        onConversationChangeRef.current?.(id);
+        // Defer callback to avoid setState-during-render
+        setPendingConversationId(id);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to load conversation";
         setError(message);
