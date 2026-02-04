@@ -178,14 +178,15 @@ class SubAgentFactory(ABC):
             # - reasoning: LiteLLM handles mapping, but may not work for all models
             return ModelSettings()
 
-        # OpenAI: Full settings optimized for sub-agent speed
+        # OpenAI: Full settings with configurable reasoning
         # Note: verbosity is NOT a valid ModelSettings param - use instructions instead
+        summary = "detailed" if self.reasoning_effort == "high" else "concise"
         return ModelSettings(
             store=True,
             parallel_tool_calls=True,  # Enable parallel tool execution
             reasoning=Reasoning(
-                effort="low",  # Sub-agents use minimal reasoning for speed
-                summary="concise",  # Shorter summaries
+                effort=self.reasoning_effort,  # Use property (default: "low")
+                summary=summary,
             ),
         )
 

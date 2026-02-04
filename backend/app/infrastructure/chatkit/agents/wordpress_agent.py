@@ -45,6 +45,11 @@ class WordPressAgentFactory(SubAgentFactory):
             "ブロック構造管理、メディアアップロード、カテゴリ/タグ管理を担当。"
         )
 
+    @property
+    def reasoning_effort(self) -> str:
+        """WordPress agent uses high reasoning for complex content creation."""
+        return "high"
+
     def _get_domain_tools(
         self,
         mcp_servers: List[Any] | None = None,
