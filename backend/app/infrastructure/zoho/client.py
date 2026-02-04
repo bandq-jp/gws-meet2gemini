@@ -381,6 +381,76 @@ class ZohoClient:
         items = data.get("data") or []
         return items[0] if items else {}
 
+    def get_app_hc_records_batch(self, record_ids: List[str]) -> List[Dict[str, Any]]:
+        """Fetch multiple APP-hc records by Zoho record ids using COQL.
+
+        Uses COQL with IN clause for efficient batch retrieval.
+        Falls back to individual API calls if COQL fails.
+
+        Args:
+            record_ids: List of Zoho record IDs (max 50)
+
+        Returns:
+            List of records with detailed fields
+        """
+        if not record_ids:
+            return []
+
+        # Limit to 50 records per batch
+        record_ids = record_ids[:50]
+        module_api = self.settings.zoho_app_hc_module
+
+        # Detailed fields to retrieve
+        detail_fields = [
+            "id", "Name", "Owner",
+            self.CHANNEL_FIELD_API,  # field14 (流入経路)
+            self.STATUS_FIELD_API,   # field19 (顧客ステータス)
+            self.DATE_FIELD_API,     # field18 (登録日)
+            "Modified_Time",
+            # 追加詳細フィールド
+            "field15",  # 年齢
+            "field16",  # 性別
+            "field17",  # 現年収
+            "field20",  # 希望年収
+            "field21",  # 経験業種
+            "field22",  # 経験職種
+            "field23",  # 希望業種
+            "field24",  # 希望職種
+            "field66",  # 転職希望時期
+            "field67",  # 現職状況
+            "field85",  # 職歴
+        ]
+
+        def _coql_batch() -> List[Dict[str, Any]]:
+            """COQLでIN句を使ってバッチ取得"""
+            ids_quoted = ", ".join(f"'{rid}'" for rid in record_ids)
+            select_fields = ", ".join(detail_fields)
+            query = f"SELECT {select_fields} FROM {module_api} WHERE id IN ({ids_quoted})"
+
+            logger.debug("[zoho] COQL batch query: %s", query)
+            result = self._coql_query(query, limit=50)
+            return result.get("data", []) or []
+
+        def _legacy_batch() -> List[Dict[str, Any]]:
+            """Records APIで個別取得（フォールバック）"""
+            results = []
+            for rid in record_ids:
+                try:
+                    record = self.get_app_hc_record(rid)
+                    if record:
+                        results.append(record)
+                except Exception as e:
+                    logger.warning("[zoho] Failed to get record %s: %s", rid, e)
+            return results
+
+        logger.info("[zoho] get_app_hc_records_batch: %d records", len(record_ids))
+
+        try:
+            return self._with_coql_fallback(_coql_batch, _legacy_batch)
+        except Exception as e:
+            logger.warning("[zoho] batch fetch failed: %s, using legacy", e)
+            return _legacy_batch()
+
     def search_app_hc_by_exact_name(self, name: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Search APP-hc by candidate name with strict equality (equals).
 

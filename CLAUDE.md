@@ -1018,6 +1018,92 @@ cd backend
 uv run python -c "from app.infrastructure.chatkit.agents import OrchestratorAgentFactory; print('OK')"
 ```
 
+### 11. SEOエージェント Ahrefs APIパラメータ仕様追加 (2026-02-04)
+
+**問題**: SEOエージェントが225秒かかった。ログ分析の結果、Ahrefs APIのパラメータエラーが多発し、何度もリトライしていたことが判明。
+
+**根本原因**: SEOエージェントのインストラクションにAhrefs APIの正確なパラメータ仕様が書かれていなかったため、エージェントが試行錯誤でパラメータを推測していた。
+
+**失敗パターン（ログから判明）**:
+| 試行 | エラー | 正しいパラメータ |
+|------|--------|-----------------|
+| `where: ""` | `bad where: invalid filter expression` | フィルタ不要なら**省略** |
+| `volume_mode: "latest"` | `bad value latest for type enum` | 省略推奨 |
+| `select: "domain"` | `column 'domain' not found` | `competitor_domain` |
+| `order_by: "traffic_desc"` | `column 'traffic_desc' not found` | `traffic` + `order: "desc"` |
+
+**修正内容** (`seo_agent.py`):
+
+インストラクションを大幅拡充（約4倍のボリューム）:
+
+1. **共通パラメータ仕様**:
+   - `where/having`: 不要なら**パラメータごと省略**（空文字列禁止）
+   - `order_by`: カラム名のみ（`traffic`）、方向は別パラメータ `order: "desc"`
+   - `select`: 正確なカラム名をカンマ区切り
+   - `where`構文例: `where: "traffic > 1000"`, `where: "position <= 10"`
+
+2. **全20ツールの詳細仕様**:
+   - 必須パラメータ / オプションパラメータを明記
+   - 正確なカラム名一覧
+   - 使用例コード
+
+3. **主要カラム名（ログから判明）**:
+   | ツール | 主要カラム |
+   |--------|-----------|
+   | `organic-competitors` | `competitor_domain` (※`domain`無効), `common_keywords`, `traffic` |
+   | `organic-keywords` | `keyword`, `position`, `volume`, `traffic`, `difficulty`, `url` |
+   | `top-pages` | `url`, `traffic`, `keywords`, `top_keyword`, `position` |
+   | `anchors` | `anchor`, `referring_domains`, `referring_pages` |
+   | `refdomains` | `domain`, `domain_rating`, `traffic`, `dofollow` |
+
+**期待効果**:
+- SEOエージェント応答時間: 225秒 → 30-60秒（リトライ削減）
+- API呼び出し回数: 6-10回 → 1-2回（エラー回避）
+
+**技術的知見**:
+- Ahrefs MCP Server: https://github.com/ahrefs/ahrefs-mcp-server
+- Ahrefs API v3: https://docs.ahrefs.com/docs/api/reference/introduction
+- パラメータ仕様はドキュメント化が不十分なため、エラーログから逆算して仕様を把握
+- `order_by`と`order`は**必ず別パラメータ**で指定
+- `where`パラメータは空文字列`""`が**絶対に無効**（使わないなら省略）
+
+### 12. ZohoCRMツール COQL最適化 (2026-02-04)
+
+**問題**: ZohoCRMエージェントが`search_job_seekers`で58件取得後、58回の`get_job_seeker_detail`を並列呼び出し。全て"No output"でタイムアウト。
+
+**解決策**: インストラクションで禁止するのではなく、**ツール自体を最適化**。
+
+**修正内容**:
+
+1. **新規ツール追加** (`zoho_crm_tools.py`):
+   - `get_job_seekers_batch(record_ids: List[str])`: COQL IN句で最大50件一括取得
+
+2. **クライアント改善** (`client.py`):
+   - `get_app_hc_records_batch()`: COQL IN句でバッチ取得（詳細フィールド含む）
+
+3. **既存ツール最適化**:
+   | ツール | 最適化前 | 最適化後 |
+   |--------|---------|---------|
+   | `compare_channels` | チャネルごとに個別API | 1回取得→メモリ分割 |
+   | `trend_analysis_by_period` | 期間ごとに個別API | 1回取得→メモリ分割 |
+
+4. **インストラクション更新** (`zoho_crm_agent.py`):
+   ```
+   | 複数人の詳細 | get_job_seekers_batch（最大50件一括、COQL最適化） |
+   ```
+
+**技術的詳細**:
+- COQL IN句: `SELECT * FROM jobSeeker WHERE id IN ('id1', 'id2', ...)`
+- 詳細フィールド: 年齢、現年収、希望年収、経験業種/職種、転職希望時期など
+- フォールバック: COQL失敗時は個別API呼び出し
+
+**期待効果**:
+| 操作 | 最適化前 | 最適化後 |
+|------|---------|---------|
+| 58件詳細取得 | 58回API | **1回API** |
+| 5チャネル比較 | 5回API | **1回API** |
+| 6ヶ月トレンド | 6回API | **1回API** |
+
 ---
 
 ## 自己改善ログ

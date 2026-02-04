@@ -135,7 +135,7 @@ async def get_job_seeker_detail(
     ctx: RunContextWrapper[Any],
     record_id: str,
 ) -> Dict[str, Any]:
-    """特定求職者の詳細取得。record_idはsearch_job_seekersで取得。"""
+    """特定求職者1名の詳細取得。複数取得にはget_job_seekers_batchを使用。"""
     logger.info("[zoho_crm_tools] get_job_seeker_detail called: record_id=%s", record_id)
 
     if not record_id:
@@ -174,6 +174,90 @@ async def get_job_seeker_detail(
             "success": False,
             "error": f"詳細取得中にエラーが発生しました: {str(e)}",
         }
+
+
+@function_tool(name_override="get_job_seekers_batch")
+async def get_job_seekers_batch(
+    ctx: RunContextWrapper[Any],
+    record_ids: List[str],
+) -> Dict[str, Any]:
+    """複数求職者の詳細を一括取得（COQLでIN句使用、最大50件）。
+
+    search_job_seekersで取得したrecord_idリストを渡す。
+    個別にget_job_seeker_detailを繰り返すより圧倒的に高速。
+
+    Args:
+        record_ids: 取得するrecord_idのリスト（最大50件）
+    """
+    logger.info("[zoho_crm_tools] get_job_seekers_batch called: %d records", len(record_ids))
+
+    if not record_ids:
+        return {
+            "success": False,
+            "error": "record_idsが空です",
+        }
+
+    if len(record_ids) > 50:
+        return {
+            "success": False,
+            "error": "最大50件まで指定可能です。それ以上は分割して取得してください。",
+        }
+
+    try:
+        zoho = ZohoClient()
+        records = zoho.get_app_hc_records_batch(record_ids)
+
+        # レコードを整形
+        formatted_records = []
+        for record in records:
+            formatted_records.append(_format_job_seeker_detail(record))
+
+        return {
+            "success": True,
+            "total": len(formatted_records),
+            "records": formatted_records,
+        }
+
+    except ZohoAuthError as e:
+        logger.error("[zoho_crm_tools] Zoho auth error: %s", e)
+        return {
+            "success": False,
+            "error": "Zoho認証エラーが発生しました。",
+        }
+    except Exception as e:
+        logger.error("[zoho_crm_tools] get_job_seekers_batch error: %s", e)
+        return {
+            "success": False,
+            "error": f"バッチ取得中にエラーが発生しました: {str(e)}",
+        }
+
+
+def _format_job_seeker_detail(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Zohoレコードを読みやすい形式に整形"""
+    owner = record.get("Owner")
+    pic_name = owner.get("name") if isinstance(owner, dict) else str(owner) if owner else "未割当"
+
+    return {
+        "record_id": record.get("id"),
+        "求職者名": record.get("Name"),
+        "流入経路": record.get("field14"),
+        "顧客ステータス": record.get("field19"),
+        "PIC": pic_name,
+        "登録日": record.get("field18"),
+        "更新日": record.get("Modified_Time"),
+        # 詳細情報
+        "年齢": record.get("field15"),
+        "性別": record.get("field16"),
+        "現年収": record.get("field17"),
+        "希望年収": record.get("field20"),
+        "経験業種": record.get("field21"),
+        "経験職種": record.get("field22"),
+        "希望業種": record.get("field23"),
+        "希望職種": record.get("field24"),
+        "転職希望時期": record.get("field66"),
+        "現職状況": record.get("field67"),
+        "職歴": record.get("field85"),
+    }
 
 
 @function_tool(name_override="aggregate_by_channel")
@@ -505,7 +589,10 @@ async def trend_analysis_by_period(
     months_back: int = 6,
     channel: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """期間別トレンド分析。月次/週次の推移と前期比を確認。"""
+    """期間別トレンド分析。月次/週次の推移と前期比を確認。
+
+    最適化: 1回のAPI呼び出しで全件取得→メモリで期間分割（N+1問題回避）
+    """
     from datetime import datetime, timedelta
 
     logger.info(
@@ -519,11 +606,18 @@ async def trend_analysis_by_period(
     try:
         zoho = ZohoClient()
         today = datetime.now()
-        trend_data = []
 
+        # 最適化: 1回で全件取得
+        all_records = zoho._fetch_all_records(max_pages=15)
+
+        # チャネルフィルタ（メモリ内）
+        if channel:
+            all_records = [r for r in all_records if r.get(zoho.CHANNEL_FIELD_API) == channel]
+
+        # 期間リストを生成
+        periods = []
         for i in range(months_back - 1, -1, -1):
             if period_type == "monthly":
-                # 月初〜月末
                 year = today.year
                 month = today.month - i
                 while month <= 0:
@@ -531,7 +625,6 @@ async def trend_analysis_by_period(
                     year -= 1
 
                 period_start = datetime(year, month, 1)
-                # 次月の1日 - 1日 = 月末
                 if month == 12:
                     period_end = datetime(year + 1, 1, 1) - timedelta(days=1)
                 else:
@@ -542,27 +635,31 @@ async def trend_analysis_by_period(
                 period_end = period_start + timedelta(days=6)
                 period_label = f"{period_start.strftime('%m/%d')}週"
 
-            date_from = period_start.strftime("%Y-%m-%d")
-            date_to = period_end.strftime("%Y-%m-%d")
+            periods.append({
+                "label": period_label,
+                "start": period_start.strftime("%Y-%m-%d"),
+                "end": period_end.strftime("%Y-%m-%d"),
+            })
 
-            # 流入経路別件数を取得
-            if channel:
-                results = zoho.search_by_criteria(
-                    channel=channel,
-                    date_from=date_from,
-                    date_to=date_to,
-                    limit=200,
-                )
-                count = len(results)
-            else:
-                channel_counts = zoho.count_by_channel(
-                    date_from=date_from,
-                    date_to=date_to,
-                )
-                count = sum(channel_counts.values())
+        # メモリ内で期間別に集計
+        trend_data = []
+        for period in periods:
+            date_from = period["start"]
+            date_to = period["end"]
+
+            # 日付フィルタ（メモリ内）
+            count = 0
+            for record in all_records:
+                reg_date = record.get(zoho.DATE_FIELD_API)
+                if reg_date:
+                    if date_from and reg_date < date_from:
+                        continue
+                    if date_to and reg_date > date_to:
+                        continue
+                    count += 1
 
             trend_data.append({
-                "period": period_label,
+                "period": period["label"],
                 "date_from": date_from,
                 "date_to": date_to,
                 "count": count,
@@ -629,7 +726,10 @@ async def compare_channels(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """複数チャネル(2-5個)の比較。獲得数・入社率をランキング。"""
+    """複数チャネル(2-5個)の比較。獲得数・入社率をランキング。
+
+    最適化: 1回のAPI呼び出しで全件取得→メモリで分割集計（N+1問題回避）
+    """
     logger.info(
         "[zoho_crm_tools] compare_channels: channels=%s, date_from=%s, date_to=%s",
         channels, date_from, date_to
@@ -649,16 +749,27 @@ async def compare_channels(
 
     try:
         zoho = ZohoClient()
+
+        # 最適化: 1回で全件取得→メモリでフィルタ・集計
+        all_records = zoho._fetch_all_records(max_pages=15)
+        filtered = zoho._filter_by_date(all_records, date_from, date_to)
+
+        # チャネル別・ステータス別に集計
+        channel_stats: Dict[str, Dict[str, int]] = {ch: {} for ch in channels}
+
+        for record in filtered:
+            ch = record.get(zoho.CHANNEL_FIELD_API)
+            if ch not in channels:
+                continue
+
+            status = record.get(zoho.STATUS_FIELD_API)
+            if status:
+                channel_stats[ch][status] = channel_stats[ch].get(status, 0) + 1
+
+        # 比較データ作成
         comparison_data = []
-
         for channel in channels:
-            # ステータス別件数を取得
-            status_counts = zoho.count_by_status(
-                channel=channel,
-                date_from=date_from,
-                date_to=date_to,
-            )
-
+            status_counts = channel_stats.get(channel, {})
             total = sum(status_counts.values())
             hired = status_counts.get("14. 入社", 0)
             interview_done = status_counts.get("4. 面談済み", 0)
@@ -809,6 +920,7 @@ ZOHO_CRM_TOOLS = [
     # 基本検索・取得
     search_job_seekers,
     get_job_seeker_detail,
+    get_job_seekers_batch,  # 複数件一括取得（COQL最適化）
     get_channel_definitions,
     # 集計・分析（COQL最適化済み）
     aggregate_by_channel,

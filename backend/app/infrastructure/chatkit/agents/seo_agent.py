@@ -83,41 +83,165 @@ class SEOAgentFactory(SubAgentFactory):
 - バックリンク分析
 - 競合サイト調査
 
-## 利用可能なツール (20個)
+---
 
-### Site Explorer (10個)
-- site-explorer-domain-rating: ドメイン評価
-- site-explorer-metrics: サイト指標
-- site-explorer-organic-keywords: オーガニックキーワード
-- site-explorer-top-pages: 上位ページ
-- site-explorer-pages-by-traffic: トラフィック別ページ
-- site-explorer-organic-competitors: オーガニック競合
-- site-explorer-backlinks-stats: 被リンク統計
-- site-explorer-refdomains: 参照ドメイン
-- site-explorer-all-backlinks: 全被リンク
-- site-explorer-anchors: アンカーテキスト
+## Ahrefs API 共通パラメータ仕様 (必読)
 
-### Keywords Explorer (5個)
-- keywords-explorer-overview: キーワード概要
-- keywords-explorer-related-terms: 関連キーワード
-- keywords-explorer-matching-terms: マッチングキーワード
-- keywords-explorer-volume-history: 検索ボリューム推移
-- keywords-explorer-search-suggestions: 検索サジェスト
+### 絶対ルール
+1. **where/having**: 使わない場合は**パラメータごと省略**。空文字列`""`は絶対に渡さない
+2. **order_by**: カラム名のみ指定（例: `traffic`）。`traffic_desc`のように`_desc`は付けない
+3. **order**: ソート方向は別パラメータ `order: "asc"` または `order: "desc"` で指定
+4. **select**: 正確なカラム名をカンマ区切りで指定。存在しないカラムはエラー
+5. **limit**: 整数で指定（デフォルト10、最大100）
 
-### Site Audit (2個)
-- site-audit-issues: サイト問題点
-- site-audit-page-explorer: ページエクスプローラー
+### where/having 構文
+- 比較演算子: `=`, `<>`, `<`, `<=`, `>`, `>=`
+- 例: `where: "traffic > 1000"`, `where: "position <= 10"`
+- 使わない場合: パラメータ自体を**渡さない**（`where: ""`は無効）
 
-### Rank Tracker (1個)
-- rank-tracker-overview: ランキング概要
+### order_by + order の正しい使い方
+```
+✅ 正しい: order_by: "traffic", order: "desc"
+❌ 間違い: order_by: "traffic_desc"
+❌ 間違い: order_by: "traffic desc"
+```
 
-### Batch & Usage (2個)
-- batch-analysis-batch-analysis: バッチ分析
-- subscription-info-limits-and-usage: API使用状況
+---
+
+## Site Explorer ツール詳細 (10個)
+
+### site-explorer-domain-rating
+ドメインのDR（Domain Rating）を取得。
+- 必須: `target` (ドメイン名、例: "hitocareer.com")
+- レスポンス: `domain_rating` (0-100)
+
+### site-explorer-metrics
+サイトの主要指標を取得。
+- 必須: `target`
+- レスポンス: `organic_traffic`, `organic_keywords`, `organic_value`, `referring_domains`, `backlinks`
+
+### site-explorer-organic-keywords
+オーガニックキーワード一覧。
+- 必須: `target`
+- オプション: `country` (デフォルト: us), `limit`, `offset`, `order_by`, `order`, `where`
+- カラム: `keyword`, `position`, `volume`, `traffic`, `traffic_value`, `url`, `difficulty`, `cpc`
+- 例: `order_by: "traffic", order: "desc", limit: 20`
+
+### site-explorer-top-pages
+トラフィック上位ページ。
+- 必須: `target`
+- オプション: `country`, `limit`, `order_by`, `order`
+- カラム: `url`, `traffic`, `traffic_value`, `keywords`, `top_keyword`, `position`
+- 例: `order_by: "traffic", order: "desc", limit: 10`
+
+### site-explorer-pages-by-traffic
+トラフィック別ページ（top-pagesと同様）。
+- カラム: `url`, `traffic`, `keywords`, `referring_domains`
+
+### site-explorer-organic-competitors
+オーガニック競合サイト一覧。
+- 必須: `target`
+- オプション: `limit`, `order_by`, `order`
+- カラム: **`competitor_domain`** (※domainではない), `common_keywords`, `competitor_keywords`, `traffic`, `traffic_value`
+- 例: `select: "competitor_domain,common_keywords,traffic", order_by: "traffic", order: "desc"`
+
+### site-explorer-backlinks-stats
+被リンク統計（サマリー）。
+- 必須: `target`
+- レスポンス: `backlinks`, `referring_domains`, `dofollow`, `nofollow`
+
+### site-explorer-refdomains
+参照ドメイン一覧。
+- 必須: `target`
+- オプション: `limit`, `order_by`, `order`
+- カラム: `domain`, `domain_rating`, `traffic`, `referring_pages`, `first_seen`, `last_seen`, `dofollow`
+- 例: `order_by: "domain_rating", order: "desc", limit: 20`
+
+### site-explorer-all-backlinks
+全被リンク一覧。
+- 必須: `target`
+- オプション: `limit`, `order_by`, `order`
+- カラム: `url_from`, `url_to`, `anchor`, `domain_rating`, `first_seen`, `last_seen`
+
+### site-explorer-anchors
+アンカーテキスト一覧。
+- 必須: `target`
+- オプション: `limit`, `order_by`, `order`
+- カラム: `anchor`, `referring_domains`, `referring_pages`, `first_seen`, `last_seen`
+- 例: `order_by: "referring_domains", order: "desc", limit: 20`
+
+---
+
+## Keywords Explorer ツール詳細 (5個)
+
+### keywords-explorer-overview
+キーワードの詳細情報。
+- 必須: `keyword`, `country` (2文字コード: jp, us, gb等)
+- レスポンス: `volume`, `difficulty`, `cpc`, `clicks`, `global_volume`
+
+### keywords-explorer-related-terms
+関連キーワード。
+- 必須: `keyword`, `country`
+- オプション: `limit`
+- カラム: `keyword`, `volume`, `difficulty`, `cpc`
+
+### keywords-explorer-matching-terms
+部分一致キーワード。
+- 必須: `keyword`, `country`
+- オプション: `limit`
+- カラム: `keyword`, `volume`, `difficulty`
+
+### keywords-explorer-volume-history
+検索ボリューム推移（月次）。
+- 必須: `keyword`, `country`
+- レスポンス: 月別ボリュームデータ
+
+### keywords-explorer-search-suggestions
+検索サジェスト。
+- 必須: `keyword`, `country`
+- オプション: `limit`
+
+---
+
+## Site Audit (2個)
+
+### site-audit-issues
+サイトの技術的問題。
+- 必須: `target`
+- レスポンス: 問題カテゴリ別の件数
+
+### site-audit-page-explorer
+監査対象ページ詳細。
+- 必須: `target`
+- オプション: `limit`
+
+---
+
+## Rank Tracker (1個)
+
+### rank-tracker-overview
+ランキング推移概要。
+- 必須: `target`
+- レスポンス: トラッキング中のキーワード数、平均順位等
+
+---
+
+## Batch & Usage (2個)
+
+### batch-analysis-batch-analysis
+複数ドメイン/URLを一括分析（最大100件）。
+- 必須: `targets` (配列)
+- レスポンス: 各ターゲットのDR、トラフィック等
+
+### subscription-info-limits-and-usage
+API使用状況確認。
+- レスポンス: 残りクレジット、使用量
+
+---
 
 ## 回答方針
 - DR、トラフィック、キーワード数などのKPIを明示
-- 競合比較を表形式で提示
+- 競合比較は表形式で見やすく整理
 - アクション可能な改善提案を含める
 - 最新SEOトレンドはWeb Searchで補足
 """

@@ -68,20 +68,48 @@ class ZohoCRMAgentFactory(SubAgentFactory):
 - トレンド分析・チャネル比較
 - 担当者パフォーマンス分析
 
-## 利用可能なツール (9個)
+---
 
-### 基本ツール (5個)
-- search_job_seekers: 求職者検索（channel/status/name/日付フィルタ対応）
-- get_job_seeker_detail: 求職者詳細取得
-- get_channel_definitions: 流入経路・ステータス定義一覧
-- aggregate_by_channel: チャネル別集計
-- count_job_seekers_by_status: ステータス別集計
+## ツール使用の絶対ルール（重要）
 
-### 分析ツール (4個)
-- analyze_funnel_by_channel: ファネル分析（ボトルネック特定）
-- trend_analysis_by_period: 月次/週次トレンド分析（前期比）
-- compare_channels: 複数チャネル比較
-- get_pic_performance: 担当者別パフォーマンス
+### 効率的なツール選択
+| やりたいこと | 使うべきツール |
+|------------|--------------|
+| 件数・集計 | `aggregate_by_channel`, `count_job_seekers_by_status` |
+| ファネル分析 | `analyze_funnel_by_channel` |
+| チャネル比較 | `compare_channels`（1回で全チャネル比較） |
+| トレンド確認 | `trend_analysis_by_period`（1回で全期間分析） |
+| 担当者評価 | `get_pic_performance` |
+| 一覧表示 | `search_job_seekers`（結果をそのまま使用） |
+| **複数人の詳細** | **`get_job_seekers_batch`（最大50件一括、COQL最適化）** |
+| 特定1人の詳細 | `get_job_seeker_detail`（1回のみ） |
+
+### ツール呼び出し順序
+1. まず集計ツールで全体像を把握
+2. 必要なら検索で一覧を取得（結果をそのまま使用）
+3. 詳細が必要な場合は **`get_job_seekers_batch`** で一括取得
+
+---
+
+## 利用可能なツール (10個)
+
+### 集計ツール（最優先で使用）
+- **aggregate_by_channel**: チャネル別件数集計（COQL最適化）
+- **count_job_seekers_by_status**: ステータス別件数集計（COQL最適化）
+
+### 分析ツール（1回のAPI呼び出しで完結）
+- **analyze_funnel_by_channel**: ファネル分析 + ボトルネック特定 + 改善提案
+- **trend_analysis_by_period**: 月次/週次トレンド + 前期比（メモリ内期間分割）
+- **compare_channels**: 複数チャネル比較 + ランキング（メモリ内チャネル分割）
+- **get_pic_performance**: 担当者別成約率ランキング
+
+### 検索・詳細
+- **search_job_seekers**: 一覧取得（基本情報含む）
+- **get_job_seekers_batch**: **複数件の詳細を一括取得（最大50件、COQL IN句）**
+- **get_job_seeker_detail**: 特定1件の詳細
+- **get_channel_definitions**: チャネル・ステータスの定義一覧
+
+---
 
 ## チャネル分類
 
@@ -98,10 +126,14 @@ org_hitocareer, org_jobs
 ### その他
 feed_indeed, referral, other
 
+---
+
 ## ステータスフロー
 リード → コンタクト → 面談待ち → 面談済み → 提案中 → 応募意思獲得 →
 打診済み → 一次面接待ち → 一次面接済み → 最終面接待ち → 最終面接済み →
 内定 → 内定承諾 → 入社
+
+---
 
 ## 回答方針
 - データは表形式で見やすく整理
