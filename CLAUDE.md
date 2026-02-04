@@ -2075,6 +2075,53 @@ uv run python scripts/test_response_time.py
 - `backend/app/infrastructure/chatkit/agents/candidate_insight_agent.py` - ModelSettings修正
 - `backend/app/infrastructure/chatkit/agents/zoho_crm_agent.py` - ModelSettings修正
 
+### 25. サブエージェント追加最適化: 許可確認バグ・Code Interpreter無効化 (2026-02-05)
+
+**問題**: OpenAI Dashboardログで発見した深刻な問題
+1. **SEO Agent**: 「許可を求めるな」ルールが欠落 → Ahrefsツールを1度も呼び出さず許可確認で終了
+2. **Analytics Agent**: Code Interpreterで無意味な`pass`を4回実行、GA4パラメータエラー連発
+3. **全体**: サブエージェントがMCPツールではなくCode Interpreterを誤用
+
+**修正内容**:
+
+1. **SEO Agent 指示追加** (`seo_agent.py`):
+   - 「許可を求めるな」ルール追加
+   - 典型的なリクエスト→ツールマッピング表追加
+
+2. **Analytics Agent 指示強化** (`analytics_agent.py`):
+   - GA4 `run_report` パラメータ仕様を詳細追加
+   - `date_ranges` が必須であることを明記
+   - `clicks`, `impressions` はGA4にない → GSCを使うよう明記
+   - 「Code Interpreterは計算のみ」ルール追加
+
+3. **サブエージェント Code Interpreter 無効化** (`settings.py`, `base.py`):
+   - 新設定: `SUB_AGENT_ENABLE_CODE_INTERPRETER=false` (デフォルトOFF)
+   - Code Interpreterがサブエージェントで無意味な`pass`を連発する問題を解決
+   - Web Searchはデフォルトでオン維持
+
+**新環境変数**:
+```bash
+# サブエージェントのCode Interpreter (デフォルト: 無効)
+SUB_AGENT_ENABLE_CODE_INTERPRETER=false
+
+# サブエージェントのWeb Search (デフォルト: 有効)
+SUB_AGENT_ENABLE_WEB_SEARCH=true
+```
+
+**期待効果**:
+| 問題 | 修正前 | 修正後 |
+|------|--------|--------|
+| SEO許可確認 | 28秒で許可確認のみ | 即座にAhrefs呼び出し |
+| Analytics Code Interpreter | 4回の無駄な`pass`実行 | Code Interpreter無効化 |
+| GA4パラメータエラー | date_ranges未指定エラー | パラメータ仕様を指示に明記 |
+| GA4 clicks使用 | 無効メトリクスエラー | GSC使用を明記 |
+
+**技術的知見**:
+- サブエージェントは専門ツール（MCP）を持っているため、汎用のCode Interpreterは不要
+- Code Interpreterはオーケストレーター側でのみ有効にすべき（最終集計・可視化用）
+- GA4 Data API v1: `clicks`, `impressions` は存在しない（GSCのみ）
+- 指示に「即時実行パターン」表を入れると、モデルが正しいツール選択をしやすい
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

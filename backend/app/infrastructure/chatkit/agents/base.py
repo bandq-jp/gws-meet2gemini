@@ -109,9 +109,11 @@ class SubAgentFactory(ABC):
         """
         Return native tools shared by all sub-agents.
 
-        For OpenAI models:
-        - WebSearchTool: For real-time web search
-        - CodeInterpreterTool: For data analysis and visualization
+        For OpenAI models (controlled by settings):
+        - WebSearchTool: For real-time web search (default: enabled)
+        - CodeInterpreterTool: For data analysis (default: DISABLED for sub-agents)
+          Code Interpreter often causes wasteful "pass" calls when models
+          mistakenly try to use it to call MCP tools.
 
         For LiteLLM models (Gemini, etc.):
         - These hosted tools are NOT supported (Responses API only)
@@ -124,32 +126,43 @@ class SubAgentFactory(ABC):
         if self.is_litellm_model:
             return []
 
-        # Check cache first
-        cache_key = self._settings.marketing_search_country
+        enable_web_search = self._settings.sub_agent_enable_web_search
+        enable_code_interpreter = self._settings.sub_agent_enable_code_interpreter
+
+        # Check cache first (key includes feature flags)
+        cache_key = f"{self._settings.marketing_search_country}_{enable_web_search}_{enable_code_interpreter}"
         if cache_key in _NATIVE_TOOLS_CACHE:
             return _NATIVE_TOOLS_CACHE[cache_key]
 
-        # Create and cache native tools
-        tools = [
-            WebSearchTool(
-                search_context_size="medium",
-                user_location={
-                    "country": self._settings.marketing_search_country,
-                    "type": "approximate",
-                },
-            ),
-            CodeInterpreterTool(
-                tool_config={
-                    "type": "code_interpreter",
-                    "container": {
-                        "type": "auto",
-                        "file_ids": [],
+        # Create and cache native tools based on settings
+        tools: List[Any] = []
+
+        if enable_web_search:
+            tools.append(
+                WebSearchTool(
+                    search_context_size="medium",
+                    user_location={
+                        "country": self._settings.marketing_search_country,
+                        "type": "approximate",
                     },
-                }
-            ),
-        ]
+                )
+            )
+
+        if enable_code_interpreter:
+            tools.append(
+                CodeInterpreterTool(
+                    tool_config={
+                        "type": "code_interpreter",
+                        "container": {
+                            "type": "auto",
+                            "file_ids": [],
+                        },
+                    }
+                )
+            )
+
         _NATIVE_TOOLS_CACHE[cache_key] = tools
-        logger.debug(f"[SubAgent] Native tools cached for country={cache_key}")
+        logger.debug(f"[SubAgent] Native tools cached: key={cache_key}, tools={len(tools)}")
         return tools
 
     def _build_model_settings(self) -> ModelSettings:

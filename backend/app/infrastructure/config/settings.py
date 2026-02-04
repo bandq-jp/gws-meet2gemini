@@ -107,6 +107,9 @@ class Settings:
     reasoning_translate_model: str = os.getenv("REASONING_TRANSLATE_MODEL", "gpt-5-nano")
     marketing_enable_web_search: bool = os.getenv("MARKETING_ENABLE_WEB_SEARCH", "true").lower() != "false"
     marketing_enable_code_interpreter: bool = os.getenv("MARKETING_ENABLE_CODE_INTERPRETER", "true").lower() != "false"
+    # Sub-agent native tools (disable Code Interpreter to prevent wasteful pass calls)
+    sub_agent_enable_web_search: bool = os.getenv("SUB_AGENT_ENABLE_WEB_SEARCH", "true").lower() != "false"
+    sub_agent_enable_code_interpreter: bool = os.getenv("SUB_AGENT_ENABLE_CODE_INTERPRETER", "false").lower() == "true"  # Default OFF
     marketing_enable_canvas: bool = os.getenv("MARKETING_ENABLE_CANVAS", "true").lower() != "false"
     marketing_workflow_id: str = os.getenv("MARKETING_WORKFLOW_ID", "wf_690a1d2e1ce881908e92b6826428f3af060621f24cf1b2bb")
     marketing_chatkit_token_secret: str = os.getenv("MARKETING_CHATKIT_TOKEN_SECRET", "")
