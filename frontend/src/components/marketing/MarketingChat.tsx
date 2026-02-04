@@ -7,7 +7,7 @@
  * Based on ga4-oauth-aiagent reference implementation.
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
 import { useMarketingChat } from "@/hooks/use-marketing-chat";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
@@ -57,6 +57,10 @@ export interface MarketingChatProps {
   attachments?: Attachment[];
   isReadOnly?: boolean;
   className?: string;
+}
+
+export interface MarketingChatRef {
+  clearMessages: () => void;
 }
 
 // Empty state suggestions
@@ -110,46 +114,55 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
   );
 }
 
-export function MarketingChat({
-  initialConversationId,
-  assets = [],
-  selectedAssetId,
-  onAssetSelect,
-  onConversationChange,
-  onSettingsClick,
-  onShareClick,
-  shareInfo,
-  attachments = [],
-  isReadOnly = false,
-  className = "",
-}: MarketingChatProps) {
-  const [internalAssetId, setInternalAssetId] = useState<string | null>(
-    selectedAssetId ?? (assets.length > 0 ? assets[0].id : null)
-  );
-  const [showAttachments, setShowAttachments] = useState(false);
-
-  const effectiveAssetId = selectedAssetId ?? internalAssetId;
-
-  const handleAssetSelect = useCallback(
-    (assetId: string) => {
-      setInternalAssetId(assetId);
-      onAssetSelect?.(assetId);
+export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
+  function MarketingChat(
+    {
+      initialConversationId,
+      assets = [],
+      selectedAssetId,
+      onAssetSelect,
+      onConversationChange,
+      onSettingsClick,
+      onShareClick,
+      shareInfo,
+      attachments = [],
+      isReadOnly = false,
+      className = "",
     },
-    [onAssetSelect]
-  );
+    ref
+  ) {
+    const [internalAssetId, setInternalAssetId] = useState<string | null>(
+      selectedAssetId ?? (assets.length > 0 ? assets[0].id : null)
+    );
+    const [showAttachments, setShowAttachments] = useState(false);
 
-  const {
-    messages,
-    isStreaming,
-    error,
-    conversationId,
-    sendMessage,
-    clearMessages,
-  } = useMarketingChat({
-    initialConversationId,
-    selectedAssetId: effectiveAssetId,
-    onConversationChange,
-  });
+    const effectiveAssetId = selectedAssetId ?? internalAssetId;
+
+    const handleAssetSelect = useCallback(
+      (assetId: string) => {
+        setInternalAssetId(assetId);
+        onAssetSelect?.(assetId);
+      },
+      [onAssetSelect]
+    );
+
+    const {
+      messages,
+      isStreaming,
+      error,
+      conversationId,
+      sendMessage,
+      clearMessages,
+    } = useMarketingChat({
+      initialConversationId,
+      selectedAssetId: effectiveAssetId,
+      onConversationChange,
+    });
+
+    // Expose clearMessages via ref
+    useImperativeHandle(ref, () => ({
+      clearMessages,
+    }), [clearMessages]);
 
   const handleSend = useCallback(
     async (content: string) => {
@@ -309,7 +322,7 @@ export function MarketingChat({
       )}
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Attachments Panel

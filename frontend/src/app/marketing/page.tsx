@@ -3,8 +3,10 @@
 /**
  * Marketing AI Chat Page
  *
- * Native SSE streaming implementation replacing ChatKit.
- * Canvas feature has been removed per user request.
+ * Native SSE streaming implementation with:
+ * - Left sidebar (AppSidebar) for navigation
+ * - Right history panel (HistoryPanel) for conversation list
+ * - ChatGPT/Claude.ai style UI/UX
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -23,6 +25,10 @@ import {
 import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
 import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 import { ShareDialog } from "@/components/marketing/share-dialog";
+import { AppSidebar, type SidebarView } from "@/components/marketing/AppSidebar";
+import { HistoryPanel, type Conversation } from "@/components/marketing/HistoryPanel";
+import { Clock, Menu } from "lucide-react";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 
 // Default asset
 const DEFAULT_ASSET: ModelAsset = {
@@ -60,14 +66,33 @@ export default function MarketingPage({
     initialThreadId
   );
 
+  // Sidebar & History Panel state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<SidebarView>("chat");
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
   // Token management
   const tokenRef = useRef<TokenState>({ secret: null, expiresAt: 0 });
+
+  // Chat ref for triggering new conversation
+  const chatRef = useRef<{ clearMessages: () => void } | null>(null);
 
   // Load selectedAssetId from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem("marketing:model_asset_id");
     if (stored) setSelectedAssetId(stored);
+
+    // Load sidebar collapsed state
+    const collapsedStored = localStorage.getItem("marketing:sidebar_collapsed");
+    if (collapsedStored) setSidebarCollapsed(collapsedStored === "true");
   }, []);
+
+  // Persist sidebar collapsed state
+  useEffect(() => {
+    localStorage.setItem("marketing:sidebar_collapsed", String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   // Ensure we have a valid token
   const ensureClientSecret = useCallback(async (): Promise<string> => {
@@ -121,7 +146,31 @@ export default function MarketingPage({
     }
   }, []);
 
-  // Conversation change handler
+  // New conversation handler
+  const handleNewConversation = useCallback(() => {
+    setCurrentConversationId(null);
+    if (typeof window !== "undefined" && window.location.pathname !== "/marketing") {
+      window.history.replaceState({}, "", "/marketing");
+    }
+    setAttachments([]);
+    setShareInfo(null);
+    setIsReadOnly(false);
+    // Clear chat messages
+    chatRef.current?.clearMessages();
+  }, []);
+
+  // Select conversation from history
+  const handleSelectConversation = useCallback((conv: Conversation) => {
+    setCurrentConversationId(conv.id);
+    if (typeof window !== "undefined") {
+      window.history.replaceState({}, "", `/marketing/${conv.id}`);
+    }
+    // Load attachments and share status
+    loadAttachments(conv.id);
+    loadShareStatus(conv.id);
+  }, []);
+
+  // Conversation change handler (from chat component)
   const handleConversationChange = useCallback(
     (conversationId: string | null) => {
       setCurrentConversationId(conversationId);
@@ -133,6 +182,9 @@ export default function MarketingPage({
       if (typeof window !== "undefined" && window.location.pathname !== target) {
         window.history.replaceState({}, "", target);
       }
+
+      // Refresh history panel
+      setRefreshTrigger((t) => t + 1);
 
       // Load attachments and share status
       loadAttachments(conversationId);
@@ -346,6 +398,14 @@ export default function MarketingPage({
     [ensureClientSecret, selectedAssetId, assets, handleSelectAsset]
   );
 
+  // Handle view change
+  const handleViewChange = useCallback((view: SidebarView) => {
+    setCurrentView(view);
+    if (view === "settings") {
+      setShowManageDialog(true);
+    }
+  }, []);
+
   return (
     <>
       {/* Model Asset Management Dialog */}
@@ -390,21 +450,98 @@ export default function MarketingPage({
         onToggleShare={handleToggleShare}
       />
 
-      {/* Main Chat */}
-      <div className="h-full w-full overflow-hidden bg-background">
-        <MarketingChat
-          initialConversationId={initialThreadId}
-          assets={assets}
-          selectedAssetId={selectedAssetId}
-          onAssetSelect={handleSelectAsset}
-          onConversationChange={handleConversationChange}
-          onSettingsClick={() => setShowManageDialog(true)}
-          onShareClick={() => setShowShareDialog(true)}
-          shareInfo={shareInfo}
-          attachments={attachments}
-          isReadOnly={isReadOnly}
-          className="h-full"
+      {/* History Panel (right sheet) */}
+      <HistoryPanel
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        currentConversationId={currentConversationId}
+        onSelectConversation={handleSelectConversation}
+        onNewConversation={handleNewConversation}
+        refreshTrigger={refreshTrigger}
+        getClientSecret={ensureClientSecret}
+      />
+
+      {/* Main Layout */}
+      <div className="h-full w-full flex overflow-hidden bg-white">
+        {/* Left Sidebar (desktop) */}
+        <AppSidebar
+          currentView={currentView}
+          onViewChange={handleViewChange}
+          onNewConversation={handleNewConversation}
+          collapsed={sidebarCollapsed}
+          onCollapsedChange={setSidebarCollapsed}
         />
+
+        {/* Mobile Sidebar (sheet) */}
+        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+          <SheetContent side="left" className="p-0 w-[280px]">
+            <SheetTitle className="sr-only">メニュー</SheetTitle>
+            <AppSidebar
+              currentView={currentView}
+              onViewChange={(view) => {
+                handleViewChange(view);
+                setMobileMenuOpen(false);
+              }}
+              onNewConversation={() => {
+                handleNewConversation();
+                setMobileMenuOpen(false);
+              }}
+              collapsed={false}
+              onCollapsedChange={() => {}}
+            />
+          </SheetContent>
+        </Sheet>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+          {/* Top Bar */}
+          <header className="h-14 shrink-0 border-b border-[#e5e7eb] bg-white flex items-center justify-between px-4">
+            {/* Left: Mobile menu + Title */}
+            <div className="flex items-center gap-3">
+              {/* Mobile menu button */}
+              <button
+                onClick={() => setMobileMenuOpen(true)}
+                className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg
+                  hover:bg-[#f0f1f5] text-[#6b7280] hover:text-[#1a1a2e]
+                  transition-colors cursor-pointer"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              <span className="text-sm font-semibold text-[#1a1a2e] tracking-tight">
+                {currentConversationId ? "チャット" : "新しいチャット"}
+              </span>
+            </div>
+
+            {/* Right: History button */}
+            <button
+              onClick={() => setHistoryOpen(true)}
+              className="flex items-center gap-2 px-3 h-9 rounded-lg
+                hover:bg-[#f0f1f5] text-[#6b7280] hover:text-[#1a1a2e]
+                transition-colors cursor-pointer text-sm font-medium"
+            >
+              <Clock className="w-4 h-4" />
+              <span className="hidden sm:inline">履歴</span>
+            </button>
+          </header>
+
+          {/* Chat Area */}
+          <div className="flex-1 overflow-hidden">
+            <MarketingChat
+              ref={chatRef}
+              initialConversationId={initialThreadId}
+              assets={assets}
+              selectedAssetId={selectedAssetId}
+              onAssetSelect={handleSelectAsset}
+              onConversationChange={handleConversationChange}
+              onSettingsClick={() => setShowManageDialog(true)}
+              onShareClick={() => setShowShareDialog(true)}
+              shareInfo={shareInfo}
+              attachments={attachments}
+              isReadOnly={isReadOnly}
+              className="h-full"
+            />
+          </div>
+        </div>
       </div>
     </>
   );

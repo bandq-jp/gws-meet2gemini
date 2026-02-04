@@ -1,11 +1,11 @@
 /**
  * Marketing Components
  *
- * Native SSE streaming chat components.
+ * Native SSE streaming chat components with ChatGPT/Claude.ai style UI.
  */
 
 export { MarketingChat } from "./MarketingChat";
-export type { MarketingChatProps } from "./MarketingChat";
+export type { MarketingChatProps, MarketingChatRef } from "./MarketingChat";
 
 export { MessageList } from "./MessageList";
 export type { MessageListProps } from "./MessageList";
@@ -24,3 +24,9 @@ export type { SubAgentEventProps } from "./SubAgentEvent";
 
 export { Composer } from "./Composer";
 export type { ComposerProps } from "./Composer";
+
+export { AppSidebar } from "./AppSidebar";
+export type { SidebarView } from "./AppSidebar";
+
+export { HistoryPanel } from "./HistoryPanel";
+export type { Conversation } from "./HistoryPanel";

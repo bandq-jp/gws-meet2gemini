@@ -113,3 +113,8 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const { id } = await context.params;
   return forward(request, id);
 }
+
+export async function DELETE(request: NextRequest, context: RouteContext) {
+  const { id } = await context.params;
+  return forward(request, id);
+}

@@ -1089,6 +1089,84 @@ def _normalize_verbosity_to_client(value: str | None) -> str | None:
 # --- Thread/Conversation Endpoints ---
 
 
+@router.get("/threads")
+async def list_threads(
+    context: MarketingRequestContext = Depends(require_marketing_context),
+    limit: int = 50,
+):
+    """
+    List user's conversations for history panel.
+
+    Returns conversations sorted by last_message_at (newest first).
+    """
+    sb = get_supabase()
+
+    try:
+        # Get user's own conversations
+        result = (
+            sb.table("marketing_conversations")
+            .select("id, title, status, created_at, last_message_at, updated_at")
+            .eq("owner_email", context.user_email)
+            .order("last_message_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        conversations = []
+        for row in result.data or []:
+            conversations.append({
+                "id": row["id"],
+                "title": row.get("title") or "新しい会話",
+                "status": row.get("status"),
+                "created_at": row.get("created_at"),
+                "updated_at": row.get("last_message_at") or row.get("updated_at") or row.get("created_at"),
+            })
+
+        return {"conversations": conversations}
+    except Exception as exc:
+        logger.exception("Failed to list threads")
+        raise HTTPException(status_code=500, detail="Failed to list conversations") from exc
+
+
+@router.delete("/threads/{thread_id}")
+async def delete_thread(
+    thread_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Delete a conversation and its messages.
+    """
+    sb = get_supabase()
+
+    try:
+        # Verify ownership
+        conv_result = (
+            sb.table("marketing_conversations")
+            .select("owner_email")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not conv_result.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        if conv_result.data[0].get("owner_email") != context.user_email:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Delete messages first (foreign key constraint)
+        sb.table("marketing_messages").delete().eq("conversation_id", thread_id).execute()
+
+        # Delete conversation
+        sb.table("marketing_conversations").delete().eq("id", thread_id).execute()
+
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to delete thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to delete conversation") from exc
+
+
 @router.get("/threads/{thread_id}")
 async def get_thread_detail(
     thread_id: str,
