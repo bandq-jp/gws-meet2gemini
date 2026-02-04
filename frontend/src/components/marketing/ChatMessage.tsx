@@ -347,10 +347,14 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
   const toolCalls = item.toolCalls || [];
   const hasDetails = toolCalls.length > 0 || item.reasoningContent;
 
-  // Auto-expand when new details arrive during running
+  // Auto-expand when running, auto-collapse after completion
   useEffect(() => {
     if (item.isRunning && hasDetails) {
       setIsExpanded(true);
+    } else if (!item.isRunning) {
+      // Auto-collapse 1 second after completion
+      const timer = setTimeout(() => setIsExpanded(false), 1000);
+      return () => clearTimeout(timer);
     }
   }, [item.isRunning, hasDetails]);
 

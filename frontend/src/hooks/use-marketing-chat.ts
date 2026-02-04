@@ -355,7 +355,7 @@ export function useMarketingChat(
                   ...subItem,
                   eventType: event.event_type,
                   isRunning: true,
-                  reasoningContent: (subItem.reasoningContent || "") + " " + reasoningContent,
+                  reasoningContent: (subItem.reasoningContent || "") + "\n\n" + reasoningContent,
                 };
               } else {
                 items.push({

@@ -383,6 +383,7 @@ class MarketingAgentService:
                     "type": "sub_agent_event",
                     "agent": agent_name,
                     "event_type": "tool_called",
+                    "is_running": True,  # Sub-agent is still running
                     "data": {
                         "tool_name": getattr(raw, "name", "unknown"),
                         "call_id": getattr(raw, "call_id", None),
@@ -400,6 +401,7 @@ class MarketingAgentService:
                     "type": "sub_agent_event",
                     "agent": agent_name,
                     "event_type": "tool_output",
+                    "is_running": True,  # Sub-agent is still running (processing output)
                     "data": {
                         "call_id": call_id,
                         "output_preview": str(item.output)[:200] if item.output else "",
@@ -413,6 +415,7 @@ class MarketingAgentService:
                     "type": "sub_agent_event",
                     "agent": agent_name,
                     "event_type": "reasoning",
+                    "is_running": True,  # Sub-agent is still running (thinking)
                     "data": {
                         "content": summary or "分析中...",
                     },
@@ -420,12 +423,13 @@ class MarketingAgentService:
                     "_needs_translation": summary is not None,
                 }
 
-            # Message output from sub-agent
+            # Message output from sub-agent (completion marker)
             if event_name == "message_output_created":
                 return {
                     "type": "sub_agent_event",
                     "agent": agent_name,
                     "event_type": "message_output",
+                    "is_running": False,  # Sub-agent completed
                     "data": {},
                 }
 
@@ -439,6 +443,7 @@ class MarketingAgentService:
                     "type": "sub_agent_event",
                     "agent": agent_name,
                     "event_type": "started",
+                    "is_running": True,  # Sub-agent just started
                     "data": {},
                 }
 

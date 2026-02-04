@@ -825,6 +825,7 @@ async def chat_stream(
                         "id": str(uuid.uuid4()),
                         "agent": event.get("agent"),
                         "event_type": event.get("event_type"),
+                        "is_running": event.get("is_running"),  # Track sub-agent completion
                         "data": event.get("data"),
                     })
                     seq += 1
