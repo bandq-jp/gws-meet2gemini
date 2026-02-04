@@ -36,11 +36,13 @@ export type UseMarketingChatOptions = {
 export type UseMarketingChatReturn = {
   messages: Message[];
   isStreaming: boolean;
+  isLoading: boolean;
   error: string | null;
   conversationId: string | null;
   sendMessage: (content: string) => Promise<void>;
   clearMessages: () => void;
   setConversationId: (id: string | null) => void;
+  loadConversation: (id: string) => Promise<void>;
 };
 
 // Generate unique ID
@@ -53,10 +55,14 @@ export function useMarketingChat(
 ): UseMarketingChatReturn {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(
     options.initialConversationId ?? null
   );
+
+  // Track if initial conversation has been loaded
+  const initialLoadDoneRef = useRef(false);
 
   // Context items for multi-turn conversation
   const contextItemsRef = useRef<Array<Record<string, unknown>> | null>(null);
@@ -535,13 +541,105 @@ export function useMarketingChat(
     onConversationChangeRef.current?.(id);
   }, []);
 
+  // Load conversation from DB
+  const loadConversation = useCallback(
+    async (id: string) => {
+      if (!id) return;
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const token = await ensureToken();
+
+        const response = await fetch(`/api/marketing/threads/${id}`, {
+          headers: {
+            "x-marketing-client-secret": token,
+          },
+        });
+
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error("Conversation not found");
+          }
+          if (response.status === 403) {
+            throw new Error("Access denied");
+          }
+          throw new Error(`Failed to load conversation: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Restore messages with activity items
+        const restoredMessages: Message[] = (data.messages || []).map(
+          (msg: {
+            id: string;
+            role: string;
+            content: string;
+            activity_items?: ActivityItem[];
+            created_at?: string;
+          }) => {
+            // Restore activity items with new IDs
+            const activityItems: ActivityItem[] = (msg.activity_items || []).map(
+              (item: ActivityItem, idx: number) => ({
+                ...item,
+                id: item.id || generateId(),
+                sequence: item.sequence ?? idx,
+              })
+            );
+
+            return {
+              id: msg.id,
+              role: msg.role as "user" | "assistant",
+              content: msg.content || "",
+              activityItems,
+              isStreaming: false,
+              createdAt: msg.created_at ? new Date(msg.created_at) : new Date(),
+            };
+          }
+        );
+
+        setMessages(restoredMessages);
+        setConversationId(id);
+
+        // Restore context items for next turn
+        if (data.context_items) {
+          contextItemsRef.current = data.context_items;
+        }
+
+        onConversationChangeRef.current?.(id);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to load conversation";
+        setError(message);
+        onErrorRef.current?.(message);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [ensureToken]
+  );
+
+  // Auto-load initial conversation
+  useEffect(() => {
+    if (
+      options.initialConversationId &&
+      !initialLoadDoneRef.current &&
+      messages.length === 0
+    ) {
+      initialLoadDoneRef.current = true;
+      loadConversation(options.initialConversationId);
+    }
+  }, [options.initialConversationId, messages.length, loadConversation]);
+
   return {
     messages,
     isStreaming,
+    isLoading,
     error,
     conversationId,
     sendMessage,
     clearMessages,
     setConversationId: handleSetConversationId,
+    loadConversation,
   };
 }

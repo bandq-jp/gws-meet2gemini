@@ -1415,6 +1415,112 @@ class AgentToolStreamEvent(TypedDict):
 
 **ビルドステータス**: ✅ 成功 (Backend + Frontend)
 
+### 17. サブエージェントUI簡素化 & 自動スクロール修正 (2026-02-04)
+
+**ユーザー指摘**:
+- サブエージェントUIがカード形式で重すぎる
+- 自動スクロールが頻繁に発生して使いにくい
+- `raw_response_event` ログが大量に出力される
+
+**修正内容**:
+
+1. **SubAgentBadge** (インライン形式に変更):
+   - `SubAgentCard` → `SubAgentBadge` に置き換え
+   - ToolBadgeと同じインラインスタイル
+   - 展開可能: ツール呼び出し・推論の詳細を表示
+   - 実行中=グレー+スピナー、完了=グリーン+チェック
+
+2. **ActivityTimeline** (インターリーブ表示):
+   - sequence順にソートして到着順表示
+   - 連続する同種アイテムをグループ化（コンパクト表示）
+
+3. **MessageList** (スマートスクロール):
+   - ユーザーが下部付近にいる場合のみ自動スクロール
+   - 新しいメッセージ追加時のみスクロール
+   - `isNearBottomRef` でスクロール位置を追跡
+
+4. **ログ削減**:
+   - `raw_response_event` をDEBUGレベルに変更
+   - 重要イベント（started, tool_called, reasoning, message_output）のみINFO
+
+5. **text_delta除外**:
+   - サブエージェントのtext_deltaイベントをSSEから除外
+   - オーケストレーターの最終出力に統合されるため不要
+
+**技術的詳細**:
+- サブエージェントの最終出力は `Agent.as_tool()` の戻り値としてオーケストレーターに返される
+- オーケストレーターがその内容を統合して最終回答を生成
+- フロントエンドにはオーケストレーターの `text_delta` として表示される
+- これは **OpenAI Agents SDK の設計通り**
+
+### 18. Native SSE実装 DB保存機能追加 (2026-02-04)
+
+**問題発見**: 大規模調査の結果、Native SSE実装（`agent_service.py`）ではDB保存がまったく実装されていないことが判明
+
+**影響**:
+- 会話履歴が保存されない
+- ページリロード/再訪問で会話が消失
+- 会話ダッシュボードに表示されない
+
+**参照プロジェクト**: `/home/als0028/study/shintairiku/ga4-oauth-aiagent/backend/app/routers/chat.py`
+
+**実装内容**:
+
+1. **`marketing.py` `/chat/stream` エンドポイント修正**:
+   - ストリーム開始前: user message 保存
+   - 新規会話: `marketing_conversations` に作成（タイトル自動生成）
+   - `_context_items` イベント時: context_items を conversation.metadata に保存
+   - ストリーム終了時: assistant message + activity_items を一括保存
+   - `last_message_at` を更新
+
+2. **DB保存データ構造**:
+   ```python
+   # marketing_messages.content (JSONB)
+   {
+       "text": "最終テキスト",
+       "activity_items": [
+           {"kind": "text", "sequence": 0, "content": "..."},
+           {"kind": "tool", "sequence": 1, "name": "...", "output": "..."},
+           {"kind": "reasoning", "sequence": 2, "content": "..."},
+           {"kind": "sub_agent", "sequence": 3, "agent": "...", "event_type": "..."},
+       ]
+   }
+   ```
+
+3. **新規APIエンドポイント**:
+   - `GET /api/v1/marketing/threads/{thread_id}` - 会話詳細 + メッセージ一覧取得
+   - activity_items を含めてUI復元可能
+
+4. **フロントエンドAPI Route追加**:
+   - `frontend/src/app/api/marketing/threads/[id]/route.ts` - バックエンドプロキシ
+
+5. **`use-marketing-chat.ts` 会話履歴ロード機能**:
+   - `loadConversation(id)` - DBから会話をロード
+   - `isLoading` 状態追加
+   - `initialConversationId` 変更時に自動ロード
+   - activity_items の復元（新規IDで再生成）
+   - context_items の復元（次ターン継続用）
+
+**2段階永続化パターン** (ga4-oauth-aiagent準拠):
+| 項目 | 保存先 | 目的 |
+|------|--------|------|
+| context_items | conversations.metadata | Agent コンテキスト継続用 |
+| activity_items | messages.content | UI復元用 |
+
+**保存タイミング**:
+```
+1. user message: SSE開始前に即座保存
+2. context_items: "_context_items"イベント時に保存
+3. assistant message + activity_items: "done"イベント時に一括保存
+```
+
+**技術的知見**:
+- `generate_thread_title()` を再利用（ChatKit実装から）
+- activity_items の復元時はクライアント側で新規UUIDを生成
+- context_items 優先: DB から復元 → リクエストbody でフォールバック
+
+**ビルドステータス**: ✅ 成功 (Backend + Frontend)
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

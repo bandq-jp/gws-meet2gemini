@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime
 from functools import lru_cache
 from typing import Annotated
 import mimetypes
@@ -687,8 +688,11 @@ async def chat_stream(
     - error: Error event
     """
     from app.infrastructure.chatkit.model_assets import get_model_asset
+    from app.infrastructure.chatkit.supabase_store import generate_thread_title
+    import uuid
 
     agent_service = get_marketing_agent_service()
+    sb = get_supabase()
 
     # Load model asset if specified
     model_asset = None
@@ -696,12 +700,59 @@ async def chat_stream(
     if asset_id:
         model_asset = get_model_asset(asset_id, context=context)
 
+    # Determine or create conversation ID
+    conversation_id = body.conversation_id or str(uuid.uuid4())
+    is_new_conversation = not body.conversation_id
+
     async def event_generator():
+        # --- DB: Save user message before streaming ---
+        user_msg_id = str(uuid.uuid4())
+        try:
+            # Ensure conversation exists
+            if is_new_conversation:
+                # Generate title asynchronously
+                title = await generate_thread_title(body.message) or "新しい会話"
+                sb.table("marketing_conversations").insert({
+                    "id": conversation_id,
+                    "title": title,
+                    "owner_email": context.user_email,
+                    "owner_clerk_id": context.user_id,
+                    "status": "active",
+                    "metadata": {"context_items": body.context_items} if body.context_items else {},
+                }).execute()
+                logger.info(f"[DB] Created conversation: {conversation_id}")
+            else:
+                # Update last_message_at for existing conversation
+                sb.table("marketing_conversations").update({
+                    "last_message_at": datetime.utcnow().isoformat(),
+                }).eq("id", conversation_id).execute()
+
+            # Save user message
+            sb.table("marketing_messages").insert({
+                "id": user_msg_id,
+                "conversation_id": conversation_id,
+                "role": "user",
+                "message_type": "content",
+                "content": {"text": body.message},
+                "plain_text": body.message,
+                "created_by": context.user_email,
+            }).execute()
+            logger.info(f"[DB] Saved user message: {user_msg_id}")
+        except Exception as e:
+            logger.exception(f"[DB] Failed to save user message: {e}")
+            # Continue streaming even if DB save fails
+
+        # --- Streaming with activity items accumulation ---
+        activity_items: list[dict] = []
+        full_text_content = ""
+        seq = 0
+        current_text_id: str | None = None
+
         try:
             async for event in agent_service.stream_chat(
                 user_id=context.user_id,
                 user_email=context.user_email,
-                conversation_id=body.conversation_id or "",
+                conversation_id=conversation_id,
                 message=body.message,
                 context_items=body.context_items,
                 model_asset=model_asset,
@@ -710,19 +761,132 @@ async def chat_stream(
                     logger.info("Client disconnected during chat stream")
                     break
 
-                # Translate reasoning summary from English to Japanese
-                if event.get("_needs_translation") and event.get("content"):
+                event_type = event.get("type")
+
+                # --- Accumulate activity items for DB storage ---
+                if event_type == "text_delta":
+                    content = event.get("content", "")
+                    full_text_content += content
+                    if current_text_id is None:
+                        current_text_id = str(uuid.uuid4())
+                        activity_items.append({
+                            "kind": "text",
+                            "sequence": seq,
+                            "id": current_text_id,
+                            "content": content,
+                        })
+                        seq += 1
+                    else:
+                        # Update existing text item
+                        for item in activity_items:
+                            if item.get("id") == current_text_id:
+                                item["content"] = item.get("content", "") + content
+                                break
+
+                elif event_type == "response_created":
+                    current_text_id = None  # Reset for new response
+
+                elif event_type == "tool_call":
+                    activity_items.append({
+                        "kind": "tool",
+                        "sequence": seq,
+                        "id": event.get("call_id"),
+                        "name": event.get("name"),
+                        "call_id": event.get("call_id"),
+                        "arguments": event.get("arguments"),
+                    })
+                    seq += 1
+
+                elif event_type == "tool_result":
+                    # Update existing tool item with output
+                    call_id = event.get("call_id")
+                    for item in activity_items:
+                        if item.get("kind") == "tool" and item.get("call_id") == call_id:
+                            item["output"] = event.get("output")
+                            item["is_complete"] = True
+                            break
+
+                elif event_type == "reasoning":
+                    activity_items.append({
+                        "kind": "reasoning",
+                        "sequence": seq,
+                        "id": str(uuid.uuid4()),
+                        "content": event.get("content"),
+                    })
+                    seq += 1
+
+                elif event_type == "sub_agent_event":
+                    activity_items.append({
+                        "kind": "sub_agent",
+                        "sequence": seq,
+                        "id": str(uuid.uuid4()),
+                        "agent": event.get("agent"),
+                        "event_type": event.get("event_type"),
+                        "data": event.get("data"),
+                    })
+                    seq += 1
+
+                elif event_type == "_context_items":
+                    # Save context_items to conversation metadata
                     try:
-                        translated = await agent_service._translate_to_japanese(
-                            event["content"]
-                        )
-                        event["content"] = translated
+                        sb.table("marketing_conversations").update({
+                            "metadata": {"context_items": event.get("items")},
+                        }).eq("id", conversation_id).execute()
+                        logger.info(f"[DB] Saved context_items for: {conversation_id}")
+                    except Exception as e:
+                        logger.warning(f"[DB] Failed to save context_items: {e}")
+                    continue  # Don't send to client
+
+                # Translate reasoning summary from English to Japanese
+                if event.get("_needs_translation"):
+                    try:
+                        if event.get("content"):
+                            translated = await agent_service._translate_to_japanese(
+                                event["content"]
+                            )
+                            event["content"] = translated
+                        elif event.get("data", {}).get("content"):
+                            translated = await agent_service._translate_to_japanese(
+                                event["data"]["content"]
+                            )
+                            event["data"]["content"] = translated
                     except Exception as te:
                         logger.warning(f"Translation failed: {te}")
-                # Remove internal flag before sending
+
+                # Remove internal flags before sending
                 event.pop("_needs_translation", None)
 
+                # Override conversation_id in done event
+                if event_type == "done":
+                    event["conversation_id"] = conversation_id
+
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+            # --- DB: Save assistant message with activity_items ---
+            if full_text_content or activity_items:
+                assistant_msg_id = str(uuid.uuid4())
+                try:
+                    sb.table("marketing_messages").insert({
+                        "id": assistant_msg_id,
+                        "conversation_id": conversation_id,
+                        "role": "assistant",
+                        "message_type": "content",
+                        "content": {
+                            "text": full_text_content,
+                            "activity_items": activity_items,
+                        },
+                        "plain_text": full_text_content[:10000] if full_text_content else None,
+                        "created_by": "assistant",
+                    }).execute()
+                    logger.info(f"[DB] Saved assistant message: {assistant_msg_id}")
+
+                    # Update conversation last_message_at
+                    sb.table("marketing_conversations").update({
+                        "last_message_at": datetime.utcnow().isoformat(),
+                    }).eq("id", conversation_id).execute()
+                except Exception as e:
+                    logger.exception(f"[DB] Failed to save assistant message: {e}")
+
         except Exception as e:
             logger.exception("Error in chat stream")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
@@ -907,6 +1071,85 @@ def _normalize_verbosity_to_client(value: str | None) -> str | None:
     if value == "long":
         return "high"
     return value
+
+
+# --- Thread/Conversation Endpoints ---
+
+
+@router.get("/threads/{thread_id}")
+async def get_thread_detail(
+    thread_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Get conversation detail with messages.
+
+    Returns conversation metadata and messages with activity_items for UI restoration.
+    """
+    sb = get_supabase()
+
+    try:
+        # Get conversation
+        conv_result = (
+            sb.table("marketing_conversations")
+            .select("*")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not conv_result.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        conversation = conv_result.data[0]
+
+        # Check access (owner or shared)
+        is_owner = conversation.get("owner_email") == context.user_email
+        is_shared = conversation.get("metadata", {}).get("is_shared", False)
+        if not is_owner and not is_shared:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        # Get messages
+        messages_result = (
+            sb.table("marketing_messages")
+            .select("id, role, message_type, content, plain_text, created_at")
+            .eq("conversation_id", thread_id)
+            .order("created_at", desc=False)
+            .limit(500)
+            .execute()
+        )
+
+        messages = []
+        for row in messages_result.data or []:
+            content = row.get("content") or {}
+            msg = {
+                "id": row["id"],
+                "role": row["role"],
+                "content": content.get("text") or row.get("plain_text") or "",
+                "activity_items": content.get("activity_items"),
+                "created_at": row.get("created_at"),
+            }
+            messages.append(msg)
+
+        # Get context_items from conversation metadata
+        context_items = conversation.get("metadata", {}).get("context_items")
+
+        return {
+            "conversation": {
+                "id": conversation["id"],
+                "title": conversation.get("title"),
+                "status": conversation.get("status"),
+                "created_at": conversation.get("created_at"),
+                "last_message_at": conversation.get("last_message_at"),
+                "is_owner": is_owner,
+            },
+            "messages": messages,
+            "context_items": context_items,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to load thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to load conversation") from exc
 
 
 # --- Thread Sharing Endpoints ---

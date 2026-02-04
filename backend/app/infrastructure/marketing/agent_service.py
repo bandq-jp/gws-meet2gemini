@@ -110,16 +110,14 @@ class MarketingAgentService:
                 agent = agent_tool_event.get("agent")
                 agent_name = getattr(agent, "name", "unknown") if agent else "unknown"
                 stream_event = agent_tool_event.get("event")  # This is StreamEvent
-                event_type = getattr(stream_event, "type", "unknown") if stream_event else "none"
-
-                logger.info(f"[Sub-agent] {agent_name}: received event type={event_type}")
 
                 sse_event = self._process_sub_agent_event(agent_name, stream_event)
                 if sse_event:
-                    logger.info(f"[Sub-agent] {agent_name}: emitting SSE event={sse_event}")
+                    # Only log important events (not every raw_response_event)
+                    event_type = sse_event.get("event_type", "")
+                    if event_type in ("started", "tool_called", "reasoning", "message_output"):
+                        logger.info(f"[Sub-agent] {agent_name}: {event_type}")
                     await queue.put(sse_event)
-                else:
-                    logger.debug(f"[Sub-agent] {agent_name}: event not converted to SSE (type={event_type})")
             except Exception as e:
                 logger.exception(f"[Sub-agent] Error processing event: {e}")
 
@@ -289,11 +287,13 @@ class MarketingAgentService:
     ) -> dict | None:
         """Convert sub-agent event to SSE event."""
         if event is None:
-            logger.debug(f"[Sub-agent] {agent_name}: event is None")
             return None
 
         event_type = getattr(event, "type", "")
-        logger.info(f"[Sub-agent] {agent_name}: processing event_type={event_type}")
+
+        # Only log important events, not every raw_response_event
+        if event_type != "raw_response_event":
+            logger.debug(f"[Sub-agent] {agent_name}: event_type={event_type}")
 
         if event_type == "run_item_stream_event":
             item = event.item
@@ -340,6 +340,8 @@ class MarketingAgentService:
                     "data": {
                         "content": summary or "分析中...",
                     },
+                    # Mark for translation (same as main agent)
+                    "_needs_translation": summary is not None,
                 }
 
             # Message output from sub-agent
@@ -364,15 +366,9 @@ class MarketingAgentService:
                     "data": {},
                 }
 
-            if inner_type == "response.output_text.delta":
-                delta = getattr(data, "delta", "")
-                if delta:
-                    return {
-                        "type": "sub_agent_event",
-                        "agent": agent_name,
-                        "event_type": "text_delta",
-                        "data": {"content": delta},
-                    }
+            # Note: We don't send text_delta for sub-agents
+            # The sub-agent's output is returned to the orchestrator
+            # which integrates it into the final response
 
         return None
 

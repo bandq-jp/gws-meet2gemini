@@ -333,140 +333,79 @@ const markdownComponents: Components = {
 };
 
 // ---------------------------------------------------------------------------
-// SubAgentCard - Rich card for each sub-agent
+// SubAgentBadge - Inline badge for sub-agent (matches main agent tool style)
 // ---------------------------------------------------------------------------
 
-function SubAgentCard({ item }: { item: SubAgentActivityItem }) {
-  const [isExpanded, setIsExpanded] = useState(item.isRunning);
+function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const config = getAgentConfig(item.agent);
   const Icon = config.icon;
 
-  // Auto-collapse when agent finishes
-  useEffect(() => {
-    if (!item.isRunning && isExpanded) {
-      // Small delay before collapsing for smooth transition
-      const timer = setTimeout(() => setIsExpanded(false), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [item.isRunning]);
-
-  // Auto-expand when new activity
-  useEffect(() => {
-    if (item.isRunning) {
-      setIsExpanded(true);
-    }
-  }, [item.isRunning]);
-
   const toolCalls = item.toolCalls || [];
-  const hasActivity = toolCalls.length > 0 || item.reasoningContent;
+  const hasDetails = toolCalls.length > 0 || item.reasoningContent;
 
   return (
-    <div
-      className={`
-        rounded-xl border overflow-hidden transition-all duration-300 ease-out
-        ${item.isRunning
-          ? `${config.borderColor} shadow-md ring-1 ring-${config.accentColor}/20`
-          : `border-[#e5e7eb] shadow-sm`
-        }
-      `}
-      style={{
-        borderLeftWidth: "3px",
-        borderLeftColor: config.accentColor,
-      }}
-    >
-      {/* Header */}
+    <div className="space-y-1.5">
+      {/* Main badge - inline with other activity items */}
       <button
-        onClick={() => setIsExpanded(!isExpanded)}
+        onClick={() => hasDetails && setIsExpanded(!isExpanded)}
         className={`
-          w-full flex items-center gap-3 px-3 py-2.5
-          ${item.isRunning ? config.bgLight : "bg-white hover:bg-[#f8f9fb]"}
-          transition-colors cursor-pointer
+          inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] sm:text-xs
+          transition-all duration-200 cursor-pointer
+          ${item.isRunning
+            ? "bg-[#f0f1f5] text-[#374151] border border-[#e5e7eb]"
+            : "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
+          }
         `}
       >
-        {/* Icon with pulse animation when running */}
-        <div className={`
-          w-8 h-8 rounded-lg flex items-center justify-center
-          bg-gradient-to-br ${config.gradient} shadow-sm
-          ${item.isRunning ? "animate-pulse" : ""}
-        `}>
-          <Icon className="w-4 h-4 text-white" />
-        </div>
-
-        {/* Title and status */}
-        <div className="flex-1 text-left min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={`font-semibold text-sm ${config.textColor}`}>
-              {config.label}
-            </span>
-            {item.isRunning ? (
-              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#6b7280] bg-white/80 px-1.5 py-0.5 rounded-full">
-                <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                実行中
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#10b981] bg-[#ecfdf5] px-1.5 py-0.5 rounded-full">
-                <CheckCircle2 className="w-2.5 h-2.5" />
-                完了
-              </span>
-            )}
-          </div>
-          {toolCalls.length > 0 && (
-            <p className="text-[11px] text-[#9ca3af] truncate mt-0.5">
-              {toolCalls.length}件のツール呼び出し
-            </p>
-          )}
-        </div>
-
-        {/* Expand/Collapse */}
-        {hasActivity && (
-          <div className="text-[#9ca3af]">
-            {isExpanded ? (
-              <ChevronDown className="w-4 h-4" />
-            ) : (
-              <ChevronRight className="w-4 h-4" />
-            )}
-          </div>
+        <Icon className="w-3 h-3 shrink-0" />
+        <span className="font-medium">{config.label}</span>
+        {item.isRunning ? (
+          <Loader2 className="w-3 h-3 animate-spin" />
+        ) : (
+          <CheckCircle2 className="w-3 h-3 text-[#10b981]" />
+        )}
+        {hasDetails && (
+          <span className="text-[#9ca3af] ml-0.5">
+            {isExpanded ? "▼" : "▶"}
+          </span>
         )}
       </button>
 
-      {/* Expanded content */}
-      {isExpanded && hasActivity && (
-        <div className="px-3 pb-3 pt-1 bg-white border-t border-[#f0f1f5]">
+      {/* Expanded details - tool calls and reasoning */}
+      {isExpanded && hasDetails && (
+        <div className="ml-3 pl-2.5 border-l border-[#e5e7eb] space-y-1">
           {/* Tool calls */}
-          {toolCalls.length > 0 && (
-            <div className="space-y-1.5">
-              {toolCalls.map((tc, idx) => {
-                const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
-                const toolLabel = TOOL_LABELS[tc.toolName] || tc.toolName;
-                return (
-                  <div
-                    key={tc.callId || idx}
-                    className={`
-                      flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px]
-                      ${tc.isComplete
-                        ? "bg-[#ecfdf5] text-[#065f46]"
-                        : "bg-[#f0f1f5] text-[#6b7280]"
-                      }
-                    `}
-                  >
-                    <ToolIcon className="w-3 h-3 shrink-0" />
-                    <span className="font-medium flex-1 truncate">{toolLabel}</span>
-                    {tc.isComplete ? (
-                      <CheckCircle2 className="w-3 h-3 text-[#10b981]" />
-                    ) : (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          {toolCalls.map((tc, idx) => {
+            const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
+            const toolLabel = TOOL_LABELS[tc.toolName] || tc.toolName;
+            return (
+              <div
+                key={tc.callId || idx}
+                className={`
+                  inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[10px]
+                  ${tc.isComplete
+                    ? "bg-[#ecfdf5] text-[#065f46]"
+                    : "bg-[#f8f9fb] text-[#6b7280]"
+                  }
+                `}
+              >
+                <ToolIcon className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate max-w-[150px]">{toolLabel}</span>
+                {tc.isComplete ? (
+                  <span className="text-[#10b981]">✓</span>
+                ) : (
+                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                )}
+              </div>
+            );
+          })}
 
-          {/* Reasoning content */}
+          {/* Reasoning */}
           {item.reasoningContent && (
-            <div className="mt-2 flex items-start gap-2">
-              <Brain className="w-3 h-3 shrink-0 mt-0.5 text-[#c0c4cc]" />
-              <p className="text-[11px] text-[#9ca3af] leading-relaxed line-clamp-3">
+            <div className="flex items-start gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#c0c4cc] mt-1.5 shrink-0" />
+              <p className="text-[10px] text-[#9ca3af] leading-relaxed line-clamp-2">
                 {item.reasoningContent}
               </p>
             </div>
@@ -565,61 +504,80 @@ function ActivityTimeline({
 }) {
   if (!items || items.length === 0) return null;
 
-  // Separate sub-agent items from other items
-  const subAgentItems = items.filter(
-    (i) => i.kind === "sub_agent"
-  ) as SubAgentActivityItem[];
-  const otherItems = items.filter((i) => i.kind !== "sub_agent");
+  // Sort by sequence and render in arrival order (interleaved timeline)
+  const sortedItems = [...items].sort((a, b) => a.sequence - b.sequence);
 
-  // Group other items by kind for rendering
-  const textItems = otherItems.filter((i) => i.kind === "text") as TextActivityItem[];
-  const toolItems = otherItems.filter((i) => i.kind === "tool") as ToolActivityItem[];
-  const reasoningItems = otherItems.filter(
-    (i) => i.kind === "reasoning"
-  ) as ReasoningActivityItem[];
+  // Group consecutive items by kind for compact rendering
+  const groups: { kind: string; items: ActivityItem[] }[] = [];
+  for (const item of sortedItems) {
+    const lastGroup = groups[groups.length - 1];
+    // Group sub_agent and tool badges together; text and reasoning are individual
+    const groupable = item.kind === "sub_agent" || item.kind === "tool";
+    if (lastGroup && lastGroup.kind === item.kind && groupable) {
+      lastGroup.items.push(item);
+    } else {
+      groups.push({ kind: item.kind, items: [item] });
+    }
+  }
 
   return (
-    <div className="space-y-3">
-      {/* Sub-agent cards (prominently displayed) */}
-      {subAgentItems.length > 0 && (
-        <div className="space-y-2">
-          {subAgentItems.map((item) => (
-            <SubAgentCard key={item.id} item={item} />
-          ))}
-        </div>
-      )}
+    <div className="space-y-2.5">
+      {groups.map((group, groupIdx) => {
+        switch (group.kind) {
+          case "sub_agent":
+            return (
+              <div key={groupIdx} className="flex flex-wrap gap-1.5">
+                {group.items.map((item) => (
+                  <SubAgentBadge
+                    key={item.id}
+                    item={item as SubAgentActivityItem}
+                  />
+                ))}
+              </div>
+            );
 
-      {/* Reasoning lines (only if not already in sub-agent cards) */}
-      {reasoningItems.length > 0 && subAgentItems.length === 0 && (
-        <div className="space-y-1.5">
-          {reasoningItems.map((item) => (
-            <ReasoningLine key={item.id} content={item.content} />
-          ))}
-        </div>
-      )}
+          case "tool":
+            return (
+              <div key={groupIdx} className="flex flex-wrap gap-1 sm:gap-1.5">
+                {group.items.map((item) => (
+                  <ToolBadge key={item.id} item={item as ToolActivityItem} />
+                ))}
+              </div>
+            );
 
-      {/* Tool badges (only if not in sub-agents) */}
-      {toolItems.length > 0 && subAgentItems.length === 0 && (
-        <div className="flex flex-wrap gap-1 sm:gap-1.5">
-          {toolItems.map((item) => (
-            <ToolBadge key={item.id} item={item} />
-          ))}
-        </div>
-      )}
+          case "reasoning":
+            return (
+              <div key={groupIdx} className="space-y-1.5">
+                {group.items.map((item) => (
+                  <ReasoningLine
+                    key={item.id}
+                    content={(item as ReasoningActivityItem).content}
+                  />
+                ))}
+              </div>
+            );
 
-      {/* Text content */}
-      {textItems.length > 0 && (
-        <div>
-          {textItems.map((item, idx) => (
-            <TextSegment
-              key={item.id}
-              content={item.content}
-              isLast={idx === textItems.length - 1}
-              isStreaming={isStreaming}
-            />
-          ))}
-        </div>
-      )}
+          case "text":
+            return (
+              <div key={groupIdx}>
+                {group.items.map((item, idx) => (
+                  <TextSegment
+                    key={item.id}
+                    content={(item as TextActivityItem).content}
+                    isLast={
+                      groupIdx === groups.length - 1 &&
+                      idx === group.items.length - 1
+                    }
+                    isStreaming={isStreaming}
+                  />
+                ))}
+              </div>
+            );
+
+          default:
+            return null;
+        }
+      })}
     </div>
   );
 }
