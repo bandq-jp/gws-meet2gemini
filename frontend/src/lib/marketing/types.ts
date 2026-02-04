@@ -200,8 +200,7 @@ export interface ToolActivityItem extends BaseActivityItem {
   name: string;
   callId: string;
   arguments?: string;
-  output?: string;
-  isComplete: boolean;
+  output?: string; // undefined = running, string = complete
 }
 
 export interface ReasoningActivityItem extends BaseActivityItem {

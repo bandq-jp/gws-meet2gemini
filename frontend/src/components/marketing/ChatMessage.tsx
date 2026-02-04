@@ -435,7 +435,8 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
 function ToolBadge({ item }: { item: ToolActivityItem }) {
   const Icon = TOOL_ICONS[item.name] || Wrench;
   const label = TOOL_LABELS[item.name] || item.name;
-  const isDone = item.isComplete;
+  // Use output presence to determine status (undefined = running, string = complete)
+  const isDone = !!item.output;
 
   return (
     <div

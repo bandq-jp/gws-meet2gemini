@@ -15,7 +15,8 @@ export interface ToolBadgeProps {
 }
 
 export function ToolBadge({ item }: ToolBadgeProps) {
-  const isRunning = !item.isComplete;
+  // Use output presence to determine status (undefined = running, string = complete)
+  const isRunning = !item.output;
 
   return (
     <div

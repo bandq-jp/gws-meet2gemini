@@ -798,12 +798,15 @@ async def chat_stream(
                     seq += 1
 
                 elif event_type == "tool_result":
-                    # Update existing tool item with output
+                    # Update matching tool item with output (search from end, match call_id + no output)
                     call_id = event.get("call_id")
-                    for item in activity_items:
-                        if item.get("kind") == "tool" and item.get("call_id") == call_id:
-                            item["output"] = event.get("output")
-                            item["is_complete"] = True
+                    for item in reversed(activity_items):
+                        if (
+                            item.get("kind") == "tool"
+                            and item.get("call_id") == call_id
+                            and "output" not in item
+                        ):
+                            item["output"] = event.get("output", "(completed)")
                             break
 
                 elif event_type == "reasoning":
@@ -863,6 +866,13 @@ async def chat_stream(
                     event["conversation_id"] = conversation_id
 
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+            # --- Safety net: Mark any unfinished tools as completed ---
+            for item in activity_items:
+                if item.get("kind") == "tool" and "output" not in item:
+                    item["output"] = "(completed)"
+                elif item.get("kind") == "sub_agent" and item.get("is_running"):
+                    item["is_running"] = False
 
             # --- DB: Save assistant message with activity_items ---
             if full_text_content or activity_items:

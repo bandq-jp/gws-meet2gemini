@@ -199,28 +199,54 @@ export function useMarketingChat(
           }
 
           case "tool_call": {
+            // Reset text accumulation when tool call starts
+            currentTextIdRef.current = null;
             items.push({
-              id: event.call_id,
+              id: event.call_id || generateId(),
               kind: "tool",
               sequence: seqRef.current++,
-              name: event.name,
+              name: event.name || "unknown",
               callId: event.call_id,
               arguments: event.arguments,
-              isComplete: false,
+              // output: undefined means "running", output: string means "complete"
             } as ToolActivityItem);
             break;
           }
 
           case "tool_result": {
-            const toolIdx = items.findIndex(
-              (i) => i.kind === "tool" && (i as ToolActivityItem).callId === event.call_id
-            );
+            // Find matching tool call - search from end (most recent first)
+            // Match by call_id AND no output yet (to handle duplicate call_ids)
+            let toolIdx = -1;
+            if (event.call_id) {
+              // Search backwards for matching call_id without output
+              for (let i = items.length - 1; i >= 0; i--) {
+                const item = items[i];
+                if (
+                  item.kind === "tool" &&
+                  (item as ToolActivityItem).callId === event.call_id &&
+                  !(item as ToolActivityItem).output
+                ) {
+                  toolIdx = i;
+                  break;
+                }
+              }
+            }
+            // Fallback: find any tool without output
+            if (toolIdx === -1) {
+              for (let i = items.length - 1; i >= 0; i--) {
+                const item = items[i];
+                if (item.kind === "tool" && !(item as ToolActivityItem).output) {
+                  toolIdx = i;
+                  break;
+                }
+              }
+            }
+
             if (toolIdx !== -1) {
               const toolItem = items[toolIdx] as ToolActivityItem;
               items[toolIdx] = {
                 ...toolItem,
-                output: event.output,
-                isComplete: true,
+                output: event.output || "(completed)",
               };
             }
             break;
@@ -388,6 +414,31 @@ export function useMarketingChat(
             if (event.conversation_id) {
               setConversationId(event.conversation_id);
               setPendingConversationId(event.conversation_id);
+            }
+
+            // Safety net: Mark any unfinished tools and sub-agents as complete
+            // This handles cases where tool_result events are missing
+            for (let i = 0; i < items.length; i++) {
+              const item = items[i];
+              if (item.kind === "tool") {
+                const toolItem = item as ToolActivityItem;
+                if (!toolItem.output) {
+                  items[i] = { ...toolItem, output: "(completed)" };
+                }
+              } else if (item.kind === "sub_agent") {
+                const subItem = item as SubAgentActivityItem;
+                if (subItem.isRunning) {
+                  // Mark all sub-agent tool calls as complete
+                  const completedToolCalls = (subItem.toolCalls || []).map((tc) =>
+                    tc.isComplete ? tc : { ...tc, isComplete: true }
+                  );
+                  items[i] = {
+                    ...subItem,
+                    isRunning: false,
+                    toolCalls: completedToolCalls,
+                  };
+                }
+              }
             }
             break;
           }
