@@ -2352,6 +2352,66 @@ useEffect(() => {
 
 **動作確認**: SSEストリーミングはinterleaved timeline方式で、テキストとツール呼び出しが到着順に表示される
 
+### 27. 大規模調査: サブエージェント完了判定 & UX改善提案 (2026-02-05)
+
+**調査方法**: 6並列エージェントによる大規模調査を実施
+- Supabase会話履歴: 314会話, 6311メッセージ
+- 参照プロジェクト: `/home/als0028/study/shintairiku/ga4-oauth-aiagent`
+- Web検索: UXベストプラクティス
+
+**発見された重大な問題**:
+
+| カテゴリ | 健全性スコア | 状態 |
+|---------|-------------|------|
+| ツール完了判定 | 94% | ✅ Good |
+| サブエージェント完了判定 | 0% | ❌ **CRITICAL** |
+| Activity Items 永続化 | 7% | ❌ **CRITICAL** |
+| エラーハンドリング | 94% | ✅ Good |
+
+**修正内容**:
+
+1. **`agent_service.py`** - サブエージェント `is_running` フィールド追加:
+   ```python
+   # 各イベントタイプで is_running を設定
+   - started → is_running: True
+   - tool_called → is_running: True
+   - tool_output → is_running: True
+   - reasoning → is_running: True
+   - message_output → is_running: False  # 完了マーカー
+   ```
+
+2. **`marketing.py`** - DB保存時に `is_running` を含める
+
+3. **`use-marketing-chat.ts`** - reasoningContent Markdown修正:
+   ```typescript
+   // Before: 空白区切り（Markdown破壊）
+   reasoningContent: (subItem.reasoningContent || "") + " " + reasoningContent,
+   // After: 改行区切り（Markdown保持）
+   reasoningContent: (subItem.reasoningContent || "") + "\n\n" + reasoningContent,
+   ```
+
+4. **`ChatMessage.tsx`** - SubAgentBadge自動折りたたみ:
+   ```typescript
+   useEffect(() => {
+     if (item.isRunning && hasDetails) {
+       setIsExpanded(true);
+     } else if (!item.isRunning) {
+       // 完了時に1秒後自動折りたたみ
+       const timer = setTimeout(() => setIsExpanded(false), 1000);
+       return () => clearTimeout(timer);
+     }
+   }, [item.isRunning, hasDetails]);
+   ```
+
+**新規ドキュメント**: `docs/marketing-ai-ux-improvement-proposal.md`
+- 調査結果の完全版
+- 推奨アクションと実装タイムライン
+- UXベストプラクティス
+
+**残課題**:
+- Activity Items永続化バグ（93.5%空）の調査 - 原因特定が必要
+- HostedMCPTool互換性問題 - LiteLLM/Geminiでは使用不可
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
