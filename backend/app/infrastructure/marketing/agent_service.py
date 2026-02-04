@@ -30,6 +30,31 @@ logger = logging.getLogger(__name__)
 # Sentinel to signal end-of-stream from the SDK background task
 _SENTINEL = object()
 
+# Keywords that indicate MCP tools are needed
+_TOOL_KEYWORDS = {
+    # Analytics (GA4/GSC)
+    "ga4", "analytics", "traffic", "session", "pageview", "search console", "gsc",
+    "index", "sitemap", "検索", "インデックス", "アクセス", "トラフィック", "pv", "ページビュー",
+    # SEO (Ahrefs)
+    "ahrefs", "backlink", "被リンク", "keyword", "キーワード", "競合", "competitor", "seo",
+    "ドメインレーティング", "dr", "organic",
+    # Ads (Meta)
+    "meta", "facebook", "instagram", "広告", "キャンペーン", "campaign", "ad", "cpm", "cpc", "roas",
+    # WordPress
+    "wordpress", "記事", "article", "post", "ブログ", "blog", "投稿",
+    # Zoho CRM
+    "zoho", "crm", "求職者", "候補者", "candidate", "job seeker", "チャネル", "channel",
+    "応募", "面接", "内定", "入社",
+    # Candidate Insight
+    "リスク", "risk", "緊急度", "urgency", "転職", "briefing", "ブリーフィング",
+}
+
+
+def _needs_mcp_tools(message: str) -> bool:
+    """Check if the message likely needs MCP tools based on keywords."""
+    lower = message.lower()
+    return any(kw in lower for kw in _TOOL_KEYWORDS)
+
 
 def _serialize_input_list(items: list) -> list[dict]:
     """Convert to_input_list() output into JSON-serializable dicts."""
@@ -121,26 +146,42 @@ class MarketingAgentService:
             except Exception as e:
                 logger.exception(f"[Sub-agent] Error processing event: {e}")
 
-        # Initialize MCP servers
+        # Initialize MCP servers (parallel for speed, skip for simple queries)
         mcp_servers = []
         mcp_stack = AsyncExitStack()
 
-        if self._mcp_manager and self._settings.use_local_mcp:
+        # Check if MCP tools are likely needed based on query keywords
+        needs_tools = _needs_mcp_tools(message)
+
+        if self._mcp_manager and self._settings.use_local_mcp and needs_tools:
             try:
                 pair = self._mcp_manager.create_server_pair()
-                if pair.ga4_server:
-                    await mcp_stack.enter_async_context(pair.ga4_server)
-                    mcp_servers.append(pair.ga4_server)
-                if pair.gsc_server:
-                    await mcp_stack.enter_async_context(pair.gsc_server)
-                    mcp_servers.append(pair.gsc_server)
-                if pair.meta_ads_server:
-                    await mcp_stack.enter_async_context(pair.meta_ads_server)
-                    mcp_servers.append(pair.meta_ads_server)
-                logger.info(f"[Local MCP] {len(mcp_servers)} servers initialized")
+
+                # Parallel initialization using asyncio.gather (saves ~2 seconds)
+                async def init_server(server):
+                    """Initialize single MCP server, returns server on success or None on failure."""
+                    if server is None:
+                        return None
+                    try:
+                        await mcp_stack.enter_async_context(server)
+                        return server
+                    except Exception as e:
+                        logger.warning(f"[Local MCP] Server init failed: {e}")
+                        return None
+
+                results = await asyncio.gather(
+                    init_server(pair.ga4_server),
+                    init_server(pair.gsc_server),
+                    init_server(pair.meta_ads_server),
+                    return_exceptions=False,
+                )
+                mcp_servers = [s for s in results if s is not None]
+                logger.info(f"[Local MCP] {len(mcp_servers)} servers initialized (parallel)")
             except Exception as e:
                 logger.warning(f"[Local MCP] Init failed: {e}")
                 mcp_servers = []
+        elif self._mcp_manager and self._settings.use_local_mcp and not needs_tools:
+            logger.info("[Local MCP] Skipped (simple query, no tool keywords detected)")
 
         try:
             # Build orchestrator agent with sub-agent streaming

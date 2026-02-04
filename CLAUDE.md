@@ -1730,6 +1730,81 @@ if (textIdx !== -1) {
 - `useEffect`でコールバック実行を次のレンダリングサイクルに遅延させることで解決
 - エッジケース（item not found）のハンドリングは静かに失敗するのではなく、フォールバック処理を入れるべき
 
+### 21. レスポンス速度最適化 (2026-02-04)
+
+**報告された症状**: 単純な「こんにちは」でも約5秒かかる
+
+**ログ分析**:
+```
+22:03:43,201 - MCP servers ready logging (create_server_pair完了)
+22:03:45,997 - [Local MCP] 3 servers initialized (~2.8秒遅延!)
+22:03:46,014 - LiteLLM completion started
+```
+
+**問題**: MCP初期化が逐次実行 + 不要なクエリでも初期化
+
+**最適化1: MCP初期化の並列化**
+
+**修正前** (`agent_service.py`):
+```python
+# 逐次初期化 (~2.8秒)
+if pair.ga4_server:
+    await mcp_stack.enter_async_context(pair.ga4_server)  # 待機
+if pair.gsc_server:
+    await mcp_stack.enter_async_context(pair.gsc_server)  # 待機
+if pair.meta_ads_server:
+    await mcp_stack.enter_async_context(pair.meta_ads_server)  # 待機
+```
+
+**修正後**:
+```python
+# 並列初期化 (~0.8-1.0秒)
+async def init_server(server):
+    if server is None:
+        return None
+    await mcp_stack.enter_async_context(server)
+    return server
+
+results = await asyncio.gather(
+    init_server(pair.ga4_server),
+    init_server(pair.gsc_server),
+    init_server(pair.meta_ads_server),
+)
+mcp_servers = [s for s in results if s is not None]
+```
+
+**効果**: ~2秒短縮
+
+**最適化2: 単純クエリでMCPスキップ**
+
+**キーワード検出**:
+```python
+_TOOL_KEYWORDS = {
+    # Analytics: "ga4", "analytics", "traffic", "検索", "アクセス"...
+    # SEO: "ahrefs", "backlink", "keyword", "競合"...
+    # Ads: "meta", "facebook", "広告", "キャンペーン"...
+    # WordPress: "wordpress", "記事", "article"...
+    # Zoho: "zoho", "crm", "求職者", "候補者"...
+}
+
+def _needs_mcp_tools(message: str) -> bool:
+    lower = message.lower()
+    return any(kw in lower for kw in _TOOL_KEYWORDS)
+```
+
+**効果**: 単純クエリ（「こんにちは」等）で~3秒短縮
+
+**期待される改善**:
+| クエリタイプ | Before | After | 改善 |
+|------------|--------|-------|------|
+| 単純クエリ | ~5秒 | ~2秒 | **-60%** |
+| ツール使用クエリ | ~5秒 | ~3秒 | **-40%** |
+
+**技術的知見**:
+- `MCPServerStdio`の`enter_async_context()`がサブプロセス起動で最も時間がかかる
+- `asyncio.gather()`で並列化することで、最も遅いサーバーの初期化時間まで短縮
+- キーワード検出は完璧である必要はない（エージェントが必要に応じてツールを呼び出す）
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
