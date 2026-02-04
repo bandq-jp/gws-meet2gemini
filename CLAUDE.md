@@ -2412,6 +2412,66 @@ useEffect(() => {
 - Activity Items永続化バグ（93.5%空）の調査 - 原因特定が必要
 - HostedMCPTool互換性問題 - LiteLLM/Geminiでは使用不可
 
+### 28. ChatGPT/Claude風サイドバー & 履歴パネル実装 (2026-02-05)
+
+**背景**: ユーザーから「履歴一覧を開くUIがない」との指摘。参照プロジェクト (ga4-oauth-aiagent) のChatGPT/Claude風UIをポーティング。
+
+**新規コンポーネント**:
+
+| ファイル | 説明 |
+|---------|------|
+| `frontend/src/components/marketing/AppSidebar.tsx` | 左サイドバー (220px ↔ 60px 折りたたみ) |
+| `frontend/src/components/marketing/HistoryPanel.tsx` | 右履歴パネル (Sheet形式) |
+
+**AppSidebar機能**:
+- 新しいチャットボタン (アクセント色 #e94560)
+- ナビゲーション: チャット、ダッシュボード、設定
+- 折りたたみ時はTooltip表示
+- Clerk UserButton統合
+- モバイル対応 (Sheet)
+
+**HistoryPanel機能**:
+- 日付グループ化: 今日、昨日、過去7日間、それ以前
+- 相対日時: 「今」「X分前」「X時間前」「X日前」「12月15」
+- 削除ボタン (ホバーで表示)
+- Empty state
+
+**バックエンドAPI追加** (`marketing.py`):
+```python
+@router.get("/threads")      # 会話一覧
+@router.delete("/threads/{thread_id}")  # 会話削除
+```
+
+**フロントエンドAPI Route追加**:
+- `frontend/src/app/api/marketing/threads/route.ts`
+- `frontend/src/app/api/marketing/threads/[id]/route.ts` (DELETE追加)
+
+**MarketingChat変更**:
+- `forwardRef` + `useImperativeHandle` で `clearMessages` を公開
+- 親コンポーネントから新規チャット開始可能に
+
+**レイアウト構造**:
+```
+┌─────────────┬────────────────────────────────┐
+│ AppSidebar  │ Header (履歴ボタン)            │
+│ (220/60px)  ├────────────────────────────────┤
+│             │ MarketingChat                  │
+│ - 新規      │                                │
+│ - チャット  │                                │
+│ - ダッシュ  │                                │
+│ - 設定      │                                │
+│             │                                │
+│ [User]      │                                │
+└─────────────┴────────────────────────────────┘
+                              [HistoryPanel →]
+```
+
+**UIデザイン**:
+- プライマリ: Navy #1a1a2e
+- グレー: #6b7280, #9ca3af, #c4c7cc, #f0f1f5
+- アクセント: ピンク赤 #e94560
+- アクティブ: 背景色 + ring-1
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
