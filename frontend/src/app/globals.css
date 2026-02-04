@@ -308,6 +308,90 @@ body {
   }
 }
 
+/* ── Sub-agent Card Animations ── */
+.sub-agent-card-enter {
+  animation: sub-agent-card-in 300ms ease-out both;
+}
+
+@keyframes sub-agent-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.sub-agent-card-complete {
+  animation: sub-agent-card-complete 400ms ease-out both;
+}
+
+@keyframes sub-agent-card-complete {
+  0% {
+    border-color: inherit;
+  }
+  50% {
+    border-color: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  }
+  100% {
+    border-color: #e5e7eb;
+    box-shadow: none;
+  }
+}
+
+/* Sub-agent running shimmer effect */
+.sub-agent-running::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* Sub-agent tool badge animation */
+.sub-agent-tool-enter {
+  animation: tool-badge-in 200ms ease-out both;
+}
+
+@keyframes tool-badge-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sub-agent-card-enter,
+  .sub-agent-card-complete,
+  .sub-agent-tool-enter {
+    animation: none;
+  }
+  .sub-agent-running::before {
+    animation: none;
+    display: none;
+  }
+}
+
 /* ── Safe area for mobile devices with notch ── */
 @supports (padding: env(safe-area-inset-bottom)) {
   .safe-bottom {

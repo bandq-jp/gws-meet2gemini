@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable
 
 from agents import Runner, RunConfig
 from agents.items import ReasoningItem
+from openai import AsyncOpenAI
 
 from app.infrastructure.chatkit.agents import OrchestratorAgentFactory
 from app.infrastructure.chatkit.keepalive import with_keepalive
@@ -102,14 +103,25 @@ class MarketingAgentService:
             await queue.put(event)
 
         # Create sub-agent stream callback
-        async def on_sub_agent_stream(event: dict) -> None:
-            """Capture sub-agent streaming events."""
-            agent = event.get("agent")
-            agent_name = getattr(agent, "name", "unknown") if agent else "unknown"
-            stream_event = event.get("event")
-            sse_event = self._process_sub_agent_event(agent_name, stream_event)
-            if sse_event:
-                await queue.put(sse_event)
+        # Receives AgentToolStreamEvent from SDK with keys: event, agent, tool_call
+        async def on_sub_agent_stream(agent_tool_event: dict) -> None:
+            """Capture sub-agent streaming events from Agent.as_tool()."""
+            try:
+                agent = agent_tool_event.get("agent")
+                agent_name = getattr(agent, "name", "unknown") if agent else "unknown"
+                stream_event = agent_tool_event.get("event")  # This is StreamEvent
+                event_type = getattr(stream_event, "type", "unknown") if stream_event else "none"
+
+                logger.info(f"[Sub-agent] {agent_name}: received event type={event_type}")
+
+                sse_event = self._process_sub_agent_event(agent_name, stream_event)
+                if sse_event:
+                    logger.info(f"[Sub-agent] {agent_name}: emitting SSE event={sse_event}")
+                    await queue.put(sse_event)
+                else:
+                    logger.debug(f"[Sub-agent] {agent_name}: event not converted to SSE (type={event_type})")
+            except Exception as e:
+                logger.exception(f"[Sub-agent] Error processing event: {e}")
 
         # Initialize MCP servers
         mcp_servers = []
@@ -277,9 +289,11 @@ class MarketingAgentService:
     ) -> dict | None:
         """Convert sub-agent event to SSE event."""
         if event is None:
+            logger.debug(f"[Sub-agent] {agent_name}: event is None")
             return None
 
         event_type = getattr(event, "type", "")
+        logger.info(f"[Sub-agent] {agent_name}: processing event_type={event_type}")
 
         if event_type == "run_item_stream_event":
             item = event.item
@@ -341,6 +355,15 @@ class MarketingAgentService:
             data = event.data
             inner_type = getattr(data, "type", "")
 
+            # Sub-agent started (response created)
+            if inner_type == "response.created":
+                return {
+                    "type": "sub_agent_event",
+                    "agent": agent_name,
+                    "event_type": "started",
+                    "data": {},
+                }
+
             if inner_type == "response.output_text.delta":
                 delta = getattr(data, "delta", "")
                 if delta:
@@ -360,7 +383,29 @@ class MarketingAgentService:
             "type": "reasoning",
             "content": summary or "分析中...",
             "has_summary": summary is not None,
+            "_needs_translation": summary is not None,  # Mark for translation
         }
+
+    async def _translate_to_japanese(self, text: str) -> str:
+        """Translate English reasoning summary to Japanese using GPT-5-nano."""
+        try:
+            client = AsyncOpenAI(api_key=self._settings.openai_api_key)
+            response = await client.responses.create(
+                model=self._settings.reasoning_translate_model,
+                instructions=(
+                    "Translate the following text to Japanese. "
+                    "Output ONLY the translated text, nothing else. "
+                    "Keep any markdown formatting intact."
+                ),
+                input=text,
+                reasoning={"effort": "minimal", "summary": None},
+                text={"verbosity": "low"},
+                store=False,
+            )
+            return response.output_text or text
+        except Exception as e:
+            logger.warning(f"Reasoning summary translation failed, using original: {e}")
+            return text
 
     def _extract_reasoning_summary(self, item: ReasoningItem) -> str | None:
         """Extract text from reasoning item summary."""

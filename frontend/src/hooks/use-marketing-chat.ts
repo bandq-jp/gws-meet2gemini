@@ -208,60 +208,119 @@ export function useMarketingChat(
           }
 
           case "sub_agent_event": {
-            // Find existing sub-agent item or create new one
+            // Find existing sub-agent card for this agent (running or not)
             const existingIdx = items.findIndex(
               (i) =>
                 i.kind === "sub_agent" &&
-                (i as SubAgentActivityItem).agent === event.agent &&
-                (i as SubAgentActivityItem).isRunning
+                (i as SubAgentActivityItem).agent === event.agent
             );
 
-            if (event.event_type === "tool_called") {
-              // New sub-agent tool call
-              items.push({
-                id: generateId(),
-                kind: "sub_agent",
-                sequence: seqRef.current++,
-                agent: event.agent,
-                eventType: event.event_type,
-                data: event.data,
-                isRunning: true,
-              } as SubAgentActivityItem);
-            } else if (event.event_type === "tool_output" && existingIdx !== -1) {
-              // Complete existing sub-agent item
-              const subItem = items[existingIdx] as SubAgentActivityItem;
-              items[existingIdx] = {
-                ...subItem,
-                eventType: event.event_type,
-                data: event.data,
-                isRunning: false,
-              };
+            if (event.event_type === "started") {
+              // Sub-agent started - create card immediately if not exists
+              if (existingIdx === -1) {
+                items.push({
+                  id: generateId(),
+                  kind: "sub_agent",
+                  sequence: seqRef.current++,
+                  agent: event.agent,
+                  eventType: event.event_type,
+                  data: event.data,
+                  isRunning: true,
+                  toolCalls: [],
+                } as SubAgentActivityItem);
+              } else {
+                // Mark as running if exists
+                const subItem = items[existingIdx] as SubAgentActivityItem;
+                items[existingIdx] = {
+                  ...subItem,
+                  isRunning: true,
+                };
+              }
+            } else if (event.event_type === "tool_called") {
+              const toolName = event.data?.tool_name || "unknown";
+              const callId = event.data?.call_id || generateId();
+
+              if (existingIdx !== -1) {
+                // Update existing sub-agent card with new tool call
+                const subItem = items[existingIdx] as SubAgentActivityItem;
+                const toolCalls = subItem.toolCalls || [];
+                items[existingIdx] = {
+                  ...subItem,
+                  eventType: event.event_type,
+                  isRunning: true,
+                  toolCalls: [
+                    ...toolCalls,
+                    { callId, toolName, isComplete: false },
+                  ],
+                };
+              } else {
+                // Create new sub-agent card
+                items.push({
+                  id: generateId(),
+                  kind: "sub_agent",
+                  sequence: seqRef.current++,
+                  agent: event.agent,
+                  eventType: event.event_type,
+                  data: event.data,
+                  isRunning: true,
+                  toolCalls: [{ callId, toolName, isComplete: false }],
+                } as SubAgentActivityItem);
+              }
+            } else if (event.event_type === "tool_output") {
+              // Mark specific tool call as complete
+              if (existingIdx !== -1) {
+                const subItem = items[existingIdx] as SubAgentActivityItem;
+                const callId = event.data?.call_id;
+                const toolCalls = (subItem.toolCalls || []).map((tc) =>
+                  tc.callId === callId ? { ...tc, isComplete: true } : tc
+                );
+                items[existingIdx] = {
+                  ...subItem,
+                  eventType: event.event_type,
+                  toolCalls,
+                  outputPreview: event.data?.output_preview || subItem.outputPreview,
+                };
+              }
             } else if (event.event_type === "reasoning") {
-              // Sub-agent reasoning
-              items.push({
-                id: generateId(),
-                kind: "sub_agent",
-                sequence: seqRef.current++,
-                agent: event.agent,
-                eventType: event.event_type,
-                data: event.data,
-                isRunning: true,
-              } as SubAgentActivityItem);
-            } else if (event.event_type === "text_delta") {
-              // Sub-agent text - mark as not running since it's generating output
+              // Sub-agent reasoning - update or create card
+              const reasoningContent = event.data?.content || "";
               if (existingIdx !== -1) {
                 const subItem = items[existingIdx] as SubAgentActivityItem;
                 items[existingIdx] = {
                   ...subItem,
-                  isRunning: false,
+                  eventType: event.event_type,
+                  isRunning: true,
+                  reasoningContent: (subItem.reasoningContent || "") + " " + reasoningContent,
+                };
+              } else {
+                items.push({
+                  id: generateId(),
+                  kind: "sub_agent",
+                  sequence: seqRef.current++,
+                  agent: event.agent,
+                  eventType: event.event_type,
+                  data: event.data,
+                  isRunning: true,
+                  reasoningContent,
+                } as SubAgentActivityItem);
+              }
+            } else if (event.event_type === "text_delta") {
+              // Sub-agent generating output - keep card but show progress
+              if (existingIdx !== -1) {
+                const subItem = items[existingIdx] as SubAgentActivityItem;
+                items[existingIdx] = {
+                  ...subItem,
+                  eventType: event.event_type,
+                  // Still running while generating text
                 };
               }
             } else if (event.event_type === "message_output") {
-              // Sub-agent finished
+              // Sub-agent finished - mark as complete
               if (existingIdx !== -1) {
                 const subItem = items[existingIdx] as SubAgentActivityItem;
                 items[existingIdx] = {
                   ...subItem,
+                  eventType: event.event_type,
                   isRunning: false,
                 };
               }
@@ -394,6 +453,10 @@ export function useMarketingChat(
             if (!line.startsWith("data: ")) continue;
             try {
               const event: StreamEvent = JSON.parse(line.slice(6));
+              // Debug logging for sub-agent events
+              if (event.type === "sub_agent_event") {
+                console.log("[Sub-agent event]", event);
+              }
               processEvent(event, assistantMessage.id);
             } catch (parseError) {
               console.warn("Failed to parse SSE event:", line, parseError);

@@ -709,6 +709,19 @@ async def chat_stream(
                 if await request.is_disconnected():
                     logger.info("Client disconnected during chat stream")
                     break
+
+                # Translate reasoning summary from English to Japanese
+                if event.get("_needs_translation") and event.get("content"):
+                    try:
+                        translated = await agent_service._translate_to_japanese(
+                            event["content"]
+                        )
+                        event["content"] = translated
+                    except Exception as te:
+                        logger.warning(f"Translation failed: {te}")
+                # Remove internal flag before sending
+                event.pop("_needs_translation", None)
+
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.exception("Error in chat stream")

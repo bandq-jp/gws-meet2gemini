@@ -130,19 +130,16 @@ class OrchestratorAgentFactory:
         """
         # Build sub-agent tools
         sub_agent_tools = []
+        has_stream_callback = on_sub_agent_stream is not None
+        logger.info(f"[Orchestrator] Building sub-agent tools (stream_callback={has_stream_callback})")
+
         for name, factory in self._sub_factories.items():
             try:
                 sub_agent = factory.build_agent(mcp_servers=mcp_servers, asset=asset)
 
-                # Create stream callback wrapper to include agent reference
-                stream_callback = None
-                if on_sub_agent_stream:
-                    # Capture agent in closure
-                    def make_callback(agent: Agent) -> Callable:
-                        async def callback(event: dict) -> None:
-                            await on_sub_agent_stream({"agent": agent, "event": event})
-                        return callback
-                    stream_callback = make_callback(sub_agent)
+                # Create stream callback that passes AgentToolStreamEvent directly
+                # SDK passes AgentToolStreamEvent with keys: event, agent, tool_call
+                stream_callback = on_sub_agent_stream if on_sub_agent_stream else None
 
                 tool = sub_agent.as_tool(
                     tool_name=factory.tool_name,
@@ -150,7 +147,7 @@ class OrchestratorAgentFactory:
                     on_stream=stream_callback,
                 )
                 sub_agent_tools.append(tool)
-                logger.debug(f"Sub-agent tool registered: {factory.tool_name}")
+                logger.info(f"[Orchestrator] Sub-agent tool registered: {factory.tool_name} (on_stream={'yes' if stream_callback else 'no'})")
             except Exception as e:
                 logger.warning(f"Failed to build sub-agent {name}: {e}")
 

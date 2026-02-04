@@ -1277,6 +1277,144 @@ const LABELS = ["考えています", "データを確認しています", "分�
 
 **ビルドステータス**: ✅ 成功 (TypeScript + Next.js)
 
+### 15. サブエージェントUI改善 & 思考過程翻訳 (2026-02-04)
+
+**ユーザー指摘**:
+- サブエージェントの実行がUIに表示されない
+- 思考過程（reasoning）が英語のまま表示される
+
+**改善内容**:
+
+1. **思考過程の日本語翻訳** (Backend):
+   - `settings.py`: `reasoning_translate_model` 設定追加 (デフォルト: `gpt-5-nano`)
+   - `agent_service.py`: `_translate_to_japanese()` メソッド追加
+   - `_process_reasoning_item()`: `_needs_translation` フラグ追加
+   - `marketing.py`: SSE送信前に翻訳処理を実行
+
+2. **サブエージェントカードUI** (Frontend):
+   - `SubAgentCard`: 各サブエージェントをカード形式で表示
+   - 実行中: グラデーションアイコン + パルスアニメーション + 「実行中」バッジ
+   - 完了: コンパクト表示 + 「完了」バッジ + 自動折りたたみ
+   - 内部にツール呼び出し・推論内容を表示
+
+3. **エージェントごとのグループ化**:
+   - `use-marketing-chat.ts`: サブエージェントイベントをエージェント単位でグループ化
+   - `toolCalls`: 各エージェントのツール呼び出しを配列で追跡
+   - `reasoningContent`: 推論内容を蓄積
+
+4. **CSSアニメーション**:
+   ```css
+   .sub-agent-card-enter { animation: sub-agent-card-in 300ms ease-out; }
+   .sub-agent-card-complete { animation: sub-agent-card-complete 400ms ease-out; }
+   .sub-agent-running::before { animation: shimmer 2s infinite; }
+   ```
+
+**サブエージェント設定**:
+| Agent | Label | Gradient | Icon |
+|-------|-------|----------|------|
+| analytics | Analytics | blue-cyan | BarChart3 |
+| seo | SEO | emerald-teal | TrendingUp |
+| ad_platform | Meta Ads | purple-pink | Megaphone |
+| zoho_crm | Zoho CRM | orange-amber | Users |
+| candidate_insight | Candidate Insight | amber-yellow | Users |
+| wordpress | WordPress | cyan-sky | FileText |
+
+**翻訳処理フロー**:
+```
+Backend: reasoning event → _needs_translation=True
+       → marketing.py: _translate_to_japanese()
+       → GPT-5-nano で翻訳
+       → _needs_translation フラグ削除
+       → SSEで日本語を送信
+```
+
+**ビルドステータス**: ✅ 成功
+
+### 16. サブエージェントストリームイベント修正 (2026-02-04)
+
+**問題**: サブエージェント（`call_seo_agent`, `call_zoho_crm_agent`等）がUIで「ぐるぐる回る」ツールコールとして表示されるが、サブエージェントの内部イベント（ツール呼び出し・推論・完了）が追跡・表示されない
+
+**根本原因分析**:
+1. `orchestrator.py`でコールバックが二重ラップされていた
+2. SDKの`Agent.as_tool(on_stream=callback)`は`AgentToolStreamEvent`（TypedDict）を直接渡す
+3. コールバックが`{"agent": agent, "event": event}`で再ラップしていたため、構造が破壊されていた
+
+**SDKの`AgentToolStreamEvent`構造**:
+```python
+class AgentToolStreamEvent(TypedDict):
+    event: StreamEvent      # 実際のストリームイベント
+    agent: Agent[Any]       # イベントを発火したサブエージェント
+    tool_call: ResponseFunctionToolCall | None  # 元のツール呼び出し
+```
+
+**修正内容**:
+
+1. **`orchestrator.py`** - コールバック修正:
+   ```python
+   # Before (バグ)
+   def make_callback(agent: Agent) -> Callable:
+       async def callback(event: dict) -> None:
+           await on_sub_agent_stream({"agent": agent, "event": event})
+       return callback
+   stream_callback = make_callback(sub_agent)
+
+   # After (修正)
+   stream_callback = on_sub_agent_stream  # 直接渡す
+   ```
+
+2. **`agent_service.py`** - イベント処理改善:
+   - `on_sub_agent_stream()`: 詳細ログ追加、例外ハンドリング強化
+   - `_process_sub_agent_event()`: `response.created` → `started` SSEイベント追加
+   - サブエージェント開始時にUIカードを即時表示可能に
+
+3. **`ChatMessage.tsx`** - エージェント名マッピング拡張:
+   ```typescript
+   // バックエンド名 (AnalyticsAgent, ZohoCRMAgent等) と
+   // フロントエンド名 (analytics, zoho_crm等) の両方に対応
+   SUB_AGENT_CONFIG = {
+     analyticsagent: {...},
+     analytics: {...},
+     zohocrmagent: {...},
+     zoho_crm: {...},
+     // ...
+   }
+   ```
+
+4. **`use-marketing-chat.ts`** - イベントハンドリング追加:
+   - `started` イベントタイプ追加（サブエージェント開始時にカード作成）
+   - デバッグ用 `console.log` 追加
+
+5. **`types.ts`** - 型定義更新:
+   ```typescript
+   event_type: "started" | "tool_called" | "tool_output" | "reasoning" | "text_delta" | "message_output"
+   ```
+
+**期待されるイベントフロー**:
+```
+1. Orchestrator → call_seo_agent ツール呼び出し
+2. SDK → on_stream(AgentToolStreamEvent) コールバック
+3. agent_service → _process_sub_agent_event() でSSEイベント変換
+4. Queue → SSE送信
+5. Frontend → sub_agent_event 受信 → SubAgentCard 表示/更新
+```
+
+**デバッグログ**:
+- Backend (INFO): `[Sub-agent] SEOAgent: received event type=run_item_stream_event`
+- Backend (INFO): `[Sub-agent] SEOAgent: emitting SSE event={"type": "sub_agent_event", ...}`
+- Frontend (console): `[Sub-agent event] {...}`
+
+**技術的知見**:
+- SDKの`Agent.as_tool(on_stream=callback)`は`AgentToolStreamEvent`を直接渡す
+- コールバック内の例外はSDKがログに記録するが、呼び出し元には伝播しない（サイレント失敗）
+- `response.created`イベントでサブエージェント開始を検知可能
+- エージェント名の正規化: `AnalyticsAgent` → `analyticsagent` (`toLowerCase() + replace(/[^a-z0-9_]/g, "")`)
+
+**情報ソース**:
+- SDK ソースコード: `agents/agent.py` L406-539 (`as_tool`実装)
+- SDK ソースコード: `agents/agent.py` L72-83 (`AgentToolStreamEvent` TypedDict)
+
+**ビルドステータス**: ✅ 成功 (Backend + Frontend)
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

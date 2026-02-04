@@ -3,21 +3,22 @@
 /**
  * ChatMessage Component
  *
- * Renders individual chat messages with full activity timeline support.
- * Based on ga4-oauth-aiagent reference implementation.
+ * Renders individual chat messages with sub-agent cards and activity timeline.
+ * Based on ga4-oauth-aiagent with enhanced sub-agent visualization.
  */
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Wrench,
   Loader2,
   BarChart3,
   Search,
   Database,
+  ChevronDown,
   ChevronRight,
   Globe,
   FileText,
@@ -28,6 +29,8 @@ import {
   Brain,
   ExternalLink,
   Code2,
+  CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -40,101 +43,184 @@ import type {
 } from "@/lib/marketing/types";
 
 // ---------------------------------------------------------------------------
-// Sub-agent color mapping
+// Sub-agent configuration
 // ---------------------------------------------------------------------------
 
-const SUB_AGENT_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  analytics: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" },
-  seo: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" },
-  meta_ads: { bg: "bg-purple-50", text: "text-purple-700", border: "border-purple-200" },
-  zoho: { bg: "bg-orange-50", text: "text-orange-700", border: "border-orange-200" },
-  candidate: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" },
-  wordpress: { bg: "bg-cyan-50", text: "text-cyan-700", border: "border-cyan-200" },
-  default: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200" },
+type AgentUIConfig = {
+  label: string;
+  icon: typeof Bot;
+  gradient: string;
+  bgLight: string;
+  textColor: string;
+  borderColor: string;
+  accentColor: string;
 };
 
-const SUB_AGENT_ICONS: Record<string, typeof Bot> = {
-  analytics: BarChart3,
-  seo: TrendingUp,
-  meta_ads: Megaphone,
-  zoho: Users,
-  candidate: Users,
-  wordpress: FileText,
-  default: Bot,
+const SUB_AGENT_CONFIG: Record<string, AgentUIConfig> = {
+  // Analytics Agent (GA4 + GSC)
+  analyticsagent: {
+    label: "Analytics",
+    icon: BarChart3,
+    gradient: "from-blue-500 to-cyan-500",
+    bgLight: "bg-blue-50",
+    textColor: "text-blue-700",
+    borderColor: "border-blue-200",
+    accentColor: "#3b82f6",
+  },
+  analytics: {
+    label: "Analytics",
+    icon: BarChart3,
+    gradient: "from-blue-500 to-cyan-500",
+    bgLight: "bg-blue-50",
+    textColor: "text-blue-700",
+    borderColor: "border-blue-200",
+    accentColor: "#3b82f6",
+  },
+  // SEO Agent (Ahrefs)
+  seoagent: {
+    label: "SEO",
+    icon: TrendingUp,
+    gradient: "from-emerald-500 to-teal-500",
+    bgLight: "bg-emerald-50",
+    textColor: "text-emerald-700",
+    borderColor: "border-emerald-200",
+    accentColor: "#10b981",
+  },
+  seo: {
+    label: "SEO",
+    icon: TrendingUp,
+    gradient: "from-emerald-500 to-teal-500",
+    bgLight: "bg-emerald-50",
+    textColor: "text-emerald-700",
+    borderColor: "border-emerald-200",
+    accentColor: "#10b981",
+  },
+  // Ad Platform Agent (Meta Ads)
+  adplatformagent: {
+    label: "Meta Ads",
+    icon: Megaphone,
+    gradient: "from-purple-500 to-pink-500",
+    bgLight: "bg-purple-50",
+    textColor: "text-purple-700",
+    borderColor: "border-purple-200",
+    accentColor: "#8b5cf6",
+  },
+  ad_platform: {
+    label: "Meta Ads",
+    icon: Megaphone,
+    gradient: "from-purple-500 to-pink-500",
+    bgLight: "bg-purple-50",
+    textColor: "text-purple-700",
+    borderColor: "border-purple-200",
+    accentColor: "#8b5cf6",
+  },
+  // Zoho CRM Agent
+  zohocrmagent: {
+    label: "Zoho CRM",
+    icon: Users,
+    gradient: "from-orange-500 to-amber-500",
+    bgLight: "bg-orange-50",
+    textColor: "text-orange-700",
+    borderColor: "border-orange-200",
+    accentColor: "#f97316",
+  },
+  zoho_crm: {
+    label: "Zoho CRM",
+    icon: Users,
+    gradient: "from-orange-500 to-amber-500",
+    bgLight: "bg-orange-50",
+    textColor: "text-orange-700",
+    borderColor: "border-orange-200",
+    accentColor: "#f97316",
+  },
+  // Candidate Insight Agent
+  candidateinsightagent: {
+    label: "Candidate Insight",
+    icon: Users,
+    gradient: "from-amber-500 to-yellow-500",
+    bgLight: "bg-amber-50",
+    textColor: "text-amber-700",
+    borderColor: "border-amber-200",
+    accentColor: "#f59e0b",
+  },
+  candidate_insight: {
+    label: "Candidate Insight",
+    icon: Users,
+    gradient: "from-amber-500 to-yellow-500",
+    bgLight: "bg-amber-50",
+    textColor: "text-amber-700",
+    borderColor: "border-amber-200",
+    accentColor: "#f59e0b",
+  },
+  // WordPress Agent
+  wordpressagent: {
+    label: "WordPress",
+    icon: FileText,
+    gradient: "from-cyan-500 to-sky-500",
+    bgLight: "bg-cyan-50",
+    textColor: "text-cyan-700",
+    borderColor: "border-cyan-200",
+    accentColor: "#06b6d4",
+  },
+  wordpress: {
+    label: "WordPress",
+    icon: FileText,
+    gradient: "from-cyan-500 to-sky-500",
+    bgLight: "bg-cyan-50",
+    textColor: "text-cyan-700",
+    borderColor: "border-cyan-200",
+    accentColor: "#06b6d4",
+  },
+  default: {
+    label: "Agent",
+    icon: Bot,
+    gradient: "from-slate-500 to-gray-500",
+    bgLight: "bg-slate-50",
+    textColor: "text-slate-700",
+    borderColor: "border-slate-200",
+    accentColor: "#64748b",
+  },
 };
 
-const SUB_AGENT_LABELS: Record<string, string> = {
-  analytics: "Analytics",
-  seo: "SEO",
-  meta_ads: "Meta Ads",
-  zoho: "Zoho CRM",
-  candidate: "Candidate",
-  wordpress: "WordPress",
-};
+function getAgentConfig(agentName: string): AgentUIConfig {
+  // Normalize: lowercase, remove non-alphanumeric chars except underscore
+  const key = agentName.toLowerCase().replace(/[^a-z0-9_]/g, "");
+  return SUB_AGENT_CONFIG[key] || SUB_AGENT_CONFIG.default;
+}
 
 // ---------------------------------------------------------------------------
 // Tool metadata maps
 // ---------------------------------------------------------------------------
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
-  // GA4
   run_report: BarChart3,
   run_realtime_report: BarChart3,
-  // GSC
   get_search_analytics: Search,
   get_performance_overview: Search,
-  get_advanced_search_analytics: Search,
   list_properties: Database,
-  // Zoho
   search_job_seekers: Users,
   get_job_seeker_detail: Users,
   aggregate_by_channel: BarChart3,
-  count_job_seekers_by_status: BarChart3,
-  get_channel_definitions: Database,
-  // Ahrefs
-  "site-explorer-organic-keywords": Search,
-  "site-explorer-backlinks": ExternalLink,
-  "site-explorer-top-pages": TrendingUp,
-  // Meta Ads
   get_campaigns: Megaphone,
   get_adsets: Megaphone,
-  get_ads: Megaphone,
-  // WordPress
   list_posts: FileText,
-  create_post: FileText,
-  update_post: FileText,
-  // Code
   code_interpreter: Code2,
-  // Web
   web_search: Globe,
 };
 
 const TOOL_LABELS: Record<string, string> = {
-  // GA4
   run_report: "レポート取得",
   run_realtime_report: "リアルタイム取得",
-  // GSC
   get_search_analytics: "検索分析",
   get_performance_overview: "パフォーマンス概要",
-  get_advanced_search_analytics: "詳細検索分析",
   list_properties: "プロパティ一覧",
-  // Zoho
   search_job_seekers: "求職者検索",
   get_job_seeker_detail: "求職者詳細",
   aggregate_by_channel: "チャネル集計",
-  count_job_seekers_by_status: "ステータス集計",
-  get_channel_definitions: "チャネル定義",
-  // Meta Ads
   get_campaigns: "キャンペーン取得",
   get_adsets: "広告セット取得",
-  get_ads: "広告取得",
-  // WordPress
   list_posts: "記事一覧",
-  create_post: "記事作成",
-  update_post: "記事更新",
-  // Code
   code_interpreter: "コード実行",
-  // Web
   web_search: "Web検索",
 };
 
@@ -247,45 +333,148 @@ const markdownComponents: Components = {
 };
 
 // ---------------------------------------------------------------------------
-// Helper: grouping for interleaved timeline
+// SubAgentCard - Rich card for each sub-agent
 // ---------------------------------------------------------------------------
 
-interface TimelineSection {
-  type: "activity" | "content";
-  items: ActivityItem[];
-}
+function SubAgentCard({ item }: { item: SubAgentActivityItem }) {
+  const [isExpanded, setIsExpanded] = useState(item.isRunning);
+  const config = getAgentConfig(item.agent);
+  const Icon = config.icon;
 
-function groupIntoSections(items: ActivityItem[]): TimelineSection[] {
-  const sections: TimelineSection[] = [];
-  for (const item of items) {
-    const isActivity = item.kind === "reasoning" || item.kind === "tool" || item.kind === "sub_agent";
-    const sectionType = isActivity ? "activity" : "content";
-    const last = sections[sections.length - 1];
-    if (last && last.type === sectionType) {
-      last.items.push(item);
-    } else {
-      sections.push({ type: sectionType, items: [item] });
+  // Auto-collapse when agent finishes
+  useEffect(() => {
+    if (!item.isRunning && isExpanded) {
+      // Small delay before collapsing for smooth transition
+      const timer = setTimeout(() => setIsExpanded(false), 500);
+      return () => clearTimeout(timer);
     }
-  }
-  return sections;
-}
+  }, [item.isRunning]);
 
-interface ItemGroup {
-  kind: ActivityItem["kind"];
-  items: ActivityItem[];
-}
-
-function groupConsecutive(items: ActivityItem[]): ItemGroup[] {
-  const groups: ItemGroup[] = [];
-  for (const item of items) {
-    const last = groups[groups.length - 1];
-    if (last && last.kind === item.kind) {
-      last.items.push(item);
-    } else {
-      groups.push({ kind: item.kind, items: [item] });
+  // Auto-expand when new activity
+  useEffect(() => {
+    if (item.isRunning) {
+      setIsExpanded(true);
     }
-  }
-  return groups;
+  }, [item.isRunning]);
+
+  const toolCalls = item.toolCalls || [];
+  const hasActivity = toolCalls.length > 0 || item.reasoningContent;
+
+  return (
+    <div
+      className={`
+        rounded-xl border overflow-hidden transition-all duration-300 ease-out
+        ${item.isRunning
+          ? `${config.borderColor} shadow-md ring-1 ring-${config.accentColor}/20`
+          : `border-[#e5e7eb] shadow-sm`
+        }
+      `}
+      style={{
+        borderLeftWidth: "3px",
+        borderLeftColor: config.accentColor,
+      }}
+    >
+      {/* Header */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className={`
+          w-full flex items-center gap-3 px-3 py-2.5
+          ${item.isRunning ? config.bgLight : "bg-white hover:bg-[#f8f9fb]"}
+          transition-colors cursor-pointer
+        `}
+      >
+        {/* Icon with pulse animation when running */}
+        <div className={`
+          w-8 h-8 rounded-lg flex items-center justify-center
+          bg-gradient-to-br ${config.gradient} shadow-sm
+          ${item.isRunning ? "animate-pulse" : ""}
+        `}>
+          <Icon className="w-4 h-4 text-white" />
+        </div>
+
+        {/* Title and status */}
+        <div className="flex-1 text-left min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`font-semibold text-sm ${config.textColor}`}>
+              {config.label}
+            </span>
+            {item.isRunning ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#6b7280] bg-white/80 px-1.5 py-0.5 rounded-full">
+                <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                実行中
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#10b981] bg-[#ecfdf5] px-1.5 py-0.5 rounded-full">
+                <CheckCircle2 className="w-2.5 h-2.5" />
+                完了
+              </span>
+            )}
+          </div>
+          {toolCalls.length > 0 && (
+            <p className="text-[11px] text-[#9ca3af] truncate mt-0.5">
+              {toolCalls.length}件のツール呼び出し
+            </p>
+          )}
+        </div>
+
+        {/* Expand/Collapse */}
+        {hasActivity && (
+          <div className="text-[#9ca3af]">
+            {isExpanded ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronRight className="w-4 h-4" />
+            )}
+          </div>
+        )}
+      </button>
+
+      {/* Expanded content */}
+      {isExpanded && hasActivity && (
+        <div className="px-3 pb-3 pt-1 bg-white border-t border-[#f0f1f5]">
+          {/* Tool calls */}
+          {toolCalls.length > 0 && (
+            <div className="space-y-1.5">
+              {toolCalls.map((tc, idx) => {
+                const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
+                const toolLabel = TOOL_LABELS[tc.toolName] || tc.toolName;
+                return (
+                  <div
+                    key={tc.callId || idx}
+                    className={`
+                      flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px]
+                      ${tc.isComplete
+                        ? "bg-[#ecfdf5] text-[#065f46]"
+                        : "bg-[#f0f1f5] text-[#6b7280]"
+                      }
+                    `}
+                  >
+                    <ToolIcon className="w-3 h-3 shrink-0" />
+                    <span className="font-medium flex-1 truncate">{toolLabel}</span>
+                    {tc.isComplete ? (
+                      <CheckCircle2 className="w-3 h-3 text-[#10b981]" />
+                    ) : (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Reasoning content */}
+          {item.reasoningContent && (
+            <div className="mt-2 flex items-start gap-2">
+              <Brain className="w-3 h-3 shrink-0 mt-0.5 text-[#c0c4cc]" />
+              <p className="text-[11px] text-[#9ca3af] leading-relaxed line-clamp-3">
+                {item.reasoningContent}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -320,49 +509,6 @@ function ToolBadge({ item }: { item: ToolActivityItem }) {
 }
 
 // ---------------------------------------------------------------------------
-// SubAgentBadge
-// ---------------------------------------------------------------------------
-
-function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
-  const agentKey = item.agent.toLowerCase().replace(/[^a-z]/g, "_");
-  const colors = SUB_AGENT_COLORS[agentKey] || SUB_AGENT_COLORS.default;
-  const Icon = SUB_AGENT_ICONS[agentKey] || SUB_AGENT_ICONS.default;
-  const label = SUB_AGENT_LABELS[agentKey] || item.agent;
-
-  const eventLabel = getEventLabel(item.eventType);
-
-  return (
-    <div
-      className={`
-        inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] sm:text-xs
-        transition-all duration-300 border
-        ${colors.bg} ${colors.text} ${colors.border}
-      `}
-    >
-      <Icon className="w-3.5 h-3.5 shrink-0" />
-      <span className="font-semibold">{label}</span>
-      <span className="opacity-70">{eventLabel}</span>
-      {item.isRunning ? (
-        <Loader2 className="w-3 h-3 animate-spin ml-0.5" />
-      ) : (
-        <span className="text-[#10b981] font-semibold ml-0.5">&#10003;</span>
-      )}
-    </div>
-  );
-}
-
-function getEventLabel(eventType: string): string {
-  switch (eventType) {
-    case "tool_called": return "ツール実行中";
-    case "tool_output": return "完了";
-    case "reasoning": return "分析中";
-    case "text_delta": return "回答生成中";
-    case "message_output": return "完了";
-    default: return eventType;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // ReasoningLine
 // ---------------------------------------------------------------------------
 
@@ -381,7 +527,15 @@ function ReasoningLine({ content }: { content: string }) {
 // TextSegment
 // ---------------------------------------------------------------------------
 
-function TextSegment({ content, isLast, isStreaming }: { content: string; isLast: boolean; isStreaming?: boolean }) {
+function TextSegment({
+  content,
+  isLast,
+  isStreaming,
+}: {
+  content: string;
+  isLast: boolean;
+  isStreaming?: boolean;
+}) {
   return (
     <div className="report-content overflow-hidden min-w-0">
       <ReactMarkdown
@@ -399,120 +553,10 @@ function TextSegment({ content, isLast, isStreaming }: { content: string; isLast
 }
 
 // ---------------------------------------------------------------------------
-// ActivityGroupInline (collapsible)
+// ActivityTimeline
 // ---------------------------------------------------------------------------
 
-function ActivityGroupInline({ items }: { items: ActivityItem[] }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const toolCount = items.filter((it) => it.kind === "tool").length;
-  const reasoningCount = items.filter((it) => it.kind === "reasoning").length;
-  const subAgentCount = items.filter((it) => it.kind === "sub_agent").length;
-
-  const parts: string[] = [];
-  if (reasoningCount > 0) parts.push(`思考 ${reasoningCount}`);
-  if (toolCount > 0) parts.push(`ツール ${toolCount}`);
-  if (subAgentCount > 0) parts.push(`エージェント ${subAgentCount}`);
-  const summaryLabel = parts.join(" · ");
-  if (!summaryLabel) return null;
-
-  return (
-    <div>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="group inline-flex items-center gap-1 text-[11px] text-[#b0b5bd] hover:text-[#6b7280] transition-colors cursor-pointer"
-      >
-        <ChevronRight
-          className={`w-2.5 h-2.5 transition-transform duration-150 ${
-            isOpen ? "rotate-90" : ""
-          }`}
-        />
-        <span className="tracking-wide">{summaryLabel}</span>
-      </button>
-      {isOpen && (
-        <div className="mt-1.5 ml-[14px] border-l border-[#e5e7eb] pl-2.5">
-          <ActivityItemsRenderer items={items} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// ActivityItemsRenderer
-// ---------------------------------------------------------------------------
-
-function ActivityItemsRenderer({
-  items,
-  isStreaming,
-}: {
-  items: ActivityItem[];
-  isStreaming?: boolean;
-}) {
-  const groups = groupConsecutive(items);
-
-  return (
-    <div className="space-y-2">
-      {groups.map((group, gi) => {
-        if (group.kind === "reasoning") {
-          return (
-            <div key={`r-${gi}`} className="space-y-1.5">
-              {group.items.map((item) => (
-                <ReasoningLine
-                  key={item.id}
-                  content={(item as ReasoningActivityItem).content}
-                />
-              ))}
-            </div>
-          );
-        }
-        if (group.kind === "text") {
-          return (
-            <div key={`x-${gi}`}>
-              {group.items.map((item, idx) => {
-                const textItem = item as TextActivityItem;
-                const isLastText = gi === groups.length - 1 && idx === group.items.length - 1;
-                return (
-                  <TextSegment
-                    key={item.id}
-                    content={textItem.content}
-                    isLast={isLastText}
-                    isStreaming={isStreaming}
-                  />
-                );
-              })}
-            </div>
-          );
-        }
-        if (group.kind === "sub_agent") {
-          return (
-            <div key={`s-${gi}`} className="flex flex-wrap gap-1.5">
-              {group.items.map((item) => (
-                <SubAgentBadge key={item.id} item={item as SubAgentActivityItem} />
-              ))}
-            </div>
-          );
-        }
-        if (group.kind === "tool") {
-          return (
-            <div key={`t-${gi}`} className="flex flex-wrap gap-1 sm:gap-1.5">
-              {group.items.map((item) => (
-                <ToolBadge key={item.id} item={item as ToolActivityItem} />
-              ))}
-            </div>
-          );
-        }
-        return null;
-      })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// InterleavedTimeline
-// ---------------------------------------------------------------------------
-
-function InterleavedTimeline({
+function ActivityTimeline({
   items,
   isStreaming,
 }: {
@@ -521,35 +565,61 @@ function InterleavedTimeline({
 }) {
   if (!items || items.length === 0) return null;
 
-  // Streaming: show full interleaved timeline
-  if (isStreaming) {
-    return (
-      <div>
-        <ActivityItemsRenderer
-          items={items}
-          isStreaming={isStreaming}
-        />
-      </div>
-    );
-  }
+  // Separate sub-agent items from other items
+  const subAgentItems = items.filter(
+    (i) => i.kind === "sub_agent"
+  ) as SubAgentActivityItem[];
+  const otherItems = items.filter((i) => i.kind !== "sub_agent");
 
-  // Completed: text always visible, reasoning/tools/sub_agent collapsed
-  const sections = groupIntoSections(items);
+  // Group other items by kind for rendering
+  const textItems = otherItems.filter((i) => i.kind === "text") as TextActivityItem[];
+  const toolItems = otherItems.filter((i) => i.kind === "tool") as ToolActivityItem[];
+  const reasoningItems = otherItems.filter(
+    (i) => i.kind === "reasoning"
+  ) as ReasoningActivityItem[];
 
   return (
-    <div className="space-y-2">
-      {sections.map((section, si) => {
-        if (section.type === "activity") {
-          return (
-            <ActivityGroupInline key={`act-${si}`} items={section.items} />
-          );
-        }
-        return (
-          <div key={`cnt-${si}`}>
-            <ActivityItemsRenderer items={section.items} />
-          </div>
-        );
-      })}
+    <div className="space-y-3">
+      {/* Sub-agent cards (prominently displayed) */}
+      {subAgentItems.length > 0 && (
+        <div className="space-y-2">
+          {subAgentItems.map((item) => (
+            <SubAgentCard key={item.id} item={item} />
+          ))}
+        </div>
+      )}
+
+      {/* Reasoning lines (only if not already in sub-agent cards) */}
+      {reasoningItems.length > 0 && subAgentItems.length === 0 && (
+        <div className="space-y-1.5">
+          {reasoningItems.map((item) => (
+            <ReasoningLine key={item.id} content={item.content} />
+          ))}
+        </div>
+      )}
+
+      {/* Tool badges (only if not in sub-agents) */}
+      {toolItems.length > 0 && subAgentItems.length === 0 && (
+        <div className="flex flex-wrap gap-1 sm:gap-1.5">
+          {toolItems.map((item) => (
+            <ToolBadge key={item.id} item={item} />
+          ))}
+        </div>
+      )}
+
+      {/* Text content */}
+      {textItems.length > 0 && (
+        <div>
+          {textItems.map((item, idx) => (
+            <TextSegment
+              key={item.id}
+              content={item.content}
+              isLast={idx === textItems.length - 1}
+              isStreaming={isStreaming}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -563,7 +633,9 @@ function UserMessage({ message }: { message: Message }) {
     <div className="flex justify-end overflow-hidden">
       <div className="max-w-[85%] sm:max-w-[70%] min-w-0">
         <div className="bg-[#f0f1f5] text-[#1a1a2e] rounded-2xl px-4 py-2.5 text-[14px] sm:text-sm leading-relaxed">
-          <p className="whitespace-pre-wrap break-words overflow-hidden">{message.content}</p>
+          <p className="whitespace-pre-wrap break-words overflow-hidden">
+            {message.content}
+          </p>
         </div>
       </div>
     </div>
@@ -576,58 +648,31 @@ function UserMessage({ message }: { message: Message }) {
 
 function AssistantMessage({ message }: { message: Message }) {
   const items = message.activityItems || [];
-  const hasTextItems = items.some((it) => it.kind === "text");
+  const hasItems = items.length > 0;
 
   // Show thinking indicator when streaming started but no events yet
-  const showThinking = !!message.isStreaming && items.length === 0 && !message.content;
+  const showThinking = !!message.isStreaming && !hasItems && !message.content;
 
-  // New interleaved mode: text segments are in activityItems
-  if (hasTextItems) {
-    return (
-      <div className="assistant-response overflow-hidden min-w-0">
-        <InterleavedTimeline
-          items={items}
-          isStreaming={message.isStreaming}
-        />
-      </div>
-    );
-  }
-
-  // Legacy mode or initial state
   return (
     <div className="assistant-response overflow-hidden min-w-0">
       {showThinking ? (
         <ThinkingIndicator />
-      ) : (
-        <>
-          {/* Activity items first (for streaming) */}
-          {items.length > 0 && (
-            <div className="mb-2.5 sm:mb-3">
-              <ActivityItemsRenderer
-                items={items}
-                isStreaming={message.isStreaming}
-              />
-            </div>
+      ) : hasItems ? (
+        <ActivityTimeline items={items} isStreaming={message.isStreaming} />
+      ) : message.content ? (
+        <div className="report-content overflow-hidden min-w-0">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw]}
+            components={markdownComponents}
+          >
+            {message.content}
+          </ReactMarkdown>
+          {message.isStreaming && (
+            <span className="inline-block w-0.5 h-5 bg-[#e94560] animate-pulse ml-0.5 align-middle rounded-full" />
           )}
-
-          {/* Text content */}
-          {message.content && (
-            <div className="report-content overflow-hidden min-w-0">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw]}
-                components={markdownComponents}
-              >
-                {message.content}
-              </ReactMarkdown>
-
-              {message.isStreaming && (
-                <span className="inline-block w-0.5 h-5 bg-[#e94560] animate-pulse ml-0.5 align-middle rounded-full" />
-              )}
-            </div>
-          )}
-        </>
-      )}
+        </div>
+      ) : null}
     </div>
   );
 }

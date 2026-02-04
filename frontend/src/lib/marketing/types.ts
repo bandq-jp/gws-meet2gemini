@@ -66,7 +66,7 @@ export interface SubAgentEventData {
 export interface SubAgentEvent extends BaseStreamEvent {
   type: "sub_agent_event";
   agent: string;
-  event_type: "tool_called" | "tool_output" | "reasoning" | "text_delta" | "message_output";
+  event_type: "started" | "tool_called" | "tool_output" | "reasoning" | "text_delta" | "message_output";
   data?: SubAgentEventData;
 }
 
@@ -177,6 +177,14 @@ export interface SubAgentActivityItem extends BaseActivityItem {
   eventType: string;
   data?: SubAgentEventData;
   isRunning: boolean;
+  // Internal tracking for rich UI
+  toolCalls?: Array<{
+    callId: string;
+    toolName: string;
+    isComplete: boolean;
+  }>;
+  reasoningContent?: string;
+  outputPreview?: string;
 }
 
 export interface AskUserActivityItem extends BaseActivityItem {

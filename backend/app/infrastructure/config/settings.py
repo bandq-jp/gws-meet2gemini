@@ -96,6 +96,8 @@ class Settings:
     marketing_agent_model: str = os.getenv("MARKETING_AGENT_MODEL", "gpt-5.1")
     marketing_reasoning_effort: str = os.getenv("MARKETING_REASONING_EFFORT", "high")
     marketing_search_country: str = os.getenv("MARKETING_SEARCH_COUNTRY", "JP")
+    # Reasoning summary translation model (lightweight for speed)
+    reasoning_translate_model: str = os.getenv("REASONING_TRANSLATE_MODEL", "gpt-5-nano")
     marketing_enable_web_search: bool = os.getenv("MARKETING_ENABLE_WEB_SEARCH", "true").lower() != "false"
     marketing_enable_code_interpreter: bool = os.getenv("MARKETING_ENABLE_CODE_INTERPRETER", "true").lower() != "false"
     marketing_enable_canvas: bool = os.getenv("MARKETING_ENABLE_CANVAS", "true").lower() != "false"
