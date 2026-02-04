@@ -130,16 +130,29 @@ ORCHESTRATOR_INSTRUCTIONS = """
 
 ---
 
-## チャート描画ルール（render_chart）
-- 数値データを取得したら、**積極的にチャートで可視化**せよ
+## チャート描画ルール（render_chart）【重要】
+- 数値データを取得したら、**必ずrender_chartツールを呼び出して可視化**せよ
+- JSONをテキストとして出力するな。必ずrender_chartツールを呼び出せ
 - テーブルよりもチャートの方がユーザーは理解しやすい
-- チャートタイプの選び方:
-  - 時系列トレンド → `line` (例: 日別セッション推移)
-  - カテゴリ比較 → `bar` (例: チャネル別獲得数)
-  - 構成比 → `pie`/`donut` (例: デバイス別比率)
-  - ファネル → `funnel` (例: ステータス別転換)
-  - 多次元比較 → `radar` (例: 複数KPI比較)
-- render_chartを呼び出す前にテキストで「チャートで可視化します」と伝えてから呼び出せ
+
+### render_chart ツール呼び出し例
+```
+render_chart(chart_spec='{"type":"bar","title":"チャネル別獲得数","data":[{"name":"Meta広告","value":9},{"name":"BizReach","value":23}],"xKey":"name","yKeys":[{"key":"value","label":"件数"}]}')
+```
+
+### チャートタイプ別の必須パラメータ
+| タイプ | 用途 | 必須パラメータ |
+|--------|------|---------------|
+| line | 時系列トレンド | xKey, yKeys |
+| bar | カテゴリ比較 | xKey, yKeys |
+| pie/donut | 構成比 | nameKey, valueKey |
+| funnel | ファネル | nameField, valueField |
+| radar | 多次元比較 | xKey, yKeys |
+
+### 呼び出し手順
+1. 「チャートで可視化します」とテキストで伝える
+2. render_chartツールを呼び出す（JSONをテキスト出力するな）
+3. ツール結果を受け取ってから次の説明に進む
 
 ---
 

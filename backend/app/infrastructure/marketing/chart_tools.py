@@ -33,12 +33,10 @@ async def render_chart(
     ctx: ToolContext[MarketingChatContext],
     chart_spec: str,
 ) -> str:
-    """チャットUIにインタラクティブなチャートを描画する。
-
-    データを可視化したい時に使用する。テーブル表示よりもチャートの方が分かりやすい場合に積極的に使用せよ。
+    """チャートを描画する。数値データは必ずこのツールで可視化せよ。JSONをテキスト出力するな。
 
     Args:
-        chart_spec: チャート仕様のJSON文字列。以下のフォーマット:
+        chart_spec: チャート仕様のJSON文字列。例:
             {
                 "type": "line|bar|area|pie|donut|scatter|radar|funnel|table",
                 "title": "チャートタイトル",
