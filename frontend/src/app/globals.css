@@ -168,3 +168,149 @@ body {
     word-wrap: normal;
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Marketing Chat Styles (based on ga4-oauth-aiagent)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Assistant Response Styles ── */
+.assistant-response {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.assistant-response .report-content {
+  padding-left: 1rem;
+  border-left: 2px solid transparent;
+  overflow: hidden;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .assistant-response .report-content {
+    padding-left: 0;
+    border-left: none;
+  }
+}
+
+/* Subtle left accent on hover for visual structure */
+.assistant-response:hover .report-content {
+  border-left-color: #f0f1f5;
+}
+
+/* Table: numbers should be right-aligned for readability */
+.report-content table td:not(:first-child) {
+  text-align: right;
+}
+
+/* Striped table rows */
+.report-content table tbody tr:nth-child(even) {
+  background-color: #fafbfc;
+}
+
+/* ── Mobile-friendly tables ── */
+.report-content table {
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 640px) {
+  .report-content table {
+    font-size: 0.75rem;
+  }
+  .report-content table th,
+  .report-content table td {
+    padding: 0.5rem 0.625rem;
+  }
+  /* Allow long text in first column to wrap on mobile, but keep words intact */
+  .report-content table td:first-child,
+  .report-content table th:first-child {
+    white-space: normal;
+    word-break: keep-all;
+    min-width: 60px;
+  }
+}
+
+/* ── Mobile-friendly code blocks ── */
+@media (max-width: 640px) {
+  .report-content pre {
+    font-size: 0.6875rem;
+  }
+}
+
+/* ── Custom Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* ── Thinking Indicator ── */
+.thinking-indicator {
+  animation: thinking-enter 300ms ease-out both;
+}
+
+@keyframes thinking-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.thinking-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #c0c4cc;
+  animation: thinking-pulse 1.4s ease-in-out infinite;
+}
+
+.thinking-dot-1 { animation-delay: 0s; }
+.thinking-dot-2 { animation-delay: 0.2s; }
+.thinking-dot-3 { animation-delay: 0.4s; }
+
+@keyframes thinking-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.thinking-label {
+  animation: thinking-label-in 300ms ease-out both;
+}
+
+@keyframes thinking-label-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-indicator {
+    animation: none;
+  }
+  .thinking-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+  .thinking-label {
+    animation: none;
+  }
+}
+
+/* ── Safe area for mobile devices with notch ── */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

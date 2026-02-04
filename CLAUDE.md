@@ -36,7 +36,7 @@
 
 ### 主要機能
 1. **ひとキャリ (HitoCari)**: Google Meet/Docs/Notta → Gemini AI構造化抽出 → Supabase保存 → Zoho CRM連携
-2. **マーケティングAIチャット**: OpenAI ChatKit + Agents SDK によるSEO/コンテンツ戦略アシスタント（GPT-5.2対応、Web Search / Code Interpreter / MCP連携）
+2. **マーケティングAIチャット**: OpenAI Agents SDK ネイティブSSEストリーミングによるSEO/コンテンツ戦略アシスタント（GPT-5.2対応、Web Search / Code Interpreter / MCP連携、Sub-Agent詳細表示）
 3. **画像生成**: Gemini 2.5 Pro によるAI画像生成（テンプレート・リファレンス画像・セッション管理）
 
 ---
@@ -57,7 +57,7 @@
 - **Package Manager**: Bun
 - **UI**: Tailwind CSS 4 + shadcn/ui (Radix UI) + Lucide React
 - **Auth**: @clerk/nextjs (Google OAuth, @bandq.jp ドメイン制限)
-- **Chat**: @openai/chatkit 1.5.0, @openai/chatkit-react 1.4.3
+- **Chat**: Native SSE streaming (ChatKit完全削除済み)
 - **Markdown**: react-markdown + remark-gfm + rehype-sanitize
 - **Search**: cmdk (Command Menu)
 
@@ -1118,6 +1118,164 @@ uv run python -c "from app.infrastructure.chatkit.agents import OrchestratorAgen
 ### 2026-02-04
 - **参考プロジェクトの不十分な調査**: ローカルMCP移行でGA4/GSCのみ対応し、Meta Ads MCPを見落とした。ユーザーに「なぜその3つのローカルサーバー環境変数を用意したの？」「META_ACCESS_TOKEN=の環境変数でできるはずだけど？もっとga4-oauth-aiagentちゃんと調べて」と指摘された。**参考プロジェクトを提示されたら、全ファイルを徹底的に読み、すべての機能を把握すること。部分的な実装は中途半端な結果を生む。**
 - **段階的実装の過剰**: 「Phase 1: GA4/GSC」「Phase 2: Meta Ads」と勝手に段階を設けたが、ユーザーは全てローカル化したかった。**ユーザーの要件を正確に把握し、勝手に段階を設けず、要件通りに実装すること。**
+- **UI/UXの不十分な実装**: ChatKit脱却後のUIがサブエージェント情報を表示していなかった。ユーザーに「まったくUIUXデザインもサブエージェントの内容も全く表示されてないし、最悪です」と指摘。**機能移行時は、単にバックエンド接続だけでなく、フロントエンドのUX品質（視覚的フィードバック、ステータス表示、デザイン）も同時に確認・実装すること。参考プロジェクトのUIコンポーネントも徹底的に調査すること。**
+
+### 13. ChatKit → Native SSE ストリーミング移行実装 (2026-02-04)
+
+**背景**: ChatKit SDK（`@openai/chatkit`, `@openai/chatkit-react`）依存を完全に排除し、OpenAI Agents SDKのネイティブストリーミングに移行
+
+**参照プロジェクト**:
+- `/home/als0028/study/shintairiku/ga4-oauth-aiagent` - SSEストリーミング実装パターン
+- `/home/als0028/study/shintairiku/marketing-automation` - Blog AIのパターン
+
+**ユーザー要件決定事項**:
+- **サブエージェント表示**: 詳細表示（エージェント名、実行中ツール、推論内容をリアルタイム表示）
+- **キャンバス機能**: 削除（SEO記事キャンバスは廃止）
+
+**アーキテクチャ (After)**:
+```
+Frontend                           Backend
+┌────────────────────────┐        ┌──────────────────────────────┐
+│ useMarketingChat hook  │        │ MarketingAgentService        │
+│ <MarketingChat>        │──SSE───│ Runner.run_streamed()        │
+│ ActivityItems          │  ↑     │ Queue + pump task            │
+│ (custom components)    │  │     │ _process_sdk_event()         │
+└────────────────────────┘  │     └──────────────────────────────┘
+                            │
+                   data: {"type":"text_delta","content":"..."}
+                   data: {"type":"sub_agent_event","agent":"SEO",...}
+                   data: {"type":"done"}
+```
+
+**新規ファイル (Backend)**:
+| ファイル | 説明 |
+|---------|------|
+| `backend/app/infrastructure/marketing/__init__.py` | モジュール初期化 |
+| `backend/app/infrastructure/marketing/agent_service.py` | SDKイベント処理サービス（Queue + pump task パターン） |
+
+**新規ファイル (Frontend)**:
+| ファイル | 説明 |
+|---------|------|
+| `frontend/src/lib/marketing/types.ts` | SSEイベント型定義、ActivityItem型 |
+| `frontend/src/hooks/use-marketing-chat.ts` | ネイティブSSEフック |
+| `frontend/src/app/api/marketing/chat/stream/route.ts` | SSEプロキシエンドポイント |
+| `frontend/src/components/marketing/MarketingChat.tsx` | メインチャットコンポーネント |
+| `frontend/src/components/marketing/MessageList.tsx` | メッセージ一覧 |
+| `frontend/src/components/marketing/ActivityItems.tsx` | アクティビティアイテム描画 |
+| `frontend/src/components/marketing/ToolBadge.tsx` | ツール呼び出し表示 |
+| `frontend/src/components/marketing/ReasoningLine.tsx` | 推論表示 |
+| `frontend/src/components/marketing/SubAgentEvent.tsx` | サブエージェント詳細表示 |
+| `frontend/src/components/marketing/Composer.tsx` | 入力コンポーザー |
+| `frontend/src/components/marketing/index.ts` | エクスポートインデックス |
+
+**変更ファイル**:
+| ファイル | 変更内容 |
+|---------|---------|
+| `backend/app/infrastructure/chatkit/agents/orchestrator.py` | `on_sub_agent_stream` コールバック追加 |
+| `backend/app/presentation/api/v1/marketing.py` | `/chat/stream` SSEエンドポイント追加 |
+
+**SSEイベント型**:
+```typescript
+export type StreamEventType =
+  | "text_delta"           // テキスト増分
+  | "response_created"     // レスポンス境界
+  | "tool_call"            // ツール呼び出し開始
+  | "tool_result"          // ツール実行結果
+  | "reasoning"            // 推論/思考
+  | "sub_agent_event"      // サブエージェントイベント
+  | "agent_updated"        // エージェント切り替え
+  | "progress"             // キープアライブ
+  | "done"                 // 完了
+  | "error";               // エラー
+```
+
+**サブエージェントイベント詳細表示**:
+- エージェント名: 色分けバッジ（Analytics=青、SEO=緑、Meta=紫、Zoho=オレンジ等）
+- イベントタイプ: `tool_called`, `tool_output`, `reasoning`, `text_delta`, `message_output`
+- ステータス: 実行中=スピナー、完了=チェックマーク
+
+**技術的詳細**:
+- `Queue + pump task` パターン: SDKストリームイベントとアウトオブバンドイベントをマルチプレクス
+- `_SENTINEL` オブジェクト: ストリーム終了シグナル
+- `on_stream` コールバック: `Agent.as_tool()` でサブエージェントイベントをキャプチャ
+- キープアライブ: 20秒間隔で `{"type": "progress", "text": "処理中..."}` を送信
+- コンテキスト永続化: `result.to_input_list()` で次ターン用にシリアライズ
+
+**削除ファイル (Phase 4クリーンアップ)**:
+- `frontend/src/hooks/use-marketing-chatkit.ts` - 旧ChatKitフック削除
+
+**キャンバス関連削除 (Phase 4)**:
+- `ModelAssetForm.tsx`: `enable_canvas` フィールドとTOOL_CONFIGエントリ削除
+- `ModelAssetSelector.tsx`: `enable_canvas` フィールドとTOOL_ICONSエントリ削除
+- `ModelAssetTable.tsx`: `enable_canvas` フィールドとTOOL_ICONSエントリ削除
+- `types.ts`: `enable_canvas` フィールド削除
+
+**移行ステータス**: ✅ 完了 (Phase 1-4)
+
+**情報ソース**:
+- [OpenAI Agents SDK Streaming](https://openai.github.io/openai-agents-python/streaming/)
+- 参考実装: `ga4-oauth-aiagent/backend/app/services/agent_service.py`
+- 参考実装: `ga4-oauth-aiagent/frontend/lib/hooks/useChat.ts`
+
+### 14. マーケティングAI UI/UX 完全再実装 (2026-02-04)
+
+**背景**: ChatKit脱却後、UI/UXとサブエージェント表示が不十分との指摘
+- 「まったくUIUXデザインもサブエージェントの内容も全く表示されてないし、最悪です」
+
+**参照プロジェクト**: `/home/als0028/study/shintairiku/ga4-oauth-aiagent`
+- ChatWindow.tsx, ChatMessage.tsx, ThinkingIndicator.tsx, ChatInput.tsx
+- Interleaved Timeline パターン（テキスト・ツール・推論・サブエージェントを到着順表示）
+
+**新規・変更ファイル (Frontend)**:
+| ファイル | 説明 |
+|---------|------|
+| `ThinkingIndicator.tsx` | 3ドットパルスアニメーション + ローテーションラベル |
+| `ChatMessage.tsx` | 完全再実装 (560行): SubAgentBadge, ToolBadge, ReasoningLine, InterleavedTimeline |
+| `Composer.tsx` | ChatGPT風カプセル入力（auto-resize, 停止ボタン） |
+| `MessageList.tsx` | シンプル化、ChatMessage使用 |
+| `MarketingChat.tsx` | 完全再設計: EmptyState, ヘッダー, アタッチメントパネル |
+| `globals.css` | マーケティングチャット用スタイル追加 |
+
+**UI設計ルール** (ga4-oauth-aiagent準拠):
+| 項目 | 値 |
+|------|-----|
+| メインカラー | Navy #1a1a2e |
+| グレー系 | #6b7280〜#f0f1f5 |
+| アクセント | #e94560 (ピンク赤) |
+| 成功色 | #10b981 (緑) |
+| フォント | 本文 13-14px、補助 11px |
+| 角丸 | rounded-xl (12px), rounded-2xl (16px) |
+| メッセージ幅 | max-w-3xl mx-auto |
+
+**サブエージェント色分け**:
+| エージェント | 背景 | テキスト | ボーダー |
+|-------------|------|---------|---------|
+| Analytics | bg-blue-50 | text-blue-700 | border-blue-200 |
+| SEO | bg-emerald-50 | text-emerald-700 | border-emerald-200 |
+| Meta Ads | bg-purple-50 | text-purple-700 | border-purple-200 |
+| Zoho | bg-orange-50 | text-orange-700 | border-orange-200 |
+| Candidate | bg-amber-50 | text-amber-700 | border-amber-200 |
+| WordPress | bg-cyan-50 | text-cyan-700 | border-cyan-200 |
+
+**Interleaved Timeline 動作**:
+1. **ストリーミング中**: 全アクティビティを到着順に展開表示
+2. **完了後**: テキストは展開、activity (reasoning/tool/sub_agent) は折りたたみ
+
+**ThinkingIndicator ラベルローテーション**:
+```typescript
+const LABELS = ["考えています", "データを確認しています", "分析しています", "情報を整理しています"];
+// 3秒ごとにローテーション
+```
+
+**CSS アニメーション** (globals.css):
+```css
+.thinking-dot { animation: thinking-pulse 1.4s ease-in-out infinite; }
+.thinking-dot-1 { animation-delay: 0s; }
+.thinking-dot-2 { animation-delay: 0.2s; }
+.thinking-dot-3 { animation-delay: 0.4s; }
+```
+
+**ビルドステータス**: ✅ 成功 (TypeScript + Next.js)
 
 ---
 

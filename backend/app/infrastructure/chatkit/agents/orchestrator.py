@@ -8,7 +8,7 @@ Tools: 6 sub-agent tools + native tools (Web Search, Code Interpreter)
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List
 
 from agents import Agent, CodeInterpreterTool, ModelSettings, WebSearchTool
 from openai.types.shared.reasoning import Reasoning
@@ -114,6 +114,7 @@ class OrchestratorAgentFactory:
         asset: Dict[str, Any] | None = None,
         disabled_mcp_servers: set[str] | None = None,
         mcp_servers: List[Any] | None = None,
+        on_sub_agent_stream: Callable[[dict], Awaitable[None]] | None = None,
     ) -> Agent:
         """
         Build the Orchestrator agent with sub-agent tools.
@@ -122,6 +123,7 @@ class OrchestratorAgentFactory:
             asset: Model asset configuration (reasoning_effort, etc.)
             disabled_mcp_servers: Set of MCP server labels to disable
             mcp_servers: Local MCP server instances
+            on_sub_agent_stream: Callback for sub-agent streaming events
 
         Returns:
             Configured Orchestrator Agent
@@ -131,9 +133,21 @@ class OrchestratorAgentFactory:
         for name, factory in self._sub_factories.items():
             try:
                 sub_agent = factory.build_agent(mcp_servers=mcp_servers, asset=asset)
+
+                # Create stream callback wrapper to include agent reference
+                stream_callback = None
+                if on_sub_agent_stream:
+                    # Capture agent in closure
+                    def make_callback(agent: Agent) -> Callable:
+                        async def callback(event: dict) -> None:
+                            await on_sub_agent_stream({"agent": agent, "event": event})
+                        return callback
+                    stream_callback = make_callback(sub_agent)
+
                 tool = sub_agent.as_tool(
                     tool_name=factory.tool_name,
                     tool_description=factory.tool_description,
+                    on_stream=stream_callback,
                 )
                 sub_agent_tools.append(tool)
                 logger.debug(f"Sub-agent tool registered: {factory.tool_name}")

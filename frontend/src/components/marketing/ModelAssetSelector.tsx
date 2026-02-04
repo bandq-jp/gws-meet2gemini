@@ -28,7 +28,6 @@ import {
   Search,
   ExternalLink,
   FileText,
-  LayoutTemplate,
   Megaphone,
   Users,
 } from "lucide-react";
@@ -48,7 +47,6 @@ export type ModelAsset = {
   enable_gsc?: boolean;
   enable_ahrefs?: boolean;
   enable_wordpress?: boolean;
-  enable_canvas?: boolean;
   enable_zoho_crm?: boolean;
   system_prompt_addition?: string | null;
   visibility?: "public" | "private";
@@ -73,7 +71,6 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   enable_gsc: <Search className="h-3 w-3" />,
   enable_ahrefs: <ExternalLink className="h-3 w-3" />,
   enable_wordpress: <FileText className="h-3 w-3" />,
-  enable_canvas: <LayoutTemplate className="h-3 w-3" />,
   enable_zoho_crm: <Users className="h-3 w-3" />,
 };
 
@@ -85,7 +82,6 @@ const TOOL_LABELS: Record<string, string> = {
   enable_gsc: "GSC",
   enable_ahrefs: "Ahrefs",
   enable_wordpress: "WP",
-  enable_canvas: "Canvas",
   enable_zoho_crm: "Zoho",
 };
 

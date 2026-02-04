@@ -36,6 +36,7 @@ from app.infrastructure.chatkit.model_assets import (
     delete_model_asset,
 )
 from app.infrastructure.chatkit.marketing_server import get_marketing_chat_server
+from app.infrastructure.marketing.agent_service import get_marketing_agent_service
 from app.infrastructure.chatkit.supabase_store import SupabaseChatStore, PermissionDeniedError
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.supabase.client import get_supabase
@@ -43,6 +44,15 @@ from app.infrastructure.security.marketing_token_service import (
     MarketingTokenError,
     MarketingTokenService,
 )
+from pydantic import BaseModel
+
+
+class ChatStreamRequest(BaseModel):
+    """Request body for the native SSE chat endpoint."""
+    message: str
+    conversation_id: str | None = None
+    context_items: list[dict] | None = None
+    model_asset_id: str | None = None
 
 router = APIRouter(prefix="/marketing", tags=["marketing"])
 logger = logging.getLogger(__name__)
@@ -653,6 +663,65 @@ async def marketing_chatkit(
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Unhandled ChatKit response",
+    )
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    request: Request,
+    body: ChatStreamRequest,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Native SSE streaming endpoint for marketing AI chat.
+
+    Replaces ChatKit with direct OpenAI Agents SDK streaming.
+    Returns SSE events in the format:
+    - text_delta: Incremental text content
+    - tool_call: Tool invocation start
+    - tool_result: Tool execution result
+    - reasoning: Agent reasoning/thinking
+    - sub_agent_event: Sub-agent activity (detailed)
+    - progress: Keepalive progress indicator
+    - done: Stream completion
+    - error: Error event
+    """
+    from app.infrastructure.chatkit.model_assets import get_model_asset
+
+    agent_service = get_marketing_agent_service()
+
+    # Load model asset if specified
+    model_asset = None
+    asset_id = body.model_asset_id or context.model_asset_id
+    if asset_id:
+        model_asset = get_model_asset(asset_id, context=context)
+
+    async def event_generator():
+        try:
+            async for event in agent_service.stream_chat(
+                user_id=context.user_id,
+                user_email=context.user_email,
+                conversation_id=body.conversation_id or "",
+                message=body.message,
+                context_items=body.context_items,
+                model_asset=model_asset,
+            ):
+                if await request.is_disconnected():
+                    logger.info("Client disconnected during chat stream")
+                    break
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.exception("Error in chat stream")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
