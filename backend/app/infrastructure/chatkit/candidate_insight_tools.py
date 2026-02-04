@@ -47,6 +47,33 @@ def _get_all_structured_data_with_sync(limit: int = 500) -> List[Dict[str, Any]]
         return []
 
 
+def _get_all_structured_data_by_zoho_ids(zoho_record_ids: List[str]) -> Dict[str, Dict[str, Any]]:
+    """
+    複数Zoho record_idの構造化データを1回で取得（IN句使用）。
+
+    N+1問題を回避するためのバッチ取得ヘルパー。
+    最大100件のrecord_idを1回のクエリで取得。
+
+    Returns:
+        {zoho_record_id: structured_data_row} の辞書
+    """
+    if not zoho_record_ids:
+        return {}
+
+    try:
+        sb = get_supabase()
+        # Supabase IN句で一括取得
+        res = sb.table("structured_outputs").select(
+            "meeting_id, data, zoho_record_id, zoho_candidate_name, zoho_sync_status"
+        ).in_("zoho_record_id", zoho_record_ids[:100]).execute()
+
+        # record_idをキーとした辞書に変換
+        return {row["zoho_record_id"]: row for row in (res.data or [])}
+    except Exception as e:
+        logger.warning(f"Failed to batch get structured data: {e}")
+        return {}
+
+
 def _extract_field(data: Dict[str, Any], field_name: str) -> Any:
     """構造化データから特定フィールドを安全に抽出"""
     if not data or not isinstance(data, dict):
@@ -86,13 +113,18 @@ async def analyze_competitor_risk(
         companies_in_selection: Counter = Counter()
         other_offers = []
 
+        # N+1回避: 全record_idを抽出して一括取得
+        record_ids = [r.get("record_id") for r in records if r.get("record_id")]
+        structured_map = _get_all_structured_data_by_zoho_ids(record_ids)
+        logger.info(f"[candidate_insight_tools] Batch fetched {len(structured_map)}/{len(record_ids)} structured records")
+
         for record in records:
             record_id = record.get("record_id")
             if not record_id:
                 continue
 
-            # Supabaseから構造化データを取得
-            structured = _get_structured_data_by_zoho_record(record_id)
+            # バッチ取得した構造化データを使用（個別クエリなし）
+            structured = structured_map.get(record_id)
             if not structured:
                 continue
 
@@ -232,14 +264,20 @@ async def assess_candidate_urgency(
         urgency_scores = []
         urgency_distribution = {"即時": 0, "高": 0, "中": 0, "低": 0}
 
+        # N+1回避: 全record_idを抽出して一括取得
+        record_ids = [r.get("record_id") for r in records if r.get("record_id")]
+        structured_map = _get_all_structured_data_by_zoho_ids(record_ids)
+        logger.info(f"[candidate_insight_tools] Batch fetched {len(structured_map)}/{len(record_ids)} structured records")
+
         for record in records:
             record_id = record.get("record_id")
             if not record_id:
                 continue
 
-            structured = _get_structured_data_by_zoho_record(record_id)
+            # バッチ取得した構造化データを使用（個別クエリなし）
+            structured = structured_map.get(record_id)
             if not structured:
-                # 構造化データがない場合はスキップ or デフォルト
+                # 構造化データがない場合はスキップ
                 continue
 
             data = structured.get("data", {})

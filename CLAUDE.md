@@ -2122,6 +2122,98 @@ SUB_AGENT_ENABLE_WEB_SEARCH=true
 - GA4 Data API v1: `clicks`, `impressions` は存在しない（GSCのみ）
 - 指示に「即時実行パターン」表を入れると、モデルが正しいツール選択をしやすい
 
+### 24. 全サブエージェント最適化 & N+1修正 (2026-02-05)
+
+**背景**: ユーザーから「100個以上あるすべてのツールをチェック・最適化し、90%以上の効率化を進めてほしい」との要求
+
+**実施内容**:
+
+#### 1. N+1問題修正 (`candidate_insight_tools.py`)
+
+**問題**: `analyze_competitor_risk()`, `assess_candidate_urgency()` がループ内で個別にSupabaseクエリを実行
+```python
+# 修正前: N+1問題 (50件 → 50回クエリ)
+for record in records:
+    structured = _get_structured_data_by_zoho_record(record_id)  # 毎回クエリ
+```
+
+**修正**: バッチ取得ヘルパー追加
+```python
+# 修正後: 1回のIN句クエリで全件取得
+def _get_all_structured_data_by_zoho_ids(zoho_record_ids: List[str]) -> Dict[str, Dict]:
+    res = sb.table("structured_outputs").select(...).in_("zoho_record_id", zoho_record_ids[:100]).execute()
+    return {row["zoho_record_id"]: row for row in res.data}
+
+# 使用箇所
+record_ids = [r.get("record_id") for r in records if r.get("record_id")]
+structured_map = _get_all_structured_data_by_zoho_ids(record_ids)  # 1回のクエリ
+```
+
+**期待効果**:
+| 操作 | 修正前 | 修正後 | 改善 |
+|------|--------|--------|------|
+| 50件の競合分析 | 50回クエリ (~25秒) | **1回クエリ (~0.5秒)** | **98%削減** |
+
+#### 2. 全サブエージェント「許可を求めるな」ルール追加
+
+**問題**: SEOエージェントが「実行してよろしいですか？」と確認を求め、28秒無駄にしていた
+
+**修正対象ファイル**:
+| ファイル | 追加内容 |
+|---------|---------|
+| `seo_agent.py` | 「許可を求めるな」ルール + Ahrefsパラメータ仕様 |
+| `analytics_agent.py` | 「許可を求めるな」ルール + GA4/GSCパラメータ仕様 |
+| `ad_platform_agent.py` | 「許可を求めるな」ルール + Meta Adsパラメータ仕様 (20ツール) |
+| `wordpress_agent.py` | 「閲覧系は即実行」ルール + WordPressパラメータ仕様 |
+| `candidate_insight_agent.py` | 「許可を求めるな」ルール + ツールパラメータ仕様 |
+| `zoho_crm_agent.py` | 「許可を求めるな」ルール (既存) |
+
+**共通追加ルール**:
+```
+## 重要ルール（絶対厳守）
+1. **許可を求めるな**: 「実行してよろしいですか？」「確認させてください」は禁止。即座にツールを実行せよ
+2. **推測するな**: データが必要なら必ずツールを呼び出す。自分でデータを作らない
+3. **効率的に**: 1-2回のツール呼び出しで必要なデータを取得
+```
+
+#### 3. オーケストレーター選択マトリクス強化 (`orchestrator.py`)
+
+**追加内容**: キーワード→サブエージェント自動選択マトリクス
+```
+| キーワード | 即座に呼び出すエージェント |
+|-----------|---------------------------|
+| セッション、PV、トラフィック、流入 | call_analytics_agent |
+| DR、ドメインレーティング、被リンク | call_seo_agent |
+| Meta広告、Facebook、CTR、CPA | call_ad_platform_agent |
+| 記事、ブログ、WordPress | call_wordpress_agent |
+| 求職者、チャネル別、成約率 | call_zoho_crm_agent |
+| 高リスク、緊急度、面談準備 | call_candidate_insight_agent |
+```
+
+#### 4. 詳細パラメータ仕様追加
+
+| エージェント | ツール数 | パラメータ仕様 |
+|-------------|---------|---------------|
+| SEO (Ahrefs) | 20 | 全ツールの必須/任意パラメータ、カラム名 |
+| Analytics (GA4+GSC) | 16 | date_ranges必須、有効メトリクス一覧 |
+| Ad Platform (Meta) | 20 | 全ツールのパラメータ、出力形式 |
+| WordPress | 26×2 | 主要ツールのパラメータ仕様 |
+| Candidate Insight | 4 | 全ツールのパラメータ、出力形式 |
+
+**期待される全体効果**:
+| 問題 | 修正前 | 修正後 |
+|------|--------|--------|
+| N+1クエリ | 25秒 | **0.5秒** (-98%) |
+| 許可確認 | 28秒 | **0秒** (-100%) |
+| パラメータエラー | リトライ多発 | **1-2回で成功** |
+| ツール選択ミス | 頻発 | **自動選択マトリクスで回避** |
+
+**技術的知見**:
+- Supabase `.in_()` メソッドでIN句バッチ取得（最大100件）
+- 「即時実行パターン」表をインストラクションに入れるとモデルが正しいツール選択をしやすい
+- パラメータエラー（Ahrefs `where: ""`）は「省略」を明記しないと空文字列を渡してしまう
+- 全エージェントに「許可を求めるな」ルールを入れることで、不要な確認ターンを排除
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
