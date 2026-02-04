@@ -40,7 +40,9 @@ import type {
   ToolActivityItem,
   ReasoningActivityItem,
   SubAgentActivityItem,
+  ChartActivityItem,
 } from "@/lib/marketing/types";
+import { ChartRenderer } from "./charts";
 
 // ---------------------------------------------------------------------------
 // Sub-agent configuration
@@ -337,12 +339,20 @@ const markdownComponents: Components = {
 // ---------------------------------------------------------------------------
 
 function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Default expanded when running (user requested)
+  const [isExpanded, setIsExpanded] = useState(item.isRunning);
   const config = getAgentConfig(item.agent);
   const Icon = config.icon;
 
   const toolCalls = item.toolCalls || [];
   const hasDetails = toolCalls.length > 0 || item.reasoningContent;
+
+  // Auto-expand when new details arrive during running
+  useEffect(() => {
+    if (item.isRunning && hasDetails) {
+      setIsExpanded(true);
+    }
+  }, [item.isRunning, hasDetails]);
 
   return (
     <div className="space-y-1.5">
@@ -372,10 +382,10 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
         )}
       </button>
 
-      {/* Expanded details - tool calls and reasoning */}
+      {/* Expanded details - tool calls and reasoning (full content, no line-clamp) */}
       {isExpanded && hasDetails && (
-        <div className="ml-3 pl-2.5 border-l border-[#e5e7eb] space-y-1">
-          {/* Tool calls */}
+        <div className="ml-3 pl-2.5 border-l border-[#e5e7eb] space-y-1.5">
+          {/* Tool calls - chronological display */}
           {toolCalls.map((tc, idx) => {
             const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
             const toolLabel = TOOL_LABELS[tc.toolName] || tc.toolName;
@@ -391,7 +401,7 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
                 `}
               >
                 <ToolIcon className="w-2.5 h-2.5 shrink-0" />
-                <span className="truncate max-w-[150px]">{toolLabel}</span>
+                <span className="truncate max-w-[200px]">{toolLabel}</span>
                 {tc.isComplete ? (
                   <span className="text-[#10b981]">✓</span>
                 ) : (
@@ -401,13 +411,15 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
             );
           })}
 
-          {/* Reasoning */}
+          {/* Reasoning - FULL content with markdown rendering (no line-clamp) */}
           {item.reasoningContent && (
             <div className="flex items-start gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#c0c4cc] mt-1.5 shrink-0" />
-              <p className="text-[10px] text-[#9ca3af] leading-relaxed line-clamp-2">
-                {item.reasoningContent}
-              </p>
+              <Brain className="w-3 h-3 shrink-0 mt-0.5 text-[#c0c4cc]" />
+              <div className="text-[10px] text-[#9ca3af] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_li]:text-[10px] [&_li]:text-[#9ca3af] [&_strong]:text-[#7f8694] [&_*]:text-[10px] [&_p]:last:mb-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {item.reasoningContent}
+                </ReactMarkdown>
+              </div>
             </div>
           )}
         </div>
@@ -569,6 +581,18 @@ function ActivityTimeline({
                       idx === group.items.length - 1
                     }
                     isStreaming={isStreaming}
+                  />
+                ))}
+              </div>
+            );
+
+          case "chart":
+            return (
+              <div key={groupIdx} className="space-y-2">
+                {group.items.map((item) => (
+                  <ChartRenderer
+                    key={item.id}
+                    spec={(item as ChartActivityItem).spec}
                   />
                 ))}
               </div>

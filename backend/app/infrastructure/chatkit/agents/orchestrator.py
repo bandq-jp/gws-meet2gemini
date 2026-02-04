@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Tuple
 from agents import Agent, CodeInterpreterTool, ModelSettings, WebSearchTool
 from openai.types.shared.reasoning import Reasoning
 
+from app.infrastructure.marketing.chart_tools import CHART_TOOLS
 from .analytics_agent import AnalyticsAgentFactory
 from .ad_platform_agent import AdPlatformAgentFactory
 from .seo_agent import SEOAgentFactory
@@ -119,10 +120,34 @@ ORCHESTRATOR_INSTRUCTIONS = """
 
 ---
 
+## 中間報告ルール（重要）
+- ツール実行の前後に、**今何をしているか・次に何をするかを短いテキストで報告**せよ
+- ユーザーはリアルタイムで行動を見ている。無言でツールを連続実行するな
+- 例:
+  - 「まずGA4からセッションデータを取得します。」→ call_analytics_agent
+  - 「データが取れました。次にチャートで可視化します。」→ render_chart
+- ただし中間報告は1〜2文の短文にせよ。冗長な説明は不要
+
+---
+
+## チャート描画ルール（render_chart）
+- 数値データを取得したら、**積極的にチャートで可視化**せよ
+- テーブルよりもチャートの方がユーザーは理解しやすい
+- チャートタイプの選び方:
+  - 時系列トレンド → `line` (例: 日別セッション推移)
+  - カテゴリ比較 → `bar` (例: チャネル別獲得数)
+  - 構成比 → `pie`/`donut` (例: デバイス別比率)
+  - ファネル → `funnel` (例: ステータス別転換)
+  - 多次元比較 → `radar` (例: 複数KPI比較)
+- render_chartを呼び出す前にテキストで「チャートで可視化します」と伝えてから呼び出せ
+
+---
+
 ## 回答方針
-- データは表形式で見やすく整理
+- データは表形式やチャートで見やすく整理
 - 複数ソースの結果を統合
 - アクション可能な提案を含める
+- チャートで可視化可能なデータは積極的にrender_chartを使う
 """
 
 
@@ -226,7 +251,7 @@ class OrchestratorAgentFactory:
         return Agent(
             name="MarketingOrchestrator",
             instructions=instructions,
-            tools=native_tools + sub_agent_tools,
+            tools=native_tools + sub_agent_tools + list(CHART_TOOLS),
             model=self._settings.marketing_agent_model,
             model_settings=model_settings,
             tool_use_behavior="run_llm_again",

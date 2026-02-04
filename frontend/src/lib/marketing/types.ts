@@ -88,10 +88,48 @@ export interface AskUserEvent extends BaseStreamEvent {
   questions: AskUserQuestionItem[];
 }
 
+// Chart Y-axis key configuration
+export interface ChartYKey {
+  key: string;
+  label: string;
+  color?: string;
+}
+
+// Chart table column configuration
+export interface ChartColumn {
+  key: string;
+  label: string;
+  align?: "left" | "right" | "center";
+}
+
+// Chart specification for render_chart function tool
 export interface ChartSpec {
-  type: string;
-  data: unknown;
-  options?: Record<string, unknown>;
+  type:
+    | "line"
+    | "bar"
+    | "area"
+    | "pie"
+    | "donut"
+    | "scatter"
+    | "radar"
+    | "funnel"
+    | "table";
+  title?: string;
+  description?: string;
+  data: Record<string, unknown>[];
+  // line/bar/area/scatter
+  xKey?: string;
+  yKeys?: ChartYKey[];
+  // pie/donut
+  nameKey?: string;
+  valueKey?: string;
+  // table
+  columns?: ChartColumn[];
+  // radar
+  categories?: string[];
+  // funnel
+  nameField?: string;
+  valueField?: string;
 }
 
 export interface ChartEvent extends BaseStreamEvent {

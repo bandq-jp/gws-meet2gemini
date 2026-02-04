@@ -15,6 +15,7 @@ import type {
   ToolActivityItem,
   ReasoningActivityItem,
   SubAgentActivityItem,
+  ChartActivityItem,
   StreamEvent,
   ChatStreamRequest,
   ModelAsset,
@@ -232,6 +233,16 @@ export function useMarketingChat(
               sequence: seqRef.current++,
               content: event.content,
             } as ReasoningActivityItem);
+            break;
+          }
+
+          case "chart": {
+            items.push({
+              id: generateId(),
+              kind: "chart",
+              sequence: seqRef.current++,
+              spec: event.spec,
+            } as ChartActivityItem);
             break;
           }
 

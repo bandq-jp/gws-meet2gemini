@@ -2214,6 +2214,144 @@ structured_map = _get_all_structured_data_by_zoho_ids(record_ids)  # 1回のク�
 - パラメータエラー（Ahrefs `where: ""`）は「省略」を明記しないと空文字列を渡してしまう
 - 全エージェントに「許可を求めるな」ルールを入れることで、不要な確認ターンを排除
 
+### 24. チャート出力機能実装 (2026-02-05)
+
+**背景**: マーケティングAIでデータを可視化するためのインタラクティブチャート機能を追加
+
+**実装内容**:
+
+#### Backend: `render_chart` Function Tool
+
+**新規ファイル**: `backend/app/infrastructure/marketing/chart_tools.py`
+```python
+@function_tool
+async def render_chart(
+    ctx: ToolContext[MarketingChatContext],
+    chart_spec: str,  # JSON文字列
+) -> str:
+    """チャットUIにインタラクティブなチャートを描画する。"""
+    spec = json.loads(chart_spec)
+    await ctx.context.emit_event({"type": "chart", "spec": spec})
+    return f"チャート「{spec.get('title', '')}」を描画しました。"
+
+CHART_TOOLS = [render_chart]
+```
+
+**循環インポート回避**:
+- `CHART_TOOLS`と`MarketingChatContext`を`chart_tools.py`に分離
+- `agent_service.py`では遅延インポート (`from ... import OrchestratorAgentFactory`)
+
+**オーケストレーターへの統合**:
+- `orchestrator.py`: `tools=native_tools + sub_agent_tools + list(CHART_TOOLS)`
+- チャート描画ルールをインストラクションに追加
+
+#### Frontend: Recharts統合
+
+**依存関係**: `recharts@3.7.0`
+
+**新規ファイル群**: `frontend/src/components/marketing/charts/`
+| ファイル | 説明 |
+|---------|------|
+| `ChartRenderer.tsx` | メインレンダラー（タイプ別ディスパッチ） |
+| `LineChartView.tsx` | 時系列トレンド |
+| `BarChartView.tsx` | カテゴリ比較 |
+| `AreaChartView.tsx` | 累積/スタックエリア |
+| `PieChartView.tsx` | 円グラフ/ドーナツ |
+| `RadarChartView.tsx` | レーダーチャート |
+| `FunnelChartView.tsx` | ファネル（横棒） |
+| `TableChartView.tsx` | テーブル表示 |
+| `chart-colors.ts` | カラーパレット、formatNumber |
+
+**ChartSpec型** (`types.ts`):
+```typescript
+export interface ChartSpec {
+  type: "line" | "bar" | "area" | "pie" | "donut" | "scatter" | "radar" | "funnel" | "table";
+  title?: string;
+  description?: string;
+  data: Record<string, unknown>[];
+  xKey?: string;
+  yKeys?: ChartYKey[];
+  nameKey?: string;
+  valueKey?: string;
+  columns?: ChartColumn[];
+  nameField?: string;
+  valueField?: string;
+}
+```
+
+**hook更新** (`use-marketing-chat.ts`):
+- `case "chart":` イベントハンドリング追加
+- `ChartActivityItem`をアクティビティに追加
+
+**ChatMessage更新**:
+- `ActivityTimeline`に`case "chart":`追加
+- `ChartRenderer`でレンダリング
+
+**技術的知見**:
+- Rechartsの`Tooltip`の`formatter`型: `value: number | undefined` なので型アノテーションを付けない
+- `PieChart`の`label`の`percent`: `undefined`の可能性があるので`?? 0`でデフォルト値
+- `ResponsiveContainer`でレスポンシブ対応（`ChartContainer`は不要）
+
+### 25. サブエージェントUI改善 (2026-02-05)
+
+**ユーザー要望**:
+1. 実行中はデフォルトで展開（現在は閉じている）
+2. 推論内容は省略せず全文表示（現在は`line-clamp-2`）
+3. マークダウンレンダリング
+
+**修正内容** (`ChatMessage.tsx`の`SubAgentBadge`):
+
+```tsx
+// Before
+const [isExpanded, setIsExpanded] = useState(false);
+
+// After - 実行中はデフォルト展開
+const [isExpanded, setIsExpanded] = useState(item.isRunning);
+
+// 新規: 詳細が到着したら自動展開
+useEffect(() => {
+  if (item.isRunning && hasDetails) {
+    setIsExpanded(true);
+  }
+}, [item.isRunning, hasDetails]);
+```
+
+**推論表示の改善**:
+```tsx
+// Before
+<p className="text-[10px] text-[#9ca3af] leading-relaxed line-clamp-2">
+  {item.reasoningContent}
+</p>
+
+// After - line-clamp削除 + マークダウンレンダリング
+<div className="text-[10px] text-[#9ca3af] leading-relaxed ...">
+  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+    {item.reasoningContent}
+  </ReactMarkdown>
+</div>
+```
+
+**UI改善詳細**:
+- ツール名の`max-w`を150px→200pxに拡大
+- 推論アイコンを`Brain`に変更
+- spacing調整 (`space-y-1` → `space-y-1.5`)
+
+### 26. 中間報告機能（既存機能確認） (2026-02-05)
+
+**確認結果**: オーケストレーターインストラクションに「中間報告ルール」が既に実装済み
+
+```markdown
+## 中間報告ルール（重要）
+- ツール実行の前後に、**今何をしているか・次に何をするかを短いテキストで報告**せよ
+- ユーザーはリアルタイムで行動を見ている。無言でツールを連続実行するな
+- 例:
+  - 「まずGA4からセッションデータを取得します。」→ call_analytics_agent
+  - 「データが取れました。次にチャートで可視化します。」→ render_chart
+- ただし中間報告は1〜2文の短文にせよ
+```
+
+**動作確認**: SSEストリーミングはinterleaved timeline方式で、テキストとツール呼び出しが到着順に表示される
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

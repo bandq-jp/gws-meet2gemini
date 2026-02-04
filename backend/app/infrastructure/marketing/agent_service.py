@@ -8,6 +8,10 @@ Optimizations:
 - Simple query bypass: greetings and general questions skip orchestrator entirely
 - Lazy MCP initialization: servers connect only when sub-agents are called
 - CompactMCPServer: GA4 output compressed 76%
+
+Chart Support:
+- render_chart function tool for all agents to emit interactive charts
+- Supports: line, bar, area, pie, donut, scatter, radar, funnel, table
 """
 from __future__ import annotations
 
@@ -15,17 +19,16 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from agents import Runner, RunConfig, Agent, ModelSettings
 from agents.items import ReasoningItem
 from openai import AsyncOpenAI
 
-from app.infrastructure.chatkit.agents import OrchestratorAgentFactory
 from app.infrastructure.chatkit.keepalive import with_keepalive
 from app.infrastructure.chatkit.mcp_manager import MCPSessionManager
 from app.infrastructure.config.settings import Settings, get_settings
+from app.infrastructure.marketing.chart_tools import MarketingChatContext, CHART_TOOLS
 
 if TYPE_CHECKING:
     from agents.stream_events import StreamEvent
@@ -74,15 +77,6 @@ def _serialize_input_list(items: list) -> list[dict]:
     return result
 
 
-@dataclass
-class MarketingChatContext:
-    """Context passed to tool functions via ToolContext."""
-    emit_event: Callable[[dict], Awaitable[None]]
-    user_id: str
-    user_email: str
-    conversation_id: str
-
-
 class MarketingAgentService:
     """
     Service for streaming marketing agent responses.
@@ -95,6 +89,9 @@ class MarketingAgentService:
         settings: Settings | None = None,
         mcp_manager: MCPSessionManager | None = None,
     ):
+        # Lazy import to avoid circular dependency
+        from app.infrastructure.chatkit.agents import OrchestratorAgentFactory
+
         self._settings = settings or get_settings()
         self._mcp_manager = mcp_manager
         self._agent_factory = OrchestratorAgentFactory(self._settings)
