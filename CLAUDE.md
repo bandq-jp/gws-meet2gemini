@@ -2028,6 +2028,53 @@ uv run python scripts/test_response_time.py
 - Gemini via LiteLLMはツール呼び出しが不安定な場合がある
 - オーケストレーターはOpenAI (gpt-5.1/5.2) 推奨
 
+### 24. サブエージェント最適化: ツールAPIパラメータ修正 (2026-02-05)
+
+**問題**: OpenAI Dashboardログで以下のエラーが大量発生
+- SEO Agent: 38秒かかりAhrefs APIエラー多発
+- Analytics Agent: 77秒かかり「実行してよろしいですか？」と許可を求める
+
+**Ahrefs API カラム名修正** (`seo_agent.py`):
+| 指示書の記載 | 実際のAPIカラム名 | 影響ツール |
+|-------------|-----------------|-----------|
+| `position` | `best_position` | organic-keywords, top-pages |
+| `traffic` | `sum_traffic` | organic-keywords, top-pages, organic-competitors |
+| `difficulty` | `keyword_difficulty` | organic-keywords, keywords-explorer |
+| なし | `date` (必須) | すべてのsite-explorerツール |
+
+**Analytics Agent指示修正** (`analytics_agent.py`):
+- 「許可を求めるな」ルールを追加
+- 即時実行パターン表を追加
+- 典型的なリクエスト→ツールマッピングを明示
+
+**全サブエージェントModelSettings修正**:
+| ファイル | 修正内容 |
+|---------|---------|
+| `ad_platform_agent.py` | `verbosity="medium"` 削除、`parallel_tool_calls=True`追加 |
+| `candidate_insight_agent.py` | `verbosity="medium"` 削除、`parallel_tool_calls=True`追加 |
+| `zoho_crm_agent.py` | `verbosity="medium"` 削除、`parallel_tool_calls=True`追加 |
+| `analytics_agent.py` | `verbosity="medium"` 削除、`summary="concise"`に変更 |
+
+**期待効果**:
+| 指標 | 最適化前 | 最適化後 |
+|------|---------|---------|
+| SEO Agent | 38秒 (リトライ多発) | ~10秒 (1-2回呼び出し) |
+| Analytics Agent | 77秒 (許可確認) | ~15秒 (即時実行) |
+| 無効パラメータ | 4ファイルに存在 | 0 |
+
+**技術的知見**:
+- Ahrefs API v3: `date`パラメータが多くのエンドポイントで**必須**
+- Ahrefs API: カラム名は公式ドキュメントと実際のAPIで異なる場合がある
+- エラーログから正確なカラム名を逆算可能
+- サブエージェントの指示に「許可を求めない」を明示しないと、許可確認で時間を浪費
+
+**修正ファイル一覧**:
+- `backend/app/infrastructure/chatkit/agents/seo_agent.py` - Ahrefsカラム名修正
+- `backend/app/infrastructure/chatkit/agents/analytics_agent.py` - 指示・ModelSettings修正
+- `backend/app/infrastructure/chatkit/agents/ad_platform_agent.py` - ModelSettings修正
+- `backend/app/infrastructure/chatkit/agents/candidate_insight_agent.py` - ModelSettings修正
+- `backend/app/infrastructure/chatkit/agents/zoho_crm_agent.py` - ModelSettings修正
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

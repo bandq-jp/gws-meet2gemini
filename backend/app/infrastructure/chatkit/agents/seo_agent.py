@@ -122,28 +122,45 @@ class SEOAgentFactory(SubAgentFactory):
 
 ### site-explorer-organic-keywords
 オーガニックキーワード一覧。
-- 必須: `target`
-- オプション: `country` (デフォルト: us), `limit`, `offset`, `order_by`, `order`, `where`
-- カラム: `keyword`, `position`, `volume`, `traffic`, `traffic_value`, `url`, `difficulty`, `cpc`
-- 例: `order_by: "traffic", order: "desc", limit: 20`
+- 必須: `target`, `date` (YYYY-MM-DD形式、例: "2026-02-01")
+- オプション: `country` (デフォルト: us), `limit`, `offset`, `order_by`, `order`, `where`, `select`
+- **正確なカラム名** (※これ以外は無効):
+  - `keyword` - キーワード
+  - `best_position` - 最良順位 (※positionではない)
+  - `best_position_url` - ランクインURL
+  - `sum_traffic` - 推定トラフィック (※trafficではない)
+  - `volume` - 検索ボリューム
+  - `keyword_difficulty` - 難易度 (※difficultyではない)
+  - `cpc` - クリック単価
+- 例: `date: "2026-02-01", select: "keyword,best_position,sum_traffic,volume", order_by: "sum_traffic", order: "desc", limit: 20`
 
 ### site-explorer-top-pages
 トラフィック上位ページ。
-- 必須: `target`
-- オプション: `country`, `limit`, `order_by`, `order`
-- カラム: `url`, `traffic`, `traffic_value`, `keywords`, `top_keyword`, `position`
-- 例: `order_by: "traffic", order: "desc", limit: 10`
+- 必須: `target`, `date` (YYYY-MM-DD形式)
+- オプション: `country`, `limit`, `order_by`, `order`, `select`
+- **正確なカラム名**:
+  - `url` - ページURL
+  - `sum_traffic` - 推定トラフィック (※trafficではない)
+  - `uniq_keywords` - キーワード数
+  - `top_keyword` - メインキーワード
+  - `top_keyword_best_position` - メインキーワード順位
+- 例: `date: "2026-02-01", select: "url,sum_traffic,uniq_keywords,top_keyword", order_by: "sum_traffic", order: "desc", limit: 10`
 
 ### site-explorer-pages-by-traffic
 トラフィック別ページ（top-pagesと同様）。
-- カラム: `url`, `traffic`, `keywords`, `referring_domains`
+- 必須: `target`, `date` (YYYY-MM-DD形式)
+- **正確なカラム名**: `url`, `sum_traffic`, `uniq_keywords`, `refdomains`
 
 ### site-explorer-organic-competitors
 オーガニック競合サイト一覧。
-- 必須: `target`
-- オプション: `limit`, `order_by`, `order`
-- カラム: **`competitor_domain`** (※domainではない), `common_keywords`, `competitor_keywords`, `traffic`, `traffic_value`
-- 例: `select: "competitor_domain,common_keywords,traffic", order_by: "traffic", order: "desc"`
+- 必須: `target`, `date` (YYYY-MM-DD形式)
+- オプション: `limit`, `order_by`, `order`, `select`
+- **正確なカラム名**:
+  - `competitor_domain` - 競合ドメイン (※domainではない)
+  - `common_keywords` - 共通キーワード数
+  - `competitor_keywords` - 競合キーワード数
+  - `sum_traffic` - 推定トラフィック (※trafficではない)
+- 例: `date: "2026-02-01", select: "competitor_domain,common_keywords,sum_traffic", order_by: "sum_traffic", order: "desc"`
 
 ### site-explorer-backlinks-stats
 被リンク統計（サマリー）。
@@ -177,19 +194,19 @@ class SEOAgentFactory(SubAgentFactory):
 ### keywords-explorer-overview
 キーワードの詳細情報。
 - 必須: `keyword`, `country` (2文字コード: jp, us, gb等)
-- レスポンス: `volume`, `difficulty`, `cpc`, `clicks`, `global_volume`
+- レスポンス: `volume`, `keyword_difficulty` (※difficultyではない), `cpc`, `clicks`, `global_volume`
 
 ### keywords-explorer-related-terms
 関連キーワード。
 - 必須: `keyword`, `country`
 - オプション: `limit`
-- カラム: `keyword`, `volume`, `difficulty`, `cpc`
+- **正確なカラム名**: `keyword`, `volume`, `keyword_difficulty`, `cpc`
 
 ### keywords-explorer-matching-terms
 部分一致キーワード。
 - 必須: `keyword`, `country`
 - オプション: `limit`
-- カラム: `keyword`, `volume`, `difficulty`
+- **正確なカラム名**: `keyword`, `volume`, `keyword_difficulty`
 
 ### keywords-explorer-volume-history
 検索ボリューム推移（月次）。

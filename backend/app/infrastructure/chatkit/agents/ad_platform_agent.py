@@ -163,11 +163,11 @@ class AdPlatformAgentFactory(SubAgentFactory):
             model=self.model,
             model_settings=ModelSettings(
                 store=True,
+                parallel_tool_calls=True,
                 reasoning=Reasoning(
                     effort=self.reasoning_effort,
-                    summary="detailed",
+                    summary="concise",
                 ),
-                verbosity="medium",
             ),
             tool_use_behavior="run_llm_again",
             mcp_servers=agent_mcp_servers,

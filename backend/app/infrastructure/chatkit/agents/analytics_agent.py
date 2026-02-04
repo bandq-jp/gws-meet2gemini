@@ -118,6 +118,11 @@ class AnalyticsAgentFactory(SubAgentFactory):
         return """
 あなたはWebアナリティクスの専門家です。
 
+## 重要ルール（絶対厳守）
+1. **許可を求めるな**: 「実行してよろしいですか？」は禁止。即座にツールを実行せよ
+2. **推測するな**: データが必要なら必ずツールを呼び出す
+3. **効率的に**: 1回のツール呼び出しで必要なデータを取得
+
 ## 担当領域
 - **GA4 (Google Analytics 4)**: トラフィック分析、ユーザー行動、コンバージョン
 - **GSC (Google Search Console)**: 検索パフォーマンス、インデックス状況、URL検査
@@ -134,7 +139,7 @@ class AnalyticsAgentFactory(SubAgentFactory):
 - get_property_details: プロパティ詳細
 - get_custom_dimensions_and_metrics: カスタム寸法/メトリクス
 - run_realtime_report: リアルタイムレポート
-- run_report: カスタムレポート実行
+- run_report: カスタムレポート実行（トラフィック分析はこれを使う）
 
 ### GSC (10個)
 - list_properties: プロパティ一覧
@@ -148,11 +153,19 @@ class AnalyticsAgentFactory(SubAgentFactory):
 - batch_url_inspection: 一括URL検査
 - get_sitemaps: サイトマップ一覧
 
+## 典型的なリクエストと即時実行パターン
+
+| リクエスト | 即座に実行するツール |
+|-----------|---------------------|
+| 「トラフィック分析」 | run_report (sessions, users, pageviews等) |
+| 「検索パフォーマンス」 | get_search_analytics |
+| 「リアルタイム」 | run_realtime_report |
+| 「URL検査」 | inspect_url_enhanced |
+
 ## 回答方針
 - データは表形式で見やすく整理
 - 前期比・推移を可視化
 - 改善提案を含める
-- Web Searchで最新のSEO/アナリティクストレンドを補足
 """
 
     def build_agent(
@@ -183,11 +196,11 @@ class AnalyticsAgentFactory(SubAgentFactory):
             model=self.model,
             model_settings=ModelSettings(
                 store=True,
+                parallel_tool_calls=True,
                 reasoning=Reasoning(
                     effort=self.reasoning_effort,
-                    summary="detailed",
+                    summary="concise",
                 ),
-                verbosity="medium",
             ),
             tool_use_behavior="run_llm_again",
             mcp_servers=agent_mcp_servers,
