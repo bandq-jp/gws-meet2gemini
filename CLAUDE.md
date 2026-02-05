@@ -855,6 +855,76 @@ cd backend && uv run python scripts/test_token_usage.py
 - システム指示の情報は専用ツール（`get_channel_definitions`）に移動可能
 - ツールdocstringは最初の1文が最も重要（OpenAI APIでトランケートされる場合あり）
 
+### 12. Google ADK移行可能性調査 (2026-02-05)
+
+**背景**: マーケティングAIチャットのOpenAI Agents SDKをGoogle ADK (Agent Development Kit)に移行できるか調査
+
+**調査結果**: **移行は技術的に可能だが、現時点では非推奨**
+
+**Google ADK概要** (v1.23.0, 2026-01-22リリース):
+- **公式**: [google.github.io/adk-docs](https://google.github.io/adk-docs/)
+- **GitHub**: [google/adk-python](https://github.com/google/adk-python)
+- **PyPI**: [google-adk](https://pypi.org/project/google-adk/)
+- Gemini最適化だが、LiteLLM経由でOpenAI/Claude等もサポート
+
+**機能比較**:
+
+| 機能 | OpenAI Agents SDK | Google ADK | 互換性 |
+|------|-------------------|------------|--------|
+| Agent定義 | `Agent(name, model, tools)` | `LlmAgent(name, model, tools)` | ✅ 類似 |
+| カスタムツール | `@function_tool` | `FunctionTool` | ✅ 類似 |
+| MCP STDIO | `MCPServerStdio` | `MCPToolset + StdioConnectionParams` | ✅ 対応 |
+| MCP HTTP | `HostedMCPTool` | `MCPToolset + StreamableHTTPConnectionParams` | ✅ 対応 |
+| ストリーミング | `Runner.run_streamed()` | `runner.run_live()` | ✅ 対応 |
+| セッション管理 | ChatKit Store | `SessionService` | ⚠️ 要実装 |
+| 会話UI | ChatKit React | AG-UI + CopilotKit | ❌ 大幅変更 |
+| Reasoning | ネイティブ | `BuiltInPlanner` (Geminiのみ) | ⚠️ GPT非対応 |
+
+**移行しない理由**:
+
+1. **ChatKitの代替構築コストが大きい**
+   - ADKには`adk web`開発UIはあるがプロダクション非対応
+   - [AG-UIプロトコル](https://github.com/ag-ui-protocol/ag-ui) + CopilotKitが推奨だがChatKit程成熟していない
+   - フロントエンド全面書き換え（推定3-4週間）
+
+2. **GPT-5.x継続ならメリット薄い**
+   - ADKはGemini最適化
+   - LiteLLM経由GPTは構造化出力・Reasoning表示で問題報告あり ([Issue #217](https://github.com/google/adk-python/issues/217), [Issue #2982](https://github.com/google/adk-python/issues/2982))
+
+3. **現在の実装が安定稼働中**
+   - SSEキープアライブ実装済み
+   - MCP統合（ローカル/リモート）完備
+   - ChatKitネイティブReasoning表示対応
+
+**移行工数見積り**:
+- バックエンド: 2-3週間 (Agent書き換え、MCP移行、セッション実装)
+- フロントエンド: 3-4週間 (ChatKit削除、AG-UI導入、UI再実装)
+- **合計: 5-7週間**
+
+**将来的な移行検討条件**:
+1. Gemini 3.0等でGPT-5.xを大幅に上回る性能が出た場合
+2. AG-UI/CopilotKitがChatKit並みに成熟した場合
+3. OpenAI Agents SDKのサポート終了が発表された場合
+
+**ADK MCP統合例** (参考):
+```python
+from google.adk.tools.mcp_tool import McpToolset
+from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
+from mcp import StdioServerParameters
+
+McpToolset(
+    connection_params=StdioConnectionParams(
+        server_params=StdioServerParameters(
+            command='analytics-mcp',
+            env={"GOOGLE_APPLICATION_CREDENTIALS": sa_path}
+        )
+    ),
+    tool_filter=['get_ga4_report', 'list_properties']  # ツールフィルタ
+)
+```
+
+**結論**: **現状維持 (OpenAI Agents SDK + ChatKit) を推奨**
+
 ---
 
 ## 自己改善ログ
