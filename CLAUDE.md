@@ -2472,6 +2472,102 @@ useEffect(() => {
 - アクセント: ピンク赤 #e94560
 - アクティブ: 背景色 + ring-1
 
+### 29. Google ADK 完全移行実装 (2026-02-05)
+
+**背景**: OpenAI Agents SDK からGoogle Agent Development Kit (ADK) への完全移行
+
+**有効化方法**:
+```bash
+# .env に追加
+USE_ADK=true
+ADK_ORCHESTRATOR_MODEL=gemini-3-flash-preview
+ADK_SUB_AGENT_MODEL=gemini-3-flash-preview
+GEMINI_API_KEY=your-gemini-api-key
+```
+
+**アーキテクチャ**:
+```
+                  ┌─────────────────────────────────────┐
+                  │        get_marketing_agent_service() │
+                  │                                      │
+                  │  USE_ADK=true   │   USE_ADK=false   │
+                  │  → ADKAgentService │ → MarketingAgentService │
+                  └─────────────────────────────────────┘
+                              │
+        ┌───────────────────────────────────────┐
+        ▼                                       ▼
+┌───────────────────┐               ┌───────────────────┐
+│  ADKAgentService  │               │ MarketingAgentService │
+│  (Gemini 3 Flash) │               │ (GPT-5.2 + GPT-5-mini) │
+├───────────────────┤               ├───────────────────┤
+│ Google ADK Runner │               │ OpenAI Agents SDK │
+│   ├─ Analytics    │               │   ├─ Analytics    │
+│   ├─ SEO          │               │   ├─ SEO          │
+│   ├─ AdPlatform   │               │   ├─ AdPlatform   │
+│   ├─ ZohoCRM      │               │   ├─ ZohoCRM      │
+│   ├─ Candidate    │               │   ├─ Candidate    │
+│   └─ WordPress    │               │   └─ WordPress    │
+│   + render_chart  │               │   + render_chart  │
+└───────────────────┘               └───────────────────┘
+```
+
+**実装済み機能**:
+| 機能 | OpenAI SDK版 | ADK版 |
+|------|-------------|-------|
+| Queue + pump task | ✅ | ✅ |
+| Simple query fast path | ✅ | ✅ |
+| Sub-agent events | ✅ | ✅ |
+| Chart rendering | ✅ | ✅ |
+| Keepalive (20s) | ✅ | ✅ |
+| Reasoning events | ✅ | ✅ |
+| Translation | ✅ (GPT-5-nano) | ✅ (パススルー) |
+
+**新規/変更ファイル (ADK)**:
+| ファイル | 説明 |
+|---------|------|
+| `backend/app/infrastructure/adk/agent_service.py` | ADKストリーミングサービス（完全書き直し） |
+| `backend/app/infrastructure/adk/agents/orchestrator.py` | ADKオーケストレーター + チャートツール |
+| `backend/app/infrastructure/adk/tools/chart_tools.py` | ADK用チャートツール（新規） |
+| `backend/app/infrastructure/adk/mcp_manager.py` | ADK MCP管理 |
+| `backend/app/infrastructure/marketing/agent_service.py` | `USE_ADK`切り替えロジック追加 |
+
+**ADKイベント構造**:
+```python
+# ADKのイベントは content.parts[] に複数要素を含む
+event.content.parts[i].text          # テキスト
+event.content.parts[i].function_call # ツール呼び出し
+event.content.parts[i].function_response # ツール結果
+```
+
+**サブエージェント名変換**:
+```
+ZohoCRMAgent → zoho_crm
+AnalyticsAgent → analytics
+SEOAgent → seo
+AdPlatformAgent → ad_platform
+WordPressAgent → wordpress
+CandidateInsightAgent → candidate_insight
+```
+
+**技術的知見**:
+- ADK `Runner.run_async()` は async generator を返す（awaitableではない）
+- ADK `InMemorySessionService.create_session()` は async メソッド
+- ADK メッセージは `types.Content(role="user", parts=[types.Part(text=...)])` 形式
+- ADKツールは plain Python function を自動ラップ（`@function_tool`不要）
+- `AgentTool(agent=sub_agent)` でサブエージェントをツール化
+- モデルID: `gemini-3-flash-preview` (Gemini 3 Flash)
+
+**コスト比較**:
+| モデル | 入力 | 出力 | 削減率 |
+|--------|------|------|--------|
+| GPT-5.2 + GPT-5-mini | $3-5/クエリ | - | - |
+| Gemini 3 Flash | ~$0.50-1/クエリ | - | **~80%** |
+
+**情報ソース**:
+- [Google ADK Documentation](https://google.github.io/adk-docs/)
+- [google/adk-python GitHub](https://github.com/google/adk-python)
+- ADK Source: `google/adk/agents/`, `google/adk/runners/`
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

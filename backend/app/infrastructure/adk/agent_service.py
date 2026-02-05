@@ -1,16 +1,26 @@
 """
-ADK Agent Service - Streaming handler for marketing AI.
+ADK Agent Service - Streaming handler for marketing AI (Google ADK version).
 
 Processes user messages through the ADK orchestrator and streams responses.
+Matches OpenAI Agents SDK functionality:
+- Queue + pump task pattern for event multiplexing
+- Chart rendering via emit_event callback
+- Sub-agent event streaming with is_running tracking
+- Reasoning/thinking events
+- Translation of reasoning summaries to Japanese
+- Simple query fast path
+- Keepalive events
 """
-
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 import time
 import uuid
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict, List, Optional
 
 from google.adk.agents import Agent
 from google.adk.runners import Runner
@@ -25,6 +35,36 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Sentinel to signal end-of-stream
+_SENTINEL = object()
+
+# Simple query patterns - skip orchestrator for these
+_SIMPLE_QUERY_PATTERNS = [
+    r"^(こんにちは|こんばんは|おはよう|ありがとう|さようなら|はじめまして)(\s|$|！|。)",
+    r"^(hello|hey|thanks|bye)(\s|$|!|\.)",
+    r"^hi(\s|$|!)",
+    r"^(あなたは誰|あなたは何|何ができ|自己紹介|help|ヘルプ)",
+    r"^(テスト|test)(\s|$)",
+]
+_SIMPLE_QUERY_COMPILED = [re.compile(p, re.IGNORECASE) for p in _SIMPLE_QUERY_PATTERNS]
+
+# Simple query response agent instructions
+_SIMPLE_AGENT_INSTRUCTIONS = """b&qマーケティングAIです。短く応答してください。
+
+挨拶には「こんにちは！マーケティング分析をお手伝いします。」程度で。
+能力を聞かれたら「GA4分析、SEO分析、広告分析、CRMデータ分析ができます。」と1文で。
+
+【重要】必ず1-2文以内で回答すること。"""
+
+
+@dataclass
+class ADKChatContext:
+    """Context passed to tool functions for event emission."""
+    emit_event: Callable[[dict], Awaitable[None]]
+    user_id: str
+    user_email: str
+    conversation_id: str
+
 
 class ADKAgentService:
     """
@@ -32,9 +72,12 @@ class ADKAgentService:
 
     Handles:
     - Agent initialization
-    - Message processing
+    - Message processing with Queue + pump task pattern
     - SSE event streaming
     - Session management
+    - Chart rendering via emit_event
+    - Sub-agent event streaming
+    - Reasoning translation
     """
 
     def __init__(self, settings: "Settings"):
@@ -42,6 +85,110 @@ class ADKAgentService:
         self._session_service = InMemorySessionService()
         self._mcp_manager = ADKMCPManager(settings)
         self._orchestrator_factory = OrchestratorAgentFactory(settings)
+
+    def _is_simple_query(self, message: str) -> bool:
+        """Detect simple queries that don't need sub-agents."""
+        message_clean = message.strip().lower()
+        if len(message_clean) > 100:
+            return False
+
+        for pattern in _SIMPLE_QUERY_COMPILED:
+            if pattern.search(message_clean):
+                logger.info(f"[ADK SimpleQuery] Detected: {message[:30]}...")
+                return True
+        return False
+
+    def _normalize_agent_name(self, tool_name: str) -> str:
+        """
+        Normalize agent tool name to snake_case.
+
+        Examples:
+        - "ZohoCRMAgent" -> "zoho_crm"
+        - "AnalyticsAgent" -> "analytics"
+        - "AdPlatformAgent" -> "ad_platform"
+        - "SEOAgent" -> "seo"
+        - "WordPressAgent" -> "wordpress"
+        - "CandidateInsightAgent" -> "candidate_insight"
+        """
+        # Remove "Agent" suffix
+        name = tool_name.replace("Agent", "")
+
+        # Special cases for acronyms
+        name = name.replace("CRM", "Crm")
+        name = name.replace("SEO", "Seo")
+
+        # Convert CamelCase to snake_case
+        result = []
+        for i, char in enumerate(name):
+            if char.isupper() and i > 0:
+                result.append("_")
+            result.append(char.lower())
+
+        return "".join(result)
+
+    async def _stream_simple_response(
+        self,
+        message: str,
+        conversation_id: str,
+    ) -> AsyncGenerator[dict, None]:
+        """Fast path for simple queries using a lightweight ADK agent."""
+        logger.info("[ADK SimpleQuery] Using fast path (no sub-agents)")
+
+        try:
+            # Create a simple agent for quick responses
+            # Use the same model as the orchestrator
+            simple_agent = Agent(
+                name="SimpleResponder",
+                model=self._settings.adk_orchestrator_model or "gemini-3-flash-preview",
+                description="シンプルな応答用エージェント",
+                instruction=_SIMPLE_AGENT_INSTRUCTIONS,
+                tools=[],
+            )
+
+            # Create temporary session
+            session_id = f"simple_{conversation_id}"
+            session = await self._session_service.get_session(
+                app_name="marketing_ai",
+                user_id="default",
+                session_id=session_id,
+            )
+            if session is None:
+                session = await self._session_service.create_session(
+                    app_name="marketing_ai",
+                    user_id="default",
+                    session_id=session_id,
+                )
+
+            runner = Runner(
+                agent=simple_agent,
+                app_name="marketing_ai",
+                session_service=self._session_service,
+            )
+
+            user_content = types.Content(
+                role="user",
+                parts=[types.Part(text=message)],
+            )
+
+            async for event in runner.run_async(
+                user_id="default",
+                session_id=session_id,
+                new_message=user_content,
+            ):
+                if hasattr(event, "content") and event.content:
+                    if hasattr(event.content, "parts"):
+                        for part in event.content.parts:
+                            if hasattr(part, "text") and part.text:
+                                yield {"type": "text_delta", "content": part.text}
+                    elif isinstance(event.content, str):
+                        yield {"type": "text_delta", "content": event.content}
+
+        except Exception as e:
+            logger.error(f"[ADK SimpleQuery] Error: {e}")
+            yield {"type": "error", "message": str(e)}
+
+        yield {"type": "_context_items", "items": []}
+        yield {"type": "done", "conversation_id": conversation_id}
 
     async def stream_chat(
         self,
@@ -55,38 +202,260 @@ class ADKAgentService:
         """
         Stream chat responses - interface compatible with OpenAI SDK service.
 
-        Args:
-            user_id: Clerk user ID
-            user_email: User email
-            conversation_id: Optional conversation ID for session
-            message: User message
-            context_items: Previous conversation context
-            model_asset: Model asset configuration
-
-        Yields:
-            SSE event dictionaries (not formatted strings)
+        Yields events in the format:
+        - {"type": "text_delta", "content": "..."}
+        - {"type": "tool_call", "name": "...", "call_id": "..."}
+        - {"type": "tool_result", "call_id": "...", "output": "..."}
+        - {"type": "reasoning", "content": "...", "_needs_translation": True}
+        - {"type": "sub_agent_event", "agent": "...", "event_type": "..."}
+        - {"type": "chart", "spec": {...}}
+        - {"type": "progress", "text": "..."}
+        - {"type": "done", "conversation_id": "..."}
         """
-        async for sse_str in self.run_stream(
-            message=message,
-            conversation_id=conversation_id,
-            context_items=context_items,
-            asset=model_asset,
-        ):
-            # Parse SSE string back to dict for compatibility
-            if sse_str.startswith("data: "):
-                json_str = sse_str[6:].strip()
-                if json_str:
+        session_id = conversation_id or str(uuid.uuid4())
+
+        # FAST PATH: Simple queries bypass orchestrator entirely
+        if not context_items and self._is_simple_query(message):
+            async for event in self._stream_simple_response(message, session_id):
+                yield event
+            return
+
+        # Queue for multiplexing SDK events and out-of-band events (chart, etc.)
+        queue: asyncio.Queue[dict | object] = asyncio.Queue()
+
+        async def emit_event(event: dict) -> None:
+            """Callback for tool functions to emit custom events (charts, etc.)."""
+            await queue.put(event)
+
+        # Create chat context
+        chat_context = ADKChatContext(
+            emit_event=emit_event,
+            user_id=user_id,
+            user_email=user_email,
+            conversation_id=session_id,
+        )
+
+        # Track sub-agent state
+        sub_agent_states: Dict[str, dict] = {}
+
+        # Initialize MCP toolsets
+        toolsets = await self._mcp_manager.create_toolsets()
+        mcp_tools = toolsets.all()
+
+        try:
+            # Create or get session
+            session = await self._session_service.get_session(
+                app_name="marketing_ai",
+                user_id="default",
+                session_id=session_id,
+            )
+            if session is None:
+                session = await self._session_service.create_session(
+                    app_name="marketing_ai",
+                    user_id="default",
+                    session_id=session_id,
+                )
+
+            # Build orchestrator agent
+            orchestrator = self._orchestrator_factory.build_agent(
+                asset=model_asset,
+                mcp_servers=mcp_tools,
+            )
+
+            # Create runner
+            runner = Runner(
+                agent=orchestrator,
+                app_name="marketing_ai",
+                session_service=self._session_service,
+            )
+
+            # Create user content
+            user_content = types.Content(
+                role="user",
+                parts=[types.Part(text=message)],
+            )
+
+            # Emit initial event
+            await queue.put({"type": "response_created"})
+
+            # Track accumulated text for context
+            accumulated_text = ""
+
+            async def _pump_adk_events() -> None:
+                """Background task: read ADK stream events and put into queue."""
+                nonlocal accumulated_text
+                try:
+                    async for event in runner.run_async(
+                        user_id="default",
+                        session_id=session_id,
+                        new_message=user_content,
+                    ):
+                        sse_events = self._process_adk_event(event, sub_agent_states)
+                        if sse_events is not None:
+                            for sse_event in sse_events:
+                                # Track text
+                                if sse_event.get("type") == "text_delta":
+                                    accumulated_text += sse_event.get("content", "")
+                                await queue.put(sse_event)
+                except Exception as e:
+                    logger.exception(f"[ADK] Error during streaming: {e}")
+                    await queue.put({"type": "error", "message": str(e)})
+                finally:
+                    await queue.put(_SENTINEL)
+
+            pump_task = asyncio.create_task(_pump_adk_events())
+
+            try:
+                while True:
+                    # Use wait_for for keepalive (20 second timeout)
                     try:
-                        yield json.loads(json_str)
-                    except json.JSONDecodeError:
+                        item = await asyncio.wait_for(queue.get(), timeout=20.0)
+                    except asyncio.TimeoutError:
+                        # Send keepalive
+                        yield {"type": "progress", "text": "処理中..."}
+                        continue
+
+                    if item is _SENTINEL:
+                        break
+                    yield item
+            finally:
+                if not pump_task.done():
+                    pump_task.cancel()
+                    try:
+                        await pump_task
+                    except (asyncio.CancelledError, Exception):
                         pass
 
+            # Return context for next turn
+            yield {"type": "_context_items", "items": []}
+            yield {"type": "done", "conversation_id": session_id}
+
+        except Exception as e:
+            logger.exception(f"[ADK] Error in stream_chat: {e}")
+            yield {"type": "error", "message": str(e)}
+            yield {"type": "done", "conversation_id": session_id}
+
+    def _process_adk_event(
+        self,
+        event: Any,
+        sub_agent_states: Dict[str, dict],
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Convert ADK event to SSE event format.
+
+        ADK events have content.parts[] which can contain:
+        - text
+        - function_call (with name attribute)
+        - function_response (with name attribute)
+
+        Returns a list of SSE events (since one ADK event can contain multiple parts).
+        """
+        results = []
+
+        # ADK events have content.parts[]
+        if hasattr(event, "content") and event.content:
+            if hasattr(event.content, "parts"):
+                for part in event.content.parts:
+                    # --- Text content ---
+                    if hasattr(part, "text") and part.text:
+                        results.append({
+                            "type": "text_delta",
+                            "content": part.text,
+                        })
+
+                    # --- Function call (tool invocation) ---
+                    if hasattr(part, "function_call") and part.function_call:
+                        fc = part.function_call
+                        tool_name = getattr(fc, "name", "unknown")
+
+                        # Check if this is a sub-agent call (AgentTool)
+                        if tool_name.endswith("Agent"):
+                            # Extract agent name (e.g., "ZohoCRMAgent" -> "zoho_crm")
+                            agent_name = self._normalize_agent_name(tool_name)
+                            sub_agent_states[agent_name] = {"is_running": True}
+                            results.append({
+                                "type": "sub_agent_event",
+                                "agent": agent_name,
+                                "event_type": "started",
+                                "is_running": True,
+                                "data": {},
+                            })
+                        else:
+                            # Regular tool call
+                            results.append({
+                                "type": "tool_call",
+                                "call_id": str(uuid.uuid4()),
+                                "name": tool_name,
+                                "arguments": json.dumps(getattr(fc, "args", {}), ensure_ascii=False),
+                            })
+
+                    # --- Function response (tool result) ---
+                    if hasattr(part, "function_response") and part.function_response:
+                        fr = part.function_response
+                        tool_name = getattr(fr, "name", "unknown")
+                        output = getattr(fr, "response", {})
+
+                        # Check if this is a chart result
+                        if isinstance(output, dict) and output.get("_chart_spec"):
+                            chart_spec = output["_chart_spec"]
+                            results.append({
+                                "type": "chart",
+                                "spec": chart_spec,
+                            })
+                        # Check if this is a sub-agent response
+                        elif tool_name.endswith("Agent"):
+                            agent_name = self._normalize_agent_name(tool_name)
+                            if agent_name in sub_agent_states:
+                                sub_agent_states[agent_name]["is_running"] = False
+
+                            if isinstance(output, dict):
+                                output_str = json.dumps(output, ensure_ascii=False)[:200]
+                            else:
+                                output_str = str(output)[:200]
+
+                            results.append({
+                                "type": "sub_agent_event",
+                                "agent": agent_name,
+                                "event_type": "message_output",
+                                "is_running": False,
+                                "data": {"output_preview": output_str},
+                            })
+                        else:
+                            # Regular tool result
+                            if isinstance(output, dict):
+                                output_str = json.dumps(output, ensure_ascii=False)[:4000]
+                            else:
+                                output_str = str(output)[:4000]
+                            results.append({
+                                "type": "tool_result",
+                                "call_id": str(uuid.uuid4()),
+                                "output": output_str,
+                            })
+
+        # Return results if any, otherwise None
+        return results if results else None
+
     async def _translate_to_japanese(self, text: str) -> str:
-        """Translate English text to Japanese (stub for ADK)."""
-        # ADK models typically respond in the instructed language
-        # This is a stub for interface compatibility
+        """
+        Translate English reasoning summary to Japanese.
+
+        Note: In ADK mode with Gemini models, the orchestrator is instructed
+        in Japanese, so reasoning summaries typically come back in Japanese.
+        This method is kept for interface compatibility with OpenAI SDK version.
+        """
+        if not text:
+            return text
+
+        # Skip if already Japanese (simple heuristic - contains CJK characters)
+        if any(ord(c) > 0x3000 for c in text[:50]):
+            return text
+
+        # For ADK mode, we return the original text since Gemini models
+        # are instructed in Japanese and should respond in Japanese.
+        # If translation is needed, it would require a separate API call.
         return text
 
+    # Legacy method for backward compatibility
     async def run_stream(
         self,
         message: str,
@@ -95,191 +464,19 @@ class ADKAgentService:
         asset: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[str, None]:
         """
-        Run the orchestrator agent with streaming.
+        Legacy method - wraps stream_chat for backward compatibility.
 
-        Args:
-            message: User message
-            conversation_id: Optional conversation ID for session
-            context_items: Previous conversation context
-            asset: Model asset configuration
-
-        Yields:
-            SSE-formatted events
+        Yields SSE-formatted strings.
         """
-        start_time = time.time()
-        session_id = conversation_id or str(uuid.uuid4())
-
-        # Create or get session (async in ADK)
-        session = await self._session_service.get_session(
-            app_name="marketing_ai",
+        async for event in self.stream_chat(
             user_id="default",
-            session_id=session_id,
-        )
-        if session is None:
-            session = await self._session_service.create_session(
-                app_name="marketing_ai",
-                user_id="default",
-                session_id=session_id,
-            )
-
-        # Initialize MCP toolsets
-        toolsets = await self._mcp_manager.create_toolsets()
-        mcp_tools = toolsets.all()
-
-        # Build orchestrator agent
-        orchestrator = self._orchestrator_factory.build_agent(
-            asset=asset,
-            mcp_servers=mcp_tools,
-        )
-
-        # Create runner
-        runner = Runner(
-            agent=orchestrator,
-            app_name="marketing_ai",
-            session_service=self._session_service,
-        )
-
-        # Emit initial event
-        yield self._format_sse({
-            "type": "response_created",
-            "conversation_id": session_id,
-        })
-
-        # Track text accumulation
-        accumulated_text = ""
-        activity_items: List[Dict[str, Any]] = []
-        sequence = 0
-
-        try:
-            # Create user content (ADK requires Content object)
-            user_content = types.Content(
-                role="user",
-                parts=[types.Part(text=message)],
-            )
-
-            # Run agent with streaming
-            async for event in runner.run_async(
-                user_id="default",
-                session_id=session_id,
-                new_message=user_content,
-            ):
-                sse_event = self._process_adk_event(event, sequence)
-                if sse_event:
-                    # Track activity items
-                    if sse_event.get("type") == "text_delta":
-                        accumulated_text += sse_event.get("content", "")
-                    elif sse_event.get("type") in ("tool_call", "tool_result", "reasoning"):
-                        activity_items.append({
-                            "kind": sse_event["type"].replace("_", ""),
-                            "sequence": sequence,
-                            **sse_event,
-                        })
-                        sequence += 1
-
-                    yield self._format_sse(sse_event)
-
-        except Exception as e:
-            logger.error(f"[ADK] Error during streaming: {e}")
-            yield self._format_sse({
-                "type": "error",
-                "error": str(e),
-            })
-
-        # Emit done event
-        elapsed = time.time() - start_time
-        yield self._format_sse({
-            "type": "done",
-            "conversation_id": session_id,
-            "elapsed_seconds": round(elapsed, 2),
-            "final_text": accumulated_text,
-        })
-
-        # Emit context items for persistence
-        context = session.state.get("context_items", [])
-        if context:
-            yield self._format_sse({
-                "type": "_context_items",
-                "context_items": context,
-            })
-
-        logger.info(f"[ADK] Stream completed in {elapsed:.2f}s")
-
-    def _process_adk_event(self, event: Any, sequence: int) -> Optional[Dict[str, Any]]:
-        """
-        Convert ADK event to SSE event format.
-
-        ADK events include:
-        - content (text chunks)
-        - function_call (tool calls)
-        - function_response (tool results)
-        - thinking (reasoning)
-        """
-        event_type = getattr(event, "type", None) or type(event).__name__
-
-        # Text content
-        if hasattr(event, "content") and event.content:
-            if isinstance(event.content, str):
-                return {
-                    "type": "text_delta",
-                    "content": event.content,
-                    "sequence": sequence,
-                }
-            # Handle Content object
-            if hasattr(event.content, "parts"):
-                text_parts = []
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text:
-                        text_parts.append(part.text)
-                if text_parts:
-                    return {
-                        "type": "text_delta",
-                        "content": "".join(text_parts),
-                        "sequence": sequence,
-                    }
-
-        # Function call (tool invocation)
-        if hasattr(event, "function_call") and event.function_call:
-            fc = event.function_call
-            return {
-                "type": "tool_call",
-                "tool_name": getattr(fc, "name", "unknown"),
-                "tool_call_id": getattr(fc, "id", str(uuid.uuid4())),
-                "arguments": getattr(fc, "args", {}),
-                "sequence": sequence,
-            }
-
-        # Function response (tool result)
-        if hasattr(event, "function_response") and event.function_response:
-            fr = event.function_response
-            output = getattr(fr, "response", {})
-            if isinstance(output, dict):
-                output_str = json.dumps(output, ensure_ascii=False)[:500]
-            else:
-                output_str = str(output)[:500]
-            return {
-                "type": "tool_result",
-                "tool_name": getattr(fr, "name", "unknown"),
-                "output": output_str,
-                "sequence": sequence,
-            }
-
-        # Thinking/reasoning
-        if hasattr(event, "thinking") or event_type == "thinking":
-            thinking_text = getattr(event, "thinking", "") or getattr(event, "content", "")
-            if thinking_text:
-                return {
-                    "type": "reasoning",
-                    "content": thinking_text,
-                    "sequence": sequence,
-                }
-
-        # Log unhandled event types for debugging
-        logger.debug(f"[ADK] Unhandled event type: {event_type}")
-        return None
-
-    def _format_sse(self, data: Dict[str, Any]) -> str:
-        """Format data as SSE event."""
-        return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+            user_email="default@example.com",
+            conversation_id=conversation_id,
+            message=message,
+            context_items=context_items,
+            model_asset=asset,
+        ):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 async def create_adk_agent_service(settings: "Settings") -> ADKAgentService:

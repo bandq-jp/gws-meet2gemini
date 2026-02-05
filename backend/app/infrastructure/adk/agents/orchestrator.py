@@ -19,6 +19,7 @@ from .seo_agent import SEOAgentFactory
 from .wordpress_agent import WordPressAgentFactory
 from .zoho_crm_agent import ZohoCRMAgentFactory
 from .candidate_insight_agent import CandidateInsightAgentFactory
+from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -193,12 +194,15 @@ class OrchestratorAgentFactory:
         # Build final instructions
         instructions = self._build_instructions(asset)
 
+        # Combine sub-agent tools with chart tools
+        all_tools = sub_agent_tools + list(ADK_CHART_TOOLS)
+
         return Agent(
             name="MarketingOrchestrator",
             model=self.model,
             description="マーケティングAIオーケストレーター - 複数の専門エージェントを調整して分析を実行",
             instruction=instructions,
-            tools=sub_agent_tools,
+            tools=all_tools,
         )
 
     def _build_instructions(self, asset: Dict[str, Any] | None = None) -> str:
