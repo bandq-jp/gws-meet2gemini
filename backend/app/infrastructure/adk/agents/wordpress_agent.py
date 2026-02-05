@@ -10,6 +10,8 @@ import logging
 from typing import TYPE_CHECKING, Any, List
 
 from google.adk.agents import Agent
+from google.adk.planners import BuiltInPlanner
+from google.genai import types
 
 from .base import SubAgentFactory
 
@@ -124,4 +126,9 @@ class WordPressAgentFactory(SubAgentFactory):
             description=self.tool_description,
             instruction=self._build_instructions(),
             tools=tools,
+            planner=BuiltInPlanner(
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="high",
+                ),
+            ),
         )

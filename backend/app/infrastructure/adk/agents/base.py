@@ -15,7 +15,9 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, List
 
 from google.adk.agents import Agent
+from google.adk.planners import BuiltInPlanner
 from google.adk.tools import FunctionTool
+from google.genai import types
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -112,4 +114,9 @@ class SubAgentFactory(ABC):
             description=self.tool_description,
             instruction=self._build_instructions(),
             tools=tools,
+            planner=BuiltInPlanner(
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="high",
+                ),
+            ),
         )

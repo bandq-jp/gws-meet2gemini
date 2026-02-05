@@ -11,7 +11,9 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from google.adk.agents import Agent
+from google.adk.planners import BuiltInPlanner
 from google.adk.tools import AgentTool
+from google.genai import types
 
 from .analytics_agent import AnalyticsAgentFactory
 from .ad_platform_agent import AdPlatformAgentFactory
@@ -232,6 +234,11 @@ class OrchestratorAgentFactory:
             description="マーケティングAIオーケストレーター - 複数の専門エージェントを調整して分析を実行",
             instruction=instructions,
             tools=all_tools,
+            planner=BuiltInPlanner(
+                thinking_config=types.ThinkingConfig(
+                    thinking_level="high",
+                ),
+            ),
         )
 
     def _build_instructions(self, asset: Dict[str, Any] | None = None) -> str:
