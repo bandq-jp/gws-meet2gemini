@@ -24,6 +24,7 @@ from app.infrastructure.adk.tools.zoho_crm_tools import ADK_ZOHO_CRM_TOOLS
 from app.infrastructure.adk.tools.candidate_insight_tools import ADK_CANDIDATE_INSIGHT_TOOLS
 from app.infrastructure.adk.tools.company_db_tools import ADK_COMPANY_DB_TOOLS
 from app.infrastructure.adk.tools.meeting_tools import ADK_MEETING_TOOLS
+from app.infrastructure.adk.tools.semantic_company_tools import ADK_SEMANTIC_COMPANY_TOOLS
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -42,7 +43,7 @@ CA_SUPPORT_INSTRUCTIONS = """
 
 ---
 
-## 利用可能なツール（25個）
+## 利用可能なツール（27個）
 
 ### Zoho CRM系（10個）
 | ツール | 用途 |
@@ -85,6 +86,12 @@ CA_SUPPORT_INSTRUCTIONS = """
 | `get_structured_data_for_candidate` | 候補者のAI抽出データ |
 | `get_candidate_full_profile` | 統合プロファイル（Zoho+議事録） |
 
+### セマンティック検索系（2個）★高速
+| ツール | 用途 |
+|--------|------|
+| `semantic_search_companies` | 自然言語で企業検索（ベクトル類似度） |
+| `find_companies_for_candidate` | 転職理由から最適企業を自動マッチング |
+
 ---
 
 ## ワークフロー例
@@ -115,6 +122,19 @@ CA_SUPPORT_INSTRUCTIONS = """
 1. get_pic_performance(date_from, date_to) → 成績確認
 2. get_pic_recommended_companies(pic_name) → 推奨企業リスト
 3. analyze_funnel_by_channel(channel) → 改善ポイント特定
+```
+
+### 5. セマンティック検索（高速・推奨）
+```
+# 自然言語で企業検索
+semantic_search_companies("リモートワーク可能で成長できる環境")
+
+# 候補者の転職理由から自動マッチング
+find_companies_for_candidate(
+    transfer_reasons="年収を上げたい、ワークライフバランスを重視",
+    age=32,
+    desired_salary=600
+)
 ```
 
 ---
@@ -158,7 +178,8 @@ class CASupportAgentFactory(SubAgentFactory):
     - Candidate Insight tools (4)
     - Company DB tools (7)
     - Meeting tools (4)
-    Total: 25 tools
+    - Semantic Search tools (2)
+    Total: 27 tools
     """
 
     @property
@@ -202,6 +223,10 @@ class CASupportAgentFactory(SubAgentFactory):
         # Add Meeting tools
         tools.extend(ADK_MEETING_TOOLS)
         logger.info(f"[CASupportAgent] Added {len(ADK_MEETING_TOOLS)} Meeting tools")
+
+        # Add Semantic Search tools (always available if company_chunks table exists)
+        tools.extend(ADK_SEMANTIC_COMPANY_TOOLS)
+        logger.info(f"[CASupportAgent] Added {len(ADK_SEMANTIC_COMPANY_TOOLS)} Semantic Search tools")
 
         logger.info(f"[CASupportAgent] Total tools: {len(tools)}")
         return tools
