@@ -3,8 +3,8 @@
 /**
  * Marketing Chat Component
  *
- * Native SSE streaming chat interface with ChatGPT-style UI.
- * Based on ga4-oauth-aiagent reference implementation.
+ * Clean, editorial-style chat interface using shadcn/ui components.
+ * No duplicate headers or sidebars.
  */
 
 import { useState, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
@@ -21,8 +21,35 @@ import {
   Search,
   TrendingUp,
   Users,
+  History,
+  MoreHorizontal,
+  Sparkles,
+  ChevronDown,
+  Zap,
+  Globe,
+  Code,
+  Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { ModelAsset as ModelAssetType } from "@/lib/marketing/types";
 
 // Re-export for convenience
@@ -53,6 +80,7 @@ export interface MarketingChatProps {
   onConversationChange?: (conversationId: string | null) => void;
   onSettingsClick?: () => void;
   onShareClick?: () => void;
+  onHistoryClick?: () => void;
   shareInfo?: ShareInfo | null;
   attachments?: Attachment[];
   isReadOnly?: boolean;
@@ -86,25 +114,25 @@ const SUGGESTIONS = [
 function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-4 sm:px-8">
-      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-[#1a1a2e] to-[#2a2a4e] rounded-xl flex items-center justify-center mb-4 sm:mb-5 shadow-lg shadow-[#1a1a2e]/10">
-        <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+      <div className="w-12 h-12 bg-primary/5 border border-primary/10 rounded-2xl flex items-center justify-center mb-5">
+        <Sparkles className="w-6 h-6 text-primary/70" />
       </div>
-      <h2 className="text-base sm:text-lg font-bold text-[#1a1a2e] mb-1 sm:mb-1.5 tracking-tight">
-        Marketing AI Assistant
+      <h2 className="text-lg font-semibold text-foreground mb-1.5 tracking-tight">
+        Marketing AI
       </h2>
-      <p className="text-xs sm:text-sm text-[#6b7280] mb-6 sm:mb-8 max-w-md leading-relaxed">
-        SEO、Analytics、CRM、広告データをAIで分析します。何でも聞いてください。
+      <p className="text-sm text-muted-foreground mb-8 max-w-md leading-relaxed">
+        SEO、Analytics、CRM、広告データをAIで分析します
       </p>
-      <div className="grid grid-cols-2 gap-2 sm:gap-2.5 max-w-md w-full">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-lg w-full">
         {SUGGESTIONS.map((s, i) => {
           const Icon = s.icon;
           return (
             <button
               key={i}
               onClick={() => onSend(s.text)}
-              className="group text-left px-3 sm:px-3.5 py-2.5 sm:py-3 bg-white border border-[#e5e7eb] rounded-xl text-xs text-[#374151] hover:border-[#1a1a2e]/20 hover:shadow-sm transition-all duration-200 cursor-pointer leading-relaxed flex items-start gap-2 sm:gap-2.5"
+              className="group text-left px-4 py-3.5 bg-background border border-border rounded-xl text-sm text-foreground hover:border-primary/30 hover:bg-accent/50 transition-all duration-200 cursor-pointer leading-relaxed flex items-start gap-3"
             >
-              <Icon className="w-3.5 h-3.5 text-[#9ca3af] group-hover:text-[#e94560] transition-colors mt-0.5 shrink-0" />
+              <Icon className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors mt-0.5 shrink-0" />
               <span>{s.text}</span>
             </button>
           );
@@ -113,6 +141,171 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Model Selector Component
+// ---------------------------------------------------------------------------
+
+interface ModelSelectorProps {
+  assets: ModelAsset[];
+  selectedAssetId: string | null;
+  onSelect: (id: string) => void;
+  onSettingsClick?: () => void;
+  disabled?: boolean;
+}
+
+function ModelSelector({
+  assets,
+  selectedAssetId,
+  onSelect,
+  onSettingsClick,
+  disabled,
+}: ModelSelectorProps) {
+  const [open, setOpen] = useState(false);
+
+  const currentAsset = assets.find((a) => a.id === selectedAssetId);
+
+  // Count tools for each asset
+  const getToolCount = (asset: ModelAsset) => {
+    let count = 0;
+    if (asset.enable_web_search) count++;
+    if (asset.enable_code_interpreter) count++;
+    if (asset.enable_ga4) count++;
+    if (asset.enable_meta_ads) count++;
+    if (asset.enable_gsc) count++;
+    if (asset.enable_ahrefs) count++;
+    if (asset.enable_wordpress) count++;
+    if (asset.enable_zoho_crm) count++;
+    return count;
+  };
+
+  const currentToolCount = currentAsset ? getToolCount(currentAsset) : 0;
+
+  // Get tool badges for an asset
+  const getToolBadges = (asset: ModelAsset) => {
+    const tools: { name: string; enabled: boolean }[] = [
+      { name: "Web", enabled: !!asset.enable_web_search },
+      { name: "Code", enabled: !!asset.enable_code_interpreter },
+      { name: "GA4", enabled: !!asset.enable_ga4 },
+      { name: "GSC", enabled: !!asset.enable_gsc },
+      { name: "Ahrefs", enabled: !!asset.enable_ahrefs },
+      { name: "Meta", enabled: !!asset.enable_meta_ads },
+      { name: "WP", enabled: !!asset.enable_wordpress },
+      { name: "Zoho", enabled: !!asset.enable_zoho_crm },
+    ];
+    return tools.filter((t) => t.enabled);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            disabled={disabled}
+            className="group flex items-center gap-2 h-9 pl-3 pr-2 rounded-lg border border-border bg-background hover:bg-accent/50 hover:border-primary/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div className="flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-primary/70" />
+              <span className="text-sm font-medium text-foreground">
+                {currentAsset?.name || "モデル"}
+              </span>
+              {currentToolCount > 0 && (
+                <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-semibold bg-primary/10 text-primary rounded-full">
+                  {currentToolCount}
+                </span>
+              )}
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-72 p-1.5"
+          sideOffset={8}
+        >
+          <div className="space-y-0.5 max-h-[300px] overflow-y-auto">
+            {assets.map((asset) => {
+              const isSelected = asset.id === selectedAssetId;
+              const toolBadges = getToolBadges(asset);
+              const toolCount = getToolCount(asset);
+
+              return (
+                <button
+                  key={asset.id}
+                  onClick={() => {
+                    onSelect(asset.id);
+                    setOpen(false);
+                  }}
+                  className={`
+                    w-full text-left px-3 py-2.5 rounded-md transition-all duration-150
+                    ${isSelected
+                      ? "bg-primary/5 border border-primary/20"
+                      : "hover:bg-accent border border-transparent"
+                    }
+                  `}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-sm font-medium ${isSelected ? "text-primary" : "text-foreground"}`}>
+                        {asset.name}
+                      </span>
+                      {isSelected && (
+                        <Check className="w-3.5 h-3.5 text-primary" />
+                      )}
+                    </div>
+                    {toolCount > 0 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {toolCount} ツール
+                      </span>
+                    )}
+                  </div>
+                  {toolBadges.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {toolBadges.slice(0, 5).map((tool) => (
+                        <span
+                          key={tool.name}
+                          className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground rounded"
+                        >
+                          {tool.name}
+                        </span>
+                      ))}
+                      {toolBadges.length > 5 && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground rounded">
+                          +{toolBadges.length - 5}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {/* Settings button - right next to model selector */}
+      {onSettingsClick && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={onSettingsClick}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Settings className="w-4 h-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>モデル設定</TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Chat Component
+// ---------------------------------------------------------------------------
 
 export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
   function MarketingChat(
@@ -124,6 +317,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       onConversationChange,
       onSettingsClick,
       onShareClick,
+      onHistoryClick,
       shareInfo,
       attachments = [],
       isReadOnly = false,
@@ -164,165 +358,167 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       clearMessages,
     }), [clearMessages]);
 
-  const handleSend = useCallback(
-    async (content: string) => {
-      if (!content.trim() || isStreaming || isReadOnly) return;
-      await sendMessage(content);
-    },
-    [sendMessage, isStreaming, isReadOnly]
-  );
+    const handleSend = useCallback(
+      async (content: string) => {
+        if (!content.trim() || isStreaming || isReadOnly) return;
+        await sendMessage(content);
+      },
+      [sendMessage, isStreaming, isReadOnly]
+    );
 
-  const handleNewChat = useCallback(() => {
-    clearMessages();
-  }, [clearMessages]);
+    const handleNewChat = useCallback(() => {
+      clearMessages();
+    }, [clearMessages]);
 
-  // Count enabled tools for display
-  const toolCount = useMemo(() => {
-    const asset = assets.find((a) => a.id === effectiveAssetId);
-    if (!asset) return 0;
-    let count = 0;
-    if (asset.enable_web_search) count++;
-    if (asset.enable_code_interpreter) count++;
-    if (asset.enable_ga4) count++;
-    if (asset.enable_meta_ads) count++;
-    if (asset.enable_gsc) count++;
-    if (asset.enable_ahrefs) count++;
-    if (asset.enable_wordpress) count++;
-    if (asset.enable_zoho_crm) count++;
-    return count;
-  }, [assets, effectiveAssetId]);
-
-  return (
-    <div className={`flex flex-col h-full bg-[#f8f9fb] relative ${className}`}>
-      {/* Read-only badge */}
-      {isReadOnly && (
-        <div className="absolute top-4 right-4 z-40">
-          <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200">
-            閲覧のみ
-          </Badge>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="shrink-0 flex items-center justify-between px-3 sm:px-6 py-2.5 sm:py-3 bg-white border-b border-[#e5e7eb]">
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Settings button */}
-          {onSettingsClick && (
-            <button
-              onClick={onSettingsClick}
-              className="p-2 rounded-lg hover:bg-[#f0f1f5] transition-colors"
-              title="設定"
-            >
-              <Settings className="w-4 h-4 sm:w-5 sm:h-5 text-[#6b7280]" />
-            </button>
-          )}
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 sm:w-8 sm:h-8 bg-gradient-to-br from-[#1a1a2e] to-[#2a2a4e] rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" />
+    return (
+      <TooltipProvider>
+        <div className={`flex flex-col h-full bg-background relative ${className}`}>
+          {/* Read-only badge */}
+          {isReadOnly && (
+            <div className="absolute top-3 right-3 z-40">
+              <Badge variant="secondary" className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                閲覧のみ
+              </Badge>
             </div>
-            <span className="text-sm sm:text-base font-semibold text-[#1a1a2e] hidden sm:inline">
-              Marketing AI
-            </span>
-          </div>
-        </div>
+          )}
 
-        <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* Model selector */}
-          {assets.length > 0 && (
-            <select
-              value={effectiveAssetId ?? ""}
-              onChange={(e) => handleAssetSelect(e.target.value)}
-              className="text-xs sm:text-sm px-2 sm:px-3 py-1.5 border border-[#d1d5db] rounded-lg bg-white text-[#1a1a2e] focus:outline-none focus:ring-2 focus:ring-[#1a1a2e]/20 focus:border-[#1a1a2e] transition-all"
+          {/* Clean Header */}
+          <header className="shrink-0 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
+            {/* Left side - Model selector + Settings */}
+            <div className="flex items-center">
+              {assets.length > 0 && (
+                <ModelSelector
+                  assets={assets}
+                  selectedAssetId={effectiveAssetId}
+                  onSelect={handleAssetSelect}
+                  onSettingsClick={onSettingsClick}
+                  disabled={isStreaming}
+                />
+              )}
+            </div>
+
+            {/* Right side - Actions */}
+            <div className="flex items-center gap-0.5">
+              {/* New chat button */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={handleNewChat}
+                    disabled={isStreaming || messages.length === 0}
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>新規チャット</TooltipContent>
+              </Tooltip>
+
+              {/* History button */}
+              {onHistoryClick && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={onHistoryClick}
+                    >
+                      <History className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>履歴</TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* Share button */}
+              {onShareClick && conversationId && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant={shareInfo?.is_shared ? "secondary" : "ghost"}
+                      size="icon-sm"
+                      onClick={onShareClick}
+                      className={shareInfo?.is_shared ? "text-blue-600" : ""}
+                    >
+                      <Share2 className="w-4 h-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {shareInfo?.is_shared ? "共有中" : "共有"}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* More menu (attachments only now) */}
+              {attachments.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon-sm">
+                      <MoreHorizontal className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onClick={() => setShowAttachments(true)}>
+                      <Download className="w-4 h-4 mr-2" />
+                      添付ファイル ({attachments.length})
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          </header>
+
+          {/* Messages area */}
+          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+            {messages.length === 0 ? (
+              <div className="flex-1 overflow-y-auto">
+                <EmptyState onSend={handleSend} />
+              </div>
+            ) : (
+              <MessageList messages={messages} isStreaming={isStreaming} />
+            )}
+
+            {/* Error display */}
+            {error && (
+              <div className="mx-4 mb-2 p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20 text-sm">
+                {error}
+              </div>
+            )}
+          </div>
+
+          {/* Attachments panel */}
+          {attachments.length > 0 && showAttachments && (
+            <AttachmentsPanel
+              attachments={attachments}
+              onClose={() => setShowAttachments(false)}
+            />
+          )}
+
+          {/* Read-only overlay */}
+          {isReadOnly && (
+            <div className="absolute bottom-0 left-0 right-0 h-28 z-20 pointer-events-auto bg-gradient-to-t from-background via-background/95 to-transparent flex items-end justify-center pb-4">
+              <div className="text-center px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-sm text-amber-800">
+                  この会話は共有されています。閲覧のみ可能です。
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Composer */}
+          {!isReadOnly && (
+            <Composer
+              onSend={handleSend}
+              isStreaming={isStreaming}
               disabled={isStreaming}
-            >
-              {assets.map((asset) => (
-                <option key={asset.id} value={asset.id}>
-                  {asset.name}
-                  {asset.id === effectiveAssetId && toolCount > 0
-                    ? ` (${toolCount})`
-                    : ""}
-                </option>
-              ))}
-            </select>
+              placeholder="マーケティングデータについて質問..."
+            />
           )}
-
-          {/* Share button */}
-          {onShareClick && conversationId && (
-            <button
-              onClick={onShareClick}
-              className={`p-2 rounded-lg transition-colors ${
-                shareInfo?.is_shared
-                  ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
-                  : "hover:bg-[#f0f1f5] text-[#6b7280]"
-              }`}
-              title={shareInfo?.is_shared ? "共有中" : "共有"}
-            >
-              <Share2 className="w-4 h-4 sm:w-5 sm:h-5" />
-            </button>
-          )}
-
-          {/* New chat button */}
-          <button
-            onClick={handleNewChat}
-            disabled={isStreaming || messages.length === 0}
-            className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs sm:text-sm font-medium border border-[#d1d5db] rounded-lg hover:bg-[#f0f1f5] disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-[#374151]"
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">新規チャット</span>
-          </button>
         </div>
-      </div>
-
-      {/* Messages area */}
-      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-        {messages.length === 0 ? (
-          <div className="flex-1 overflow-y-auto">
-            <EmptyState onSend={handleSend} />
-          </div>
-        ) : (
-          <MessageList messages={messages} isStreaming={isStreaming} />
-        )}
-
-        {/* Error display */}
-        {error && (
-          <div className="mx-4 sm:mx-6 mb-2 p-3 bg-red-50 text-red-700 rounded-lg border border-red-200 text-sm">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Attachments panel */}
-      {attachments.length > 0 && (
-        <AttachmentsPanel
-          attachments={attachments}
-          show={showAttachments}
-          onToggle={() => setShowAttachments((v) => !v)}
-        />
-      )}
-
-      {/* Read-only overlay */}
-      {isReadOnly && (
-        <div className="absolute bottom-0 left-0 right-0 h-32 z-20 pointer-events-auto bg-gradient-to-t from-white via-white/95 to-transparent flex items-end justify-center pb-4">
-          <div className="text-center px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg shadow-sm">
-            <p className="text-sm text-amber-800">
-              この会話は共有されています。閲覧のみ可能です。
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Composer */}
-      {!isReadOnly && (
-        <Composer
-          onSend={handleSend}
-          isStreaming={isStreaming}
-          disabled={isStreaming}
-          placeholder="マーケティングデータについて質問..."
-        />
-      )}
-    </div>
-  );
-});
+      </TooltipProvider>
+    );
+  }
+);
 
 // ---------------------------------------------------------------------------
 // Attachments Panel
@@ -330,82 +526,55 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
 
 interface AttachmentsPanelProps {
   attachments: Attachment[];
-  show: boolean;
-  onToggle: () => void;
+  onClose: () => void;
 }
 
-function AttachmentsPanel({ attachments, show, onToggle }: AttachmentsPanelProps) {
+function AttachmentsPanel({ attachments, onClose }: AttachmentsPanelProps) {
   return (
-    <>
-      {/* Toggle button */}
-      <div className="absolute bottom-20 right-4 z-30">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-full bg-[#1a1a2e] text-white shadow-lg hover:bg-[#2a2a4e] focus:outline-none focus:ring-2 focus:ring-[#1a1a2e]/50 transition-colors"
-        >
-          <Download className="h-4 w-4" />
-          添付ファイル ({attachments.length})
-        </button>
-      </div>
-
-      {/* Panel */}
-      <div
-        className={`absolute bottom-32 right-4 z-30 w-80 max-w-[92vw] transition-all duration-200 ${
-          show
-            ? "opacity-100 translate-y-0"
-            : "opacity-0 pointer-events-none translate-y-2"
-        }`}
-      >
-        <div className="bg-white/95 backdrop-blur rounded-xl shadow-2xl border border-[#e5e7eb] max-h-[55vh] overflow-y-auto">
-          <div className="px-4 py-3 border-b border-[#e5e7eb] flex items-center justify-between sticky top-0 bg-white/95 backdrop-blur rounded-t-xl">
-            <div className="text-sm font-semibold text-[#1a1a2e]">
-              添付ファイル
-            </div>
-            <button
-              type="button"
-              className="p-1 hover:bg-[#f0f1f5] rounded transition-colors"
-              onClick={onToggle}
-            >
-              <X className="h-4 w-4 text-[#6b7280]" />
-            </button>
-          </div>
-          <ul className="divide-y divide-[#f0f1f5]">
-            {attachments.map((att) => (
-              <li key={`${att.message_id}-${att.file_id}`}>
-                <a
-                  href={att.download_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-start gap-3 px-4 py-3 hover:bg-blue-50 transition"
-                  download
-                >
-                  <div className="mt-0.5">
-                    <Download className="h-4 w-4 text-[#3b82f6]" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-[#1a1a2e] truncate">
-                      {att.filename || att.file_id}
-                    </div>
-                    {att.created_at && (
-                      <div className="text-xs text-[#9ca3af]">
-                        {new Date(att.created_at).toLocaleString("ja-JP", {
-                          timeZone: "Asia/Tokyo",
-                          year: "numeric",
-                          month: "2-digit",
-                          day: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </a>
-              </li>
-            ))}
-          </ul>
+    <div className="absolute inset-0 z-40 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-background border border-border rounded-xl shadow-lg w-full max-w-md max-h-[70vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <h3 className="text-sm font-semibold">添付ファイル</h3>
+          <Button variant="ghost" size="icon-sm" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
         </div>
+
+        {/* List */}
+        <ul className="flex-1 overflow-y-auto divide-y divide-border">
+          {attachments.map((att) => (
+            <li key={`${att.message_id}-${att.file_id}`}>
+              <a
+                href={att.download_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-start gap-3 px-4 py-3 hover:bg-accent transition-colors"
+                download
+              >
+                <Download className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium truncate">
+                    {att.filename || att.file_id}
+                  </div>
+                  {att.created_at && (
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(att.created_at).toLocaleString("ja-JP", {
+                        timeZone: "Asia/Tokyo",
+                        year: "numeric",
+                        month: "2-digit",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  )}
+                </div>
+              </a>
+            </li>
+          ))}
+        </ul>
       </div>
-    </>
+    </div>
   );
 }

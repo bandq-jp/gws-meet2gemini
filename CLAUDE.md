@@ -3335,6 +3335,45 @@ limit $3;
 | Supabase Storage | 含む | - | $0 |
 | **合計** | | | **~$0.03/月** |
 
+### 29. マーケティングチャットUI/UXリファクタリング (2026-02-05)
+
+**問題**:
+1. サイドバーが重複（ルートレベル`AppSidebar` + マーケティング専用`AppSidebar`）
+2. ヘッダーが重複（page.tsx内 + MarketingChat.tsx内）
+3. モデルセレクタがHTML `<select>` で見栄えが悪い
+4. 新規チャットボタンがカスタムスタイルでデザイン不統一
+
+**修正内容**:
+
+1. **`marketing/page.tsx`**:
+   - マーケティング専用`AppSidebar`を削除（ルートサイドバーのみ使用）
+   - 重複ヘッダーを削除
+   - `onHistoryClick` propを追加
+
+2. **`MarketingChat.tsx`**:
+   - shadcn `Select` コンポーネントでモデルセレクタを実装
+   - shadcn `Button` コンポーネントでボタンを統一
+   - shadcn `DropdownMenu` で設定・添付ファイルをまとめる
+   - shadcn `Tooltip` でアイコンボタンにラベル表示
+   - エディトリアル/マガジン風の洗練されたデザイン
+   - 紫グラデーションなど「AIっぽい」デザインを排除
+
+**デザイン変更**:
+| 要素 | 変更前 | 変更後 |
+|------|--------|--------|
+| サイドバー | 2つ重複 | ルートレベルのみ |
+| ヘッダー | 2つ重複 | MarketingChat内のみ |
+| モデルセレクタ | HTML `<select>` | shadcn `Select` |
+| ボタン | カスタムCSS | shadcn `Button` |
+| アクションメニュー | 複数ボタン | shadcn `DropdownMenu` |
+| EmptyState | グラデーションアイコン | 控えめなボーダー+アイコン |
+
+**技術的知見**:
+- ルートレベルの`SidebarLayout`（`src/components/sidebar-layout.tsx`）が全ページに`AppSidebar`を提供
+- ページ固有のサイドバーを追加すると重複になる
+- shadcn/uiコンポーネントはCSS変数ベースでテーマと統一される
+- `TooltipProvider`はコンポーネントのルートでラップする
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

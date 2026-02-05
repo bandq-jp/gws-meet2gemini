@@ -3,10 +3,8 @@
 /**
  * Marketing AI Chat Page
  *
- * Native SSE streaming implementation with:
- * - Left sidebar (AppSidebar) for navigation
- * - Right history panel (HistoryPanel) for conversation list
- * - ChatGPT/Claude.ai style UI/UX
+ * Clean, editorial-style chat interface.
+ * Uses root-level AppSidebar from SidebarLayout.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -15,6 +13,7 @@ import {
   type ModelAsset,
   type ShareInfo,
   type Attachment,
+  type MarketingChatRef,
 } from "@/components/marketing/MarketingChat";
 import {
   Dialog,
@@ -25,10 +24,7 @@ import {
 import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
 import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 import { ShareDialog } from "@/components/marketing/share-dialog";
-import { AppSidebar, type SidebarView } from "@/components/marketing/AppSidebar";
 import { HistoryPanel, type Conversation } from "@/components/marketing/HistoryPanel";
-import { Clock, Menu } from "lucide-react";
-import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 
 // Default asset
 const DEFAULT_ASSET: ModelAsset = {
@@ -66,33 +62,21 @@ export default function MarketingPage({
     initialThreadId
   );
 
-  // Sidebar & History Panel state
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // History Panel state
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [currentView, setCurrentView] = useState<SidebarView>("chat");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   // Token management
   const tokenRef = useRef<TokenState>({ secret: null, expiresAt: 0 });
 
   // Chat ref for triggering new conversation
-  const chatRef = useRef<{ clearMessages: () => void } | null>(null);
+  const chatRef = useRef<MarketingChatRef | null>(null);
 
   // Load selectedAssetId from localStorage on mount
   useEffect(() => {
     const stored = localStorage.getItem("marketing:model_asset_id");
     if (stored) setSelectedAssetId(stored);
-
-    // Load sidebar collapsed state
-    const collapsedStored = localStorage.getItem("marketing:sidebar_collapsed");
-    if (collapsedStored) setSidebarCollapsed(collapsedStored === "true");
   }, []);
-
-  // Persist sidebar collapsed state
-  useEffect(() => {
-    localStorage.setItem("marketing:sidebar_collapsed", String(sidebarCollapsed));
-  }, [sidebarCollapsed]);
 
   // Ensure we have a valid token
   const ensureClientSecret = useCallback(async (): Promise<string> => {
@@ -398,25 +382,17 @@ export default function MarketingPage({
     [ensureClientSecret, selectedAssetId, assets, handleSelectAsset]
   );
 
-  // Handle view change
-  const handleViewChange = useCallback((view: SidebarView) => {
-    setCurrentView(view);
-    if (view === "settings") {
-      setShowManageDialog(true);
-    }
-  }, []);
-
   return (
     <>
       {/* Model Asset Management Dialog */}
       <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>
         <DialogContent className="max-w-6xl max-h-[90vh] p-6">
           <DialogHeader className="mb-4">
-            <DialogTitle className="text-2xl font-bold">
-              Model Asset Management
+            <DialogTitle className="text-xl font-semibold">
+              モデルアセット管理
             </DialogTitle>
-            <p className="text-sm text-muted-foreground mt-2">
-              Create, edit, and delete custom presets
+            <p className="text-sm text-muted-foreground mt-1">
+              カスタムプリセットの作成・編集・削除
             </p>
           </DialogHeader>
           <ModelAssetTable
@@ -431,12 +407,12 @@ export default function MarketingPage({
       <Dialog open={showAssetDialog} onOpenChange={setShowAssetDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create Model Asset</DialogTitle>
+            <DialogTitle>新規モデルアセット</DialogTitle>
           </DialogHeader>
           <ModelAssetForm
             onSubmit={handleSaveAsset}
             loading={savingAsset}
-            submitLabel="Create"
+            submitLabel="作成"
           />
         </DialogContent>
       </Dialog>
@@ -461,88 +437,22 @@ export default function MarketingPage({
         getClientSecret={ensureClientSecret}
       />
 
-      {/* Main Layout */}
-      <div className="h-full w-full flex overflow-hidden bg-white">
-        {/* Left Sidebar (desktop) */}
-        <AppSidebar
-          currentView={currentView}
-          onViewChange={handleViewChange}
-          onNewConversation={handleNewConversation}
-          collapsed={sidebarCollapsed}
-          onCollapsedChange={setSidebarCollapsed}
-        />
-
-        {/* Mobile Sidebar (sheet) */}
-        <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
-          <SheetContent side="left" className="p-0 w-[280px]">
-            <SheetTitle className="sr-only">メニュー</SheetTitle>
-            <AppSidebar
-              currentView={currentView}
-              onViewChange={(view) => {
-                handleViewChange(view);
-                setMobileMenuOpen(false);
-              }}
-              onNewConversation={() => {
-                handleNewConversation();
-                setMobileMenuOpen(false);
-              }}
-              collapsed={false}
-              onCollapsedChange={() => {}}
-            />
-          </SheetContent>
-        </Sheet>
-
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-          {/* Top Bar */}
-          <header className="h-14 shrink-0 border-b border-[#e5e7eb] bg-white flex items-center justify-between px-4">
-            {/* Left: Mobile menu + Title */}
-            <div className="flex items-center gap-3">
-              {/* Mobile menu button */}
-              <button
-                onClick={() => setMobileMenuOpen(true)}
-                className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg
-                  hover:bg-[#f0f1f5] text-[#6b7280] hover:text-[#1a1a2e]
-                  transition-colors cursor-pointer"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-              <span className="text-sm font-semibold text-[#1a1a2e] tracking-tight">
-                {currentConversationId ? "チャット" : "新しいチャット"}
-              </span>
-            </div>
-
-            {/* Right: History button */}
-            <button
-              onClick={() => setHistoryOpen(true)}
-              className="flex items-center gap-2 px-3 h-9 rounded-lg
-                hover:bg-[#f0f1f5] text-[#6b7280] hover:text-[#1a1a2e]
-                transition-colors cursor-pointer text-sm font-medium"
-            >
-              <Clock className="w-4 h-4" />
-              <span className="hidden sm:inline">履歴</span>
-            </button>
-          </header>
-
-          {/* Chat Area */}
-          <div className="flex-1 overflow-hidden">
-            <MarketingChat
-              ref={chatRef}
-              initialConversationId={initialThreadId}
-              assets={assets}
-              selectedAssetId={selectedAssetId}
-              onAssetSelect={handleSelectAsset}
-              onConversationChange={handleConversationChange}
-              onSettingsClick={() => setShowManageDialog(true)}
-              onShareClick={() => setShowShareDialog(true)}
-              shareInfo={shareInfo}
-              attachments={attachments}
-              isReadOnly={isReadOnly}
-              className="h-full"
-            />
-          </div>
-        </div>
-      </div>
+      {/* Main Chat - Full height, no extra sidebar/header */}
+      <MarketingChat
+        ref={chatRef}
+        initialConversationId={initialThreadId}
+        assets={assets}
+        selectedAssetId={selectedAssetId}
+        onAssetSelect={handleSelectAsset}
+        onConversationChange={handleConversationChange}
+        onSettingsClick={() => setShowManageDialog(true)}
+        onShareClick={() => setShowShareDialog(true)}
+        onHistoryClick={() => setHistoryOpen(true)}
+        shareInfo={shareInfo}
+        attachments={attachments}
+        isReadOnly={isReadOnly}
+        className="h-full"
+      />
     </>
   );
 }

@@ -219,6 +219,7 @@ export function ModelAssetTable({ assets, onSave, onDelete }: Props) {
                       {enabledTools.length > 0 ? (
                         enabledTools.slice(0, 6).map((tool) => {
                           const config = TOOL_ICONS[tool];
+                          if (!config) return null; // Skip unknown tools
                           return (
                             <Badge
                               key={tool}
