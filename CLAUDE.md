@@ -2873,6 +2873,46 @@ const activityItems = (msg.activity_items || [])
 ]
 ```
 
+### 32-4. ストリーミング時の謎の改行問題修正 (2026-02-05)
+
+**問題**: ストリーミング中にテキストが文の途中で改行される（「平均順位1」/「4.7位で」）。ブラウザリロードで直る。
+
+**原因分析**:
+1. **ADKチャンク境界**: Gemini APIがテキストチャンクの末尾に単一改行 (`\n`) を含めて送信
+2. **ReactMarkdownの解釈**: 単一改行がそのままレンダリングされ視覚的な改行に
+3. **テキストグルーピング**: 連続するテキストアイテムが別々のグループとして処理され、別々の`<div>`でレンダリング
+
+**修正内容**:
+
+1. **バックエンド** (`agent_service.py` L589-600):
+```python
+# Normalize text: strip trailing single newlines to prevent
+# mid-sentence line breaks in markdown rendering.
+# Double newlines (paragraph breaks) are preserved.
+text_content = part.text
+# Only strip a single trailing newline (not double = paragraph break)
+if text_content.endswith("\n") and not text_content.endswith("\n\n"):
+    text_content = text_content.rstrip("\n")
+```
+
+2. **フロントエンド** (`ChatMessage.tsx` L527-539):
+```typescript
+// Group consecutive items of same kind:
+// - text: concatenated for seamless markdown rendering (prevents mid-sentence breaks)
+// - sub_agent/tool: rendered as badge rows
+const groupable =
+  item.kind === "text" || item.kind === "sub_agent" || item.kind === "tool";
+```
+
+**修正のポイント**:
+- 単一の末尾改行 (`\n`) は削除、二重改行 (`\n\n` = 段落区切り) は保持
+- テキストアイテムを「groupable」に追加し、連続するテキストが`.join("")`で結合される
+
+**技術的知見**:
+- Gemini APIはストリーミングチャンクの末尾に改行を含むことがある
+- ReactMarkdownは単一改行を`<br/>`や新しい行として解釈する場合がある
+- フロントエンドでのテキスト結合 + バックエンドでの改行正規化の両方が必要
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

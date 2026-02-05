@@ -528,8 +528,13 @@ function ActivityTimeline({
   const groups: { kind: string; items: ActivityItem[] }[] = [];
   for (const item of sortedItems) {
     const lastGroup = groups[groups.length - 1];
-    // Group sub_agent and tool badges together; text and reasoning are individual
-    const groupable = item.kind === "sub_agent" || item.kind === "tool";
+    // Group consecutive items of same kind:
+    // - text: concatenated for seamless markdown rendering (prevents mid-sentence breaks)
+    // - sub_agent/tool: rendered as badge rows
+    // - reasoning: individual items (separate expandable blocks)
+    // - chart: individual items (separate visualizations)
+    const groupable =
+      item.kind === "text" || item.kind === "sub_agent" || item.kind === "tool";
     if (lastGroup && lastGroup.kind === item.kind && groupable) {
       lastGroup.items.push(item);
     } else {
@@ -574,22 +579,21 @@ function ActivityTimeline({
               </div>
             );
 
-          case "text":
+          case "text": {
+            // Concatenate all text items in this group into a single string
+            // This prevents visual line breaks between consecutive text chunks
+            const combinedContent = group.items
+              .map((item) => (item as TextActivityItem).content)
+              .join("");
             return (
-              <div key={groupIdx}>
-                {group.items.map((item, idx) => (
-                  <TextSegment
-                    key={item.id}
-                    content={(item as TextActivityItem).content}
-                    isLast={
-                      groupIdx === groups.length - 1 &&
-                      idx === group.items.length - 1
-                    }
-                    isStreaming={isStreaming}
-                  />
-                ))}
-              </div>
+              <TextSegment
+                key={groupIdx}
+                content={combinedContent}
+                isLast={groupIdx === groups.length - 1}
+                isStreaming={isStreaming}
+              />
             );
+          }
 
           case "chart":
             return (

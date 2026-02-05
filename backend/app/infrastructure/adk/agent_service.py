@@ -590,9 +590,16 @@ class ADKAgentService:
                     elif hasattr(part, "text") and part.text:
                         # For partial=True or partial=None, send text immediately
                         # (partial=False is handled separately above with concatenation)
+                        # Normalize text: strip trailing single newlines to prevent
+                        # mid-sentence line breaks in markdown rendering.
+                        # Double newlines (paragraph breaks) are preserved.
+                        text_content = part.text
+                        # Only strip a single trailing newline (not double = paragraph break)
+                        if text_content.endswith("\n") and not text_content.endswith("\n\n"):
+                            text_content = text_content.rstrip("\n")
                         results.append({
                             "type": "text_delta",
-                            "content": part.text,
+                            "content": text_content,
                         })
 
         # Return results if any, otherwise None
