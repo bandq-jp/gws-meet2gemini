@@ -29,7 +29,6 @@ type TokenState = {
 
 export type UseMarketingChatOptions = {
   initialConversationId?: string | null;
-  selectedAssetId?: string | null;
   onConversationChange?: (conversationId: string | null) => void;
   onError?: (error: string) => void;
 };
@@ -504,7 +503,6 @@ export function useMarketingChat(
           message: content,
           conversation_id: conversationId,
           context_items: contextItemsRef.current,
-          model_asset_id: options.selectedAssetId,
         };
 
         const response = await fetch("/api/marketing-v2/chat/stream", {
@@ -598,7 +596,7 @@ export function useMarketingChat(
         abortControllerRef.current = null;
       }
     },
-    [isStreaming, conversationId, options.selectedAssetId, ensureToken, processEvent]
+    [isStreaming, conversationId, ensureToken, processEvent]
   );
 
   // Clear messages and reset state

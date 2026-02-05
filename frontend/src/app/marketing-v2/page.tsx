@@ -4,34 +4,18 @@
  * Marketing AI Chat Page (V2 - Google ADK + Gemini)
  *
  * Clean, editorial-style chat interface.
- * Uses root-level AppSidebar from SidebarLayout.
+ * Full-stack mode with all agents and tools enabled by default.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MarketingChat,
-  type ModelAsset,
   type ShareInfo,
   type Attachment,
   type MarketingChatRef,
 } from "@/components/marketing/v2/MarketingChat";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { ModelAssetTable } from "@/components/marketing/ModelAssetTable";
-import { ModelAssetForm } from "@/components/marketing/ModelAssetForm";
 import { ShareDialog } from "@/components/marketing/share-dialog";
 import { HistoryPanel, type Conversation } from "@/components/marketing/v2/HistoryPanel";
-
-// Default asset
-const DEFAULT_ASSET: ModelAsset = {
-  id: "standard",
-  name: "Standard",
-  visibility: "public",
-};
 
 // Token management
 type TokenState = {
@@ -47,12 +31,6 @@ export default function MarketingV2Page({
   initialThreadId = null,
 }: MarketingV2PageProps) {
   // State
-  const [assets, setAssets] = useState<ModelAsset[]>([DEFAULT_ASSET]);
-  const [assetsLoaded, setAssetsLoaded] = useState(false);
-  const [selectedAssetId, setSelectedAssetId] = useState<string>("standard");
-  const [showManageDialog, setShowManageDialog] = useState(false);
-  const [showAssetDialog, setShowAssetDialog] = useState(false);
-  const [savingAsset, setSavingAsset] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [shareInfo, setShareInfo] = useState<ShareInfo | null>(null);
   const [showShareDialog, setShowShareDialog] = useState(false);
@@ -71,12 +49,6 @@ export default function MarketingV2Page({
 
   // Chat ref for triggering new conversation
   const chatRef = useRef<MarketingChatRef | null>(null);
-
-  // Load selectedAssetId from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem("marketing-v2:model_asset_id");
-    if (stored) setSelectedAssetId(stored);
-  }, []);
 
   // Ensure we have a valid token
   const ensureClientSecret = useCallback(async (): Promise<string> => {
@@ -120,14 +92,6 @@ export default function MarketingV2Page({
     }
 
     return tokenRef.current.secret!;
-  }, []);
-
-  // Asset selection handler
-  const handleSelectAsset = useCallback((id: string) => {
-    setSelectedAssetId(id);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("marketing-v2:model_asset_id", id);
-    }
   }, []);
 
   // New conversation handler
@@ -273,150 +237,14 @@ export default function MarketingV2Page({
     [currentConversationId, ensureClientSecret, loadShareStatus]
   );
 
-  // Load model assets
-  useEffect(() => {
-    const loadAssets = async () => {
-      try {
-        const secret = await ensureClientSecret();
-        const res = await fetch("/api/marketing/model-assets", {
-          headers: { "x-marketing-client-secret": secret },
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error("Failed to load model assets");
-        const data = await res.json();
-        const list: ModelAsset[] = data?.data ?? [];
-        const withDefault =
-          list.length && list.find((a) => a.id === "standard")
-            ? list
-            : [DEFAULT_ASSET, ...list];
-        setAssets(withDefault);
-        setAssetsLoaded(true);
-        if (
-          withDefault.length &&
-          !withDefault.find((a) => a.id === selectedAssetId)
-        ) {
-          handleSelectAsset(withDefault[0].id);
-        }
-      } catch (err) {
-        console.error(err);
-        setAssetsLoaded(true);
-      }
-    };
-    loadAssets();
-  }, [ensureClientSecret, handleSelectAsset, selectedAssetId]);
-
   // Initial load
   useEffect(() => {
     loadAttachments(initialThreadId);
     loadShareStatus(initialThreadId);
   }, [initialThreadId, loadAttachments, loadShareStatus]);
 
-  // Save asset
-  const handleSaveAsset = useCallback(
-    async (form: Partial<ModelAsset>, assetId?: string) => {
-      setSavingAsset(true);
-      try {
-        const secret = await ensureClientSecret();
-        const url = assetId
-          ? `/api/marketing/model-assets/${assetId}`
-          : "/api/marketing/model-assets";
-        const method = assetId ? "PUT" : "POST";
-
-        const res = await fetch(url, {
-          method,
-          headers: {
-            "Content-Type": "application/json",
-            "x-marketing-client-secret": secret,
-          },
-          body: JSON.stringify(form),
-        });
-        if (!res.ok) {
-          const detail = await res.json().catch(() => ({}));
-          throw new Error(detail?.error || "Failed to save model asset");
-        }
-        const data = await res.json();
-        const saved: ModelAsset = data?.data || {};
-        setAssets((prev) => {
-          const filtered = prev.filter((a) => a.id !== saved.id);
-          return [saved, ...filtered];
-        });
-        if (!assetId) {
-          handleSelectAsset(saved.id);
-        }
-        setShowAssetDialog(false);
-      } catch (err) {
-        console.error(err);
-        alert(err instanceof Error ? err.message : "Failed to save");
-      } finally {
-        setSavingAsset(false);
-      }
-    },
-    [ensureClientSecret, handleSelectAsset]
-  );
-
-  // Delete asset
-  const handleDeleteAsset = useCallback(
-    async (assetId: string) => {
-      try {
-        const secret = await ensureClientSecret();
-        const res = await fetch(`/api/marketing/model-assets/${assetId}`, {
-          method: "DELETE",
-          headers: { "x-marketing-client-secret": secret },
-        });
-        if (!res.ok) {
-          const detail = await res.json().catch(() => ({}));
-          throw new Error(detail?.error || "Failed to delete");
-        }
-        setAssets((prev) => prev.filter((a) => a.id !== assetId));
-        if (selectedAssetId === assetId) {
-          const standardAsset = assets.find((a) => a.id === "standard");
-          if (standardAsset) {
-            handleSelectAsset(standardAsset.id);
-          }
-        }
-      } catch (err) {
-        console.error(err);
-        throw err;
-      }
-    },
-    [ensureClientSecret, selectedAssetId, assets, handleSelectAsset]
-  );
-
   return (
     <>
-      {/* Model Asset Management Dialog */}
-      <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>
-        <DialogContent className="max-w-6xl max-h-[90vh] p-6">
-          <DialogHeader className="mb-4">
-            <DialogTitle className="text-xl font-semibold">
-              モデルアセット管理
-            </DialogTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              カスタムプリセットの作成・編集・削除
-            </p>
-          </DialogHeader>
-          <ModelAssetTable
-            assets={assets}
-            onSave={handleSaveAsset}
-            onDelete={handleDeleteAsset}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* New Asset Dialog */}
-      <Dialog open={showAssetDialog} onOpenChange={setShowAssetDialog}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>新規モデルアセット</DialogTitle>
-          </DialogHeader>
-          <ModelAssetForm
-            onSubmit={handleSaveAsset}
-            loading={savingAsset}
-            submitLabel="作成"
-          />
-        </DialogContent>
-      </Dialog>
-
       {/* Share Dialog */}
       <ShareDialog
         open={showShareDialog}
@@ -437,15 +265,11 @@ export default function MarketingV2Page({
         getClientSecret={ensureClientSecret}
       />
 
-      {/* Main Chat - Full height, no extra sidebar/header */}
+      {/* Main Chat - Full height */}
       <MarketingChat
         ref={chatRef}
         initialConversationId={initialThreadId}
-        assets={assets}
-        selectedAssetId={selectedAssetId}
-        onAssetSelect={handleSelectAsset}
         onConversationChange={handleConversationChange}
-        onSettingsClick={() => setShowManageDialog(true)}
         onShareClick={() => setShowShareDialog(true)}
         onHistoryClick={() => setHistoryOpen(true)}
         shareInfo={shareInfo}

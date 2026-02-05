@@ -1,18 +1,17 @@
 "use client";
 
 /**
- * Marketing Chat Component
+ * Marketing Chat Component (V2 - ADK/Gemini)
  *
  * Clean, editorial-style chat interface using shadcn/ui components.
- * No duplicate headers or sidebars.
+ * Full-stack mode with all agents enabled by default.
  */
 
-import { useState, useCallback, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useCallback, forwardRef, useImperativeHandle, useState } from "react";
 import { useMarketingChat } from "@/hooks/use-marketing-chat-v2";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import {
-  Settings,
   Share2,
   Download,
   X,
@@ -24,24 +23,13 @@ import {
   History,
   MoreHorizontal,
   Sparkles,
-  ChevronDown,
-  Zap,
-  Globe,
-  Code,
-  Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -50,10 +38,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { ModelAsset as ModelAssetType } from "@/lib/marketing/types";
-
-// Re-export for convenience
-export type ModelAsset = ModelAssetType;
 
 export type ShareInfo = {
   thread_id: string;
@@ -74,11 +58,7 @@ export type Attachment = {
 
 export interface MarketingChatProps {
   initialConversationId?: string | null;
-  assets?: ModelAsset[];
-  selectedAssetId?: string | null;
-  onAssetSelect?: (assetId: string) => void;
   onConversationChange?: (conversationId: string | null) => void;
-  onSettingsClick?: () => void;
   onShareClick?: () => void;
   onHistoryClick?: () => void;
   shareInfo?: ShareInfo | null;
@@ -143,167 +123,6 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Model Selector Component
-// ---------------------------------------------------------------------------
-
-interface ModelSelectorProps {
-  assets: ModelAsset[];
-  selectedAssetId: string | null;
-  onSelect: (id: string) => void;
-  onSettingsClick?: () => void;
-  disabled?: boolean;
-}
-
-function ModelSelector({
-  assets,
-  selectedAssetId,
-  onSelect,
-  onSettingsClick,
-  disabled,
-}: ModelSelectorProps) {
-  const [open, setOpen] = useState(false);
-
-  const currentAsset = assets.find((a) => a.id === selectedAssetId);
-
-  // Count tools for each asset
-  const getToolCount = (asset: ModelAsset) => {
-    let count = 0;
-    if (asset.enable_web_search) count++;
-    if (asset.enable_code_interpreter) count++;
-    if (asset.enable_ga4) count++;
-    if (asset.enable_meta_ads) count++;
-    if (asset.enable_gsc) count++;
-    if (asset.enable_ahrefs) count++;
-    if (asset.enable_wordpress) count++;
-    if (asset.enable_zoho_crm) count++;
-    return count;
-  };
-
-  const currentToolCount = currentAsset ? getToolCount(currentAsset) : 0;
-
-  // Get tool badges for an asset
-  const getToolBadges = (asset: ModelAsset) => {
-    const tools: { name: string; enabled: boolean }[] = [
-      { name: "Web", enabled: !!asset.enable_web_search },
-      { name: "Code", enabled: !!asset.enable_code_interpreter },
-      { name: "GA4", enabled: !!asset.enable_ga4 },
-      { name: "GSC", enabled: !!asset.enable_gsc },
-      { name: "Ahrefs", enabled: !!asset.enable_ahrefs },
-      { name: "Meta", enabled: !!asset.enable_meta_ads },
-      { name: "WP", enabled: !!asset.enable_wordpress },
-      { name: "Zoho", enabled: !!asset.enable_zoho_crm },
-    ];
-    return tools.filter((t) => t.enabled);
-  };
-
-  return (
-    <div className="flex items-center gap-1.5">
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <button
-            disabled={disabled}
-            className="group flex items-center gap-2 h-9 pl-3 pr-2 rounded-lg border border-border bg-background hover:bg-accent/50 hover:border-primary/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <div className="flex items-center gap-2">
-              <Zap className="w-3.5 h-3.5 text-primary/70" />
-              <span className="text-sm font-medium text-foreground">
-                {currentAsset?.name || "モデル"}
-              </span>
-              {currentToolCount > 0 && (
-                <span className="flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-semibold bg-primary/10 text-primary rounded-full">
-                  {currentToolCount}
-                </span>
-              )}
-            </div>
-            <ChevronDown className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground transition-colors" />
-          </button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          className="w-72 p-1.5"
-          sideOffset={8}
-        >
-          <div className="space-y-0.5 max-h-[300px] overflow-y-auto">
-            {assets.map((asset) => {
-              const isSelected = asset.id === selectedAssetId;
-              const toolBadges = getToolBadges(asset);
-              const toolCount = getToolCount(asset);
-
-              return (
-                <button
-                  key={asset.id}
-                  onClick={() => {
-                    onSelect(asset.id);
-                    setOpen(false);
-                  }}
-                  className={`
-                    w-full text-left px-3 py-2.5 rounded-md transition-all duration-150
-                    ${isSelected
-                      ? "bg-primary/5 border border-primary/20"
-                      : "hover:bg-accent border border-transparent"
-                    }
-                  `}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-sm font-medium ${isSelected ? "text-primary" : "text-foreground"}`}>
-                        {asset.name}
-                      </span>
-                      {isSelected && (
-                        <Check className="w-3.5 h-3.5 text-primary" />
-                      )}
-                    </div>
-                    {toolCount > 0 && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {toolCount} ツール
-                      </span>
-                    )}
-                  </div>
-                  {toolBadges.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {toolBadges.slice(0, 5).map((tool) => (
-                        <span
-                          key={tool.name}
-                          className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground rounded"
-                        >
-                          {tool.name}
-                        </span>
-                      ))}
-                      {toolBadges.length > 5 && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground rounded">
-                          +{toolBadges.length - 5}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      {/* Settings button - right next to model selector */}
-      {onSettingsClick && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onSettingsClick}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              <Settings className="w-4 h-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>モデル設定</TooltipContent>
-        </Tooltip>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main Chat Component
 // ---------------------------------------------------------------------------
 
@@ -311,11 +130,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
   function MarketingChat(
     {
       initialConversationId,
-      assets = [],
-      selectedAssetId,
-      onAssetSelect,
       onConversationChange,
-      onSettingsClick,
       onShareClick,
       onHistoryClick,
       shareInfo,
@@ -325,20 +140,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
     },
     ref
   ) {
-    const [internalAssetId, setInternalAssetId] = useState<string | null>(
-      selectedAssetId ?? (assets.length > 0 ? assets[0].id : null)
-    );
     const [showAttachments, setShowAttachments] = useState(false);
-
-    const effectiveAssetId = selectedAssetId ?? internalAssetId;
-
-    const handleAssetSelect = useCallback(
-      (assetId: string) => {
-        setInternalAssetId(assetId);
-        onAssetSelect?.(assetId);
-      },
-      [onAssetSelect]
-    );
 
     const {
       messages,
@@ -349,7 +151,6 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       clearMessages,
     } = useMarketingChat({
       initialConversationId,
-      selectedAssetId: effectiveAssetId,
       onConversationChange,
     });
 
@@ -384,17 +185,10 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
 
           {/* Clean Header */}
           <header className="shrink-0 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
-            {/* Left side - Model selector + Settings */}
-            <div className="flex items-center">
-              {assets.length > 0 && (
-                <ModelSelector
-                  assets={assets}
-                  selectedAssetId={effectiveAssetId}
-                  onSelect={handleAssetSelect}
-                  onSettingsClick={onSettingsClick}
-                  disabled={isStreaming}
-                />
-              )}
+            {/* Left side - Title */}
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary/70" />
+              <span className="text-sm font-medium text-foreground">Marketing AI</span>
             </div>
 
             {/* Right side - Actions */}
