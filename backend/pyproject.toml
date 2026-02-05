@@ -28,6 +28,8 @@ dependencies = [
     "meta-ads-mcp>=1.0.0", # Meta Ads MCP
     # LiteLLM for multi-provider support (Gemini sub-agents)
     "litellm>=1.55.0",
+    # Google Agent Development Kit (ADK)
+    "google-adk>=0.5.0",
 ]
 
 [dependency-groups]

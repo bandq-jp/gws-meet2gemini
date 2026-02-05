@@ -141,6 +141,14 @@ class Settings:
     wordpress_achieve_mcp_server_url: str = os.getenv("WORDPRESS_ACHIEVE_MCP_SERVER_URL", "")
     wordpress_achieve_mcp_authorization: str = os.getenv("WORDPRESS_ACHIEVE_MCP_AUTHORIZATION", "")
 
+    # Google ADK settings
+    # Enable ADK mode (use Google ADK instead of OpenAI Agents SDK)
+    use_adk: bool = os.getenv("USE_ADK", "false").lower() == "true"
+    # ADK orchestrator model (Gemini 3 Flash for orchestration)
+    adk_orchestrator_model: str = os.getenv("ADK_ORCHESTRATOR_MODEL", "gemini-3-flash-preview")
+    # ADK sub-agent model (Gemini 3 Flash for speed and cost)
+    adk_sub_agent_model: str = os.getenv("ADK_SUB_AGENT_MODEL", "gemini-3-flash-preview")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

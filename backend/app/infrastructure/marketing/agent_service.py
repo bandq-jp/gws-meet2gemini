@@ -499,13 +499,29 @@ class MarketingAgentService:
 
 # Singleton instance
 _service_instance: MarketingAgentService | None = None
+_adk_service_instance: "ADKAgentService | None" = None
 
 
-def get_marketing_agent_service() -> MarketingAgentService:
-    """Get or create singleton MarketingAgentService instance."""
+def get_marketing_agent_service() -> "MarketingAgentService | ADKAgentService":
+    """
+    Get or create singleton agent service instance.
+
+    Returns ADKAgentService if USE_ADK=true, otherwise MarketingAgentService (OpenAI SDK).
+    """
+    settings = get_settings()
+
+    # --- ADK Mode ---
+    if settings.use_adk:
+        global _adk_service_instance
+        if _adk_service_instance is None:
+            from app.infrastructure.adk.agent_service import ADKAgentService
+            _adk_service_instance = ADKAgentService(settings)
+            logger.info("[ADK] Agent service initialized (model=%s)", settings.adk_orchestrator_model)
+        return _adk_service_instance
+
+    # --- OpenAI SDK Mode (default) ---
     global _service_instance
     if _service_instance is None:
-        settings = get_settings()
         mcp_manager = None
         if settings.use_local_mcp:
             mcp_manager = MCPSessionManager(settings)
