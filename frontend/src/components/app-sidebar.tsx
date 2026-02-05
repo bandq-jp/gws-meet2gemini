@@ -191,12 +191,12 @@ export function AppSidebar() {
             description: "Ahrefs/GSC/GA4を束ねたマーケティング分析チャット",
           },
           {
-            title: "Chat-MKT-V2",
+            title: "b&q エージェント",
             icon: MessageSquare,
             href: "/marketing-v2",
             id: "marketing-chat-v2",
             enabled: true,
-            description: "Google ADK + Gemini 3による次世代マーケティングAI",
+            description: "マーケティング・採用・候補者支援を統合したAIアシスタント",
           },
           {
             title: "画像生成",

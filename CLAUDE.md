@@ -81,6 +81,15 @@
   - 環境変数: `COMPANY_DB_SPREADSHEET_ID`, `COMPANY_DB_CACHE_TTL`
   - 認証: 既存のSERVICE_ACCOUNT_JSON（drive_docs_collector.pyパターン）を流用
 
+- **ブランディング変更: Marketing AI → b&q エージェント**
+  - フロントエンド:
+    - `frontend/src/components/marketing/v2/MarketingChat.tsx` - タイトル・説明・サンプルクエリ更新
+    - `frontend/src/components/app-sidebar.tsx` - サイドバー項目名・説明更新
+  - バックエンド:
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - オーケストレーター名更新
+  - サンプルクエリ: 4個→6個に拡充、全エージェント機能をカバーする実用的なクエリに改善
+    - GA4+CRMファネル分析、企業マッチング、SEO競合比較、候補者リスク分析、チャネル別ROI、一気通貫分析
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

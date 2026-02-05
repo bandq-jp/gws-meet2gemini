@@ -23,6 +23,8 @@ import {
   History,
   MoreHorizontal,
   Sparkles,
+  Building2,
+  AlertTriangle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,23 +73,31 @@ export interface MarketingChatRef {
   clearMessages: () => void;
 }
 
-// Empty state suggestions
+// Empty state suggestions - comprehensive queries covering all agents
 const SUGGESTIONS = [
   {
     icon: TrendingUp,
-    text: "先週のチャネル別流入数を分析して",
+    text: "今週のGA4流入から求職者の応募・入社までのファネル全体を分析して、改善ポイントを教えて",
+  },
+  {
+    icon: Building2,
+    text: "35歳、年収希望600万、成長志向の候補者に合う企業TOP5と、それぞれの訴求ポイントを提案して",
   },
   {
     icon: Search,
-    text: "SEOのパフォーマンスを確認したい",
+    text: "hitocareer.comと競合3社のSEO状況（DR、被リンク、オーガニックKW）を比較分析して",
+  },
+  {
+    icon: AlertTriangle,
+    text: "今週面談予定の候補者で、競合エージェントリスクが高い人を洗い出して面談準備資料を作って",
   },
   {
     icon: BarChart3,
-    text: "今月の求職者データを教えて",
+    text: "過去3ヶ月のチャネル別（Indeed, doda, 自然流入）の獲得単価と入社率を比較して",
   },
   {
     icon: Users,
-    text: "入社率が高いチャネルはどれ？",
+    text: "今月の流入→応募→面談→内定→入社の全体ファネルと、離脱が多いステップの改善案を提示して",
   },
 ];
 
@@ -98,12 +108,12 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
         <Sparkles className="w-6 h-6 text-primary/70" />
       </div>
       <h2 className="text-lg font-semibold text-foreground mb-1.5 tracking-tight">
-        Marketing AI
+        b&q エージェント
       </h2>
       <p className="text-sm text-muted-foreground mb-8 max-w-md leading-relaxed">
-        SEO、Analytics、CRM、広告データをAIで分析します
+        マーケティング・採用・候補者支援をAIで統合分析。GA4、SEO、CRM、企業DB、広告データを横断して最適解を導きます
       </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-lg w-full">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-2xl w-full">
         {SUGGESTIONS.map((s, i) => {
           const Icon = s.icon;
           return (
@@ -188,7 +198,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
             {/* Left side - Title */}
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-primary/70" />
-              <span className="text-sm font-medium text-foreground">Marketing AI</span>
+              <span className="text-sm font-medium text-foreground">b&q エージェント</span>
             </div>
 
             {/* Right side - Actions */}
@@ -305,7 +315,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
               onSend={handleSend}
               isStreaming={isStreaming}
               disabled={isStreaming}
-              placeholder="マーケティングデータについて質問..."
+              placeholder="マーケティング・採用・候補者支援について質問..."
             />
           )}
         </div>
