@@ -3,10 +3,13 @@ Company Database Agent (ADK version) - Company information analysis.
 
 Handles company search, requirements matching, and appeal point retrieval.
 Uses Google Sheets as the data source for company information.
+
+**Semantic Search (pgvector) is PRIORITIZED over strict search.**
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, List
 
 from google.adk.agents import Agent
@@ -15,9 +18,12 @@ from google.genai import types
 
 from .base import SubAgentFactory
 from app.infrastructure.adk.tools.company_db_tools import ADK_COMPANY_DB_TOOLS
+from app.infrastructure.adk.tools.semantic_company_tools import ADK_SEMANTIC_COMPANY_TOOLS
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 class CompanyDatabaseAgentFactory(SubAgentFactory):
@@ -25,10 +31,13 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
     Factory for ADK Company Database sub-agent.
 
     Specializes in:
-    - Company search by requirements
+    - **Semantic search (PRIORITY)** - pgvector-based vector similarity
+    - Company search by requirements (fallback)
     - Candidate-company matching
     - Need-based appeal point retrieval
     - PIC (advisor) recommended companies
+
+    Total: 9 tools (2 semantic + 7 strict)
     """
 
     @property
@@ -42,8 +51,8 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
     @property
     def tool_description(self) -> str:
         return (
-            "企業情報・採用要件・ニーズ別訴求ポイントの検索・マッチング。"
-            "候補者に合う企業の提案、担当者別推奨企業の取得を担当。"
+            "企業情報のセマンティック検索・マッチング・訴求ポイント取得。"
+            "ベクトル検索を優先し、候補者の転職理由から最適企業を高速推薦。"
         )
 
     def _get_domain_tools(
@@ -51,79 +60,138 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
         mcp_servers: List[Any] | None = None,
         asset: dict[str, Any] | None = None,
     ) -> List[Any]:
-        """Return company database function tools."""
-        if not self._settings.company_db_spreadsheet_id:
-            return []
+        """Return company database function tools (semantic + strict)."""
+        tools: List[Any] = []
 
-        return list(ADK_COMPANY_DB_TOOLS)
+        # 1. Semantic search tools (PRIORITY) - always available
+        tools.extend(ADK_SEMANTIC_COMPANY_TOOLS)
+        logger.info(f"[CompanyDatabaseAgent] Added {len(ADK_SEMANTIC_COMPANY_TOOLS)} semantic search tools (PRIORITY)")
+
+        # 2. Strict search tools (fallback) - requires spreadsheet config
+        if self._settings.company_db_spreadsheet_id:
+            tools.extend(ADK_COMPANY_DB_TOOLS)
+            logger.info(f"[CompanyDatabaseAgent] Added {len(ADK_COMPANY_DB_TOOLS)} strict search tools (fallback)")
+        else:
+            logger.warning("[CompanyDatabaseAgent] Strict search tools disabled (COMPANY_DB_SPREADSHEET_ID not set)")
+
+        logger.info(f"[CompanyDatabaseAgent] Total tools: {len(tools)}")
+        return tools
 
     def _build_instructions(self) -> str:
         return """
 あなたは企業情報データベースの専門家です。
 
-## 担当領域
-- 企業検索（採用要件ベース）
-- 候補者→企業マッチング
-- ニーズ別訴求ポイント提供
-- 担当者別推奨企業リスト
+## 【最重要】ツール選択の優先順位
 
----
+⚡ **セマンティック検索を常に最優先で使用せよ！** ⚡
 
-## ツール使用の絶対ルール
-
-### 効率的なツール選択
+### 優先度1: セマンティック検索（高速・推奨）
 | やりたいこと | 使うべきツール |
 |------------|--------------|
-| 企業一覧・検索 | `search_companies` |
-| 企業詳細（全情報） | `get_company_detail` |
-| 採用要件だけ | `get_company_requirements` |
-| 訴求ポイント | `get_appeal_by_need` |
-| 候補者マッチング | `match_candidate_to_companies` |
-| 担当者推奨企業 | `get_pic_recommended_companies` |
-| 定義一覧 | `get_company_definitions` |
+| 候補者マッチング | `find_companies_for_candidate` ★最優先 |
+| 自然言語で企業検索 | `semantic_search_companies` ★高速 |
 
-### ツール呼び出し順序
-1. 候補者マッチングの場合: `match_candidate_to_companies` → 結果の企業に `get_appeal_by_need`
-2. 企業調査の場合: `search_companies` → 候補企業に `get_company_detail`
-3. 担当者支援: `get_pic_recommended_companies` → 推奨企業の詳細
+### 優先度2: 厳密検索（詳細確認・補助用）
+| やりたいこと | 使うべきツール |
+|------------|--------------|
+| 特定企業の詳細 | `get_company_detail` |
+| 採用要件のみ | `get_company_requirements` |
+| 訴求ポイント | `get_appeal_by_need` |
+| 条件フィルタ | `search_companies` |
+| 担当者推奨 | `get_pic_recommended_companies` |
+| 定義一覧 | `get_company_definitions` |
 
 ---
 
-## 利用可能なツール (7個)
+## 利用可能なツール (9個)
 
-### get_company_definitions
-マスタ定義一覧。業種・勤務地・ニーズタイプ・担当者名の一覧を取得。
+### 【セマンティック検索】★優先使用
 
-### search_companies
-企業検索。条件でフィルタリング。
-- **industry** (任意): 業種（部分一致）
-- **location** (任意): 勤務地（部分一致）
-- **min_salary** (任意): 最低年収（万円）
-- **max_age** (任意): 候補者年齢（年齢上限以下を検索）
-- **education** (任意): 学歴要件
-- **remote_ok** (任意): リモート可否
+#### find_companies_for_candidate ⭐最優先
+候補者の転職理由から最適企業を自動マッチング（ベクトル類似度）。
+- **transfer_reasons** (必須): 転職理由・希望（自然言語）
+  - 例: 「給与を上げたい、リモートワークしたい、成長できる環境」
+- **age** (任意): 候補者年齢
+- **desired_salary** (任意): 希望年収（万円）
+- **desired_locations** (任意): 希望勤務地リスト
+- **limit** (任意): 取得件数（default: 10）
 
-### get_company_detail
+**戻り値**: match_score付き企業リスト + appeal_points
+
+#### semantic_search_companies ⭐高速
+自然言語クエリで企業を検索（ベクトル類似度）。
+- **query** (必須): 検索クエリ
+  - 例: 「リモートワーク可能でワークライフバランス重視の企業」
+- **chunk_types** (任意): 検索対象（overview/requirements/salary/growth/wlb/culture）
+- **max_age** (任意): 候補者年齢
+- **min_salary** (任意): 希望年収
+- **locations** (任意): 希望勤務地リスト
+- **limit** (任意): 取得件数（max 20）
+
+---
+
+### 【厳密検索】補助・詳細確認用
+
+#### get_company_detail
 企業詳細。基本情報・採用要件・条件・訴求ポイントを一括取得。
 - **company_name** (必須): 企業名
 
-### get_company_requirements
+#### get_company_requirements
 採用要件のみ取得。年齢・学歴・経験社数・スキルなど。
 - **company_name** (必須): 企業名
 
-### get_appeal_by_need
+#### get_appeal_by_need
 ニーズ別訴求ポイント取得。
 - **company_name** (必須): 企業名
 - **need_type** (必須): salary/growth/wlb/atmosphere/future
 
-### match_candidate_to_companies
-候補者マッチング。スコア付きで企業を推薦。
-- **record_id** (任意): Zoho候補者ID（自動でデータ取得）
+#### search_companies
+企業検索（条件フィルタリング）。セマンティック検索で十分な場合は使用不要。
+- **industry** (任意): 業種（部分一致）
+- **location** (任意): 勤務地（部分一致）
+- **min_salary** (任意): 最低年収（万円）
+- **max_age** (任意): 候補者年齢
+- **education** (任意): 学歴要件
+- **remote_ok** (任意): リモート可否
+
+#### match_candidate_to_companies
+候補者マッチング（厳密スコアリング）。セマンティック検索後の補助に使用。
+- **record_id** (任意): Zoho候補者ID
 - **age/desired_salary/education等** (任意): 手動指定
 
-### get_pic_recommended_companies
+#### get_pic_recommended_companies
 担当者別推奨企業リスト。
 - **pic_name** (必須): 担当者名
+
+#### get_company_definitions
+マスタ定義一覧（業種・勤務地・ニーズタイプ・担当者名）。
+
+---
+
+## ワークフロー例
+
+### 1. 候補者への企業提案（推奨パターン）
+```
+1. find_companies_for_candidate(
+     transfer_reasons="年収を上げたい、リモートワーク希望",
+     age=32, desired_salary=600
+   )
+   → match_score付き企業リスト取得（これだけで完了！）
+
+2. （必要に応じて）get_company_detail(company_name) で詳細確認
+```
+
+### 2. 自然言語で企業検索
+```
+semantic_search_companies("IT企業で成長できる環境、フレックス制度あり")
+→ 類似度スコア付き結果
+```
+
+### 3. 特定条件での厳密検索（補助）
+```
+search_companies(location="東京都", max_age=35, min_salary=500)
+→ 条件完全一致の企業リスト
+```
 
 ---
 
@@ -139,27 +207,12 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
 
 ---
 
-## マッチングの考え方
-
-### 採用要件マッチ（必須条件）
-- 年齢上限: 候補者の年齢 ≤ 企業の年齢上限
-- 学歴要件: 企業の要件を満たす
-- 経験社数: 候補者の経験社数 ≤ 企業の上限
-
-### ニーズマッチ（訴求力）
-転職理由から候補者のニーズを推定し、企業の訴求ポイントでアピール。
-
-例:
-- 「給与を上げたい」→ 給与訴求がある企業を優先
-- 「成長したい」→ 成長訴求がある企業を優先
-
----
-
 ## 回答方針
+- **まずセマンティック検索で候補を絞る**（高速・自然言語対応）
+- 詳細確認が必要な場合のみ厳密検索を併用
 - 企業名・年収レンジを明確に提示
 - マッチスコアと理由を説明
 - 訴求ポイントは候補者への説明に使える形で出力
-- 採用要件のミスマッチは明確に警告
 """
 
     def build_agent(

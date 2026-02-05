@@ -60,6 +60,7 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | 高リスク、緊急度、競合エージェント、面談準備 | call_candidate_insight_agent |
 | 企業検索、採用要件、訴求ポイント | call_company_db_agent |
 | 候補者マッチング、おすすめ企業、推奨企業 | call_company_db_agent |
+| 転職理由から企業、セマンティック検索、ベクトル検索 | call_company_db_agent |
 | 担当者の企業、PIC企業、アドバイザー担当 | call_company_db_agent |
 | CA支援、面談準備、企業提案、候補者プロファイル | call_ca_support_agent |
 | 議事録、構造化データ、面談内容 | call_ca_support_agent |
@@ -102,7 +103,10 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 転職理由・パターン分析
 - 面談ブリーフィング
 
-### call_company_db_agent (企業DB)
+### call_company_db_agent (企業DB) ★セマンティック検索対応
+**ベクトル検索（pgvector）を優先使用！高速・自然言語対応**
+- ⭐ `find_companies_for_candidate`: 転職理由から最適企業を自動マッチング
+- ⭐ `semantic_search_companies`: 自然言語で企業検索（ベクトル類似度）
 - 企業検索（業種・勤務地・年収・年齢等）
 - 採用要件確認（年齢上限・学歴・経験社数）
 - ニーズ別訴求ポイント（salary/growth/wlb/atmosphere/future）
