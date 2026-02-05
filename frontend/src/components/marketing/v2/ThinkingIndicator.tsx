@@ -1,27 +1,44 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
-// Phase-based thinking labels for better user feedback
+// Concrete, action-oriented labels that show what's actually happening
+// Ordered to match the actual system flow: init → routing → connection → execution → synthesis
 const LABELS = [
-  "リクエストを理解しています",
-  "最適なエージェントを選択中",
-  "データソースを確認中",
-  "分析方針を策定中",
-  "結果を準備しています",
+  "メッセージを分析中...",
+  "専門エージェントを選択中...",
+  "データソースに接続中...",
+  "情報を取得しています...",
+  "分析を実行中...",
+  "結果を整理しています...",
 ];
 
-const LABEL_INTERVAL_MS = 2500; // Faster rotation for better perceived progress
+// Progressive intervals: start fast (feels responsive), slow down (feels stable)
+// Total cycle: 1.2 + 1.5 + 2.0 + 2.5 + 3.0 + 3.5 = 13.7s before repeat
+const INTERVALS_MS = [1200, 1500, 2000, 2500, 3000, 3500];
 
 export function ThinkingIndicator() {
   const [labelIndex, setLabelIndex] = useState(0);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setLabelIndex((prev) => (prev + 1) % LABELS.length);
-    }, LABEL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
+    const scheduleNext = (currentIndex: number) => {
+      const interval = INTERVALS_MS[currentIndex] || INTERVALS_MS[INTERVALS_MS.length - 1];
+      timerRef.current = setTimeout(() => {
+        const nextIndex = (currentIndex + 1) % LABELS.length;
+        setLabelIndex(nextIndex);
+        scheduleNext(nextIndex);
+      }, interval);
+    };
+
+    scheduleNext(labelIndex);
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
