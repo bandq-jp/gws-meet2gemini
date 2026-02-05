@@ -23,6 +23,7 @@ from .wordpress_agent import WordPressAgentFactory
 from .zoho_crm_agent import ZohoCRMAgentFactory
 from .candidate_insight_agent import CandidateInsightAgentFactory
 from .company_db_agent import CompanyDatabaseAgentFactory
+from .ca_support_agent import CASupportAgentFactory
 from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
 from app.infrastructure.adk.mcp_manager import ADKMCPToolsets
 
@@ -60,6 +61,8 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | 企業検索、採用要件、訴求ポイント | call_company_db_agent |
 | 候補者マッチング、おすすめ企業、推奨企業 | call_company_db_agent |
 | 担当者の企業、PIC企業、アドバイザー担当 | call_company_db_agent |
+| CA支援、面談準備、企業提案、候補者プロファイル | call_ca_support_agent |
+| 議事録、構造化データ、面談内容 | call_ca_support_agent |
 
 ---
 
@@ -106,6 +109,14 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 候補者→企業マッチング（スコア付き推薦）
 - 担当者別推奨企業リスト
 
+### call_ca_support_agent (CA統合支援) ★推奨
+**25ツール統合**：Zoho CRM + 候補者インサイト + 企業DB + 議事録
+- 候補者の完全プロファイル取得（Zoho + 議事録構造化データ）
+- 面談準備資料の自動生成
+- 競合リスク分析 + 企業マッチング一括実行
+- 議事録検索・本文取得・AI抽出データ参照
+- **CA業務に関する質問はこのエージェントを優先使用**
+
 ---
 
 ## 並列呼び出しパターン
@@ -137,6 +148,10 @@ ORCHESTRATOR_INSTRUCTIONS = """
 **一気通貫レポート**
 「今月の流入→候補者→企業マッチングを分析」
 → call_analytics_agent + call_zoho_crm_agent + call_company_db_agent
+
+**CA業務全般（推奨パターン）**
+「山田さんの面談準備をして」「候補者に合う企業を提案して」「リスク分析して」
+→ call_ca_support_agent（統合エージェント1つで対応）
 
 ---
 
@@ -177,6 +192,7 @@ class OrchestratorAgentFactory:
             "zoho_crm": ZohoCRMAgentFactory(settings),
             "candidate_insight": CandidateInsightAgentFactory(settings),
             "company_db": CompanyDatabaseAgentFactory(settings),
+            "ca_support": CASupportAgentFactory(settings),
         }
 
     @property
@@ -218,6 +234,7 @@ class OrchestratorAgentFactory:
             "zoho_crm": [],  # Uses function tools, no MCP
             "candidate_insight": [],  # Uses function tools, no MCP
             "company_db": [],  # Uses function tools (Google Sheets), no MCP
+            "ca_support": [],  # Unified agent with all function tools, no MCP
         }
 
         # Populate MCP mapping if toolsets are provided
