@@ -281,8 +281,9 @@ class ADKAgentService:
             # Emit initial event
             await queue.put({"type": "response_created"})
 
-            # Track accumulated text for context
+            # Track accumulated text for context and deduplication
             accumulated_text = ""
+            sent_text_tracker: Dict[str, str] = {"text": ""}
 
             async def _pump_adk_events() -> None:
                 """Background task: read ADK stream events and put into queue."""
@@ -296,12 +297,16 @@ class ADKAgentService:
                         new_message=user_content,
                         run_config=run_config,
                     ):
-                        sse_events = self._process_adk_event(event, sub_agent_states)
+                        sse_events = self._process_adk_event(
+                            event, sub_agent_states, sent_text_tracker
+                        )
                         if sse_events is not None:
                             for sse_event in sse_events:
-                                # Track text
+                                # Track text for deduplication and context
                                 if sse_event.get("type") == "text_delta":
-                                    accumulated_text += sse_event.get("content", "")
+                                    content = sse_event.get("content", "")
+                                    accumulated_text += content
+                                    sent_text_tracker["text"] += content
                                 await queue.put(sse_event)
                 except Exception as e:
                     logger.exception(f"[ADK] Error during streaming: {e}")
@@ -341,10 +346,84 @@ class ADKAgentService:
             yield {"type": "error", "message": str(e)}
             yield {"type": "done", "conversation_id": session_id}
 
+    def _process_non_text_part(
+        self,
+        part: Any,
+        sub_agent_states: Dict[str, dict],
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Process non-text parts (function_call, function_response)."""
+        results = []
+
+        # Function response (tool result)
+        if hasattr(part, "function_response") and part.function_response:
+            fr = part.function_response
+            tool_name = getattr(fr, "name", "unknown")
+            output = getattr(fr, "response", {})
+
+            if isinstance(output, dict) and output.get("_chart_spec"):
+                results.append({
+                    "type": "chart",
+                    "spec": output["_chart_spec"],
+                })
+            elif tool_name.endswith("Agent"):
+                agent_name = self._normalize_agent_name(tool_name)
+                if agent_name in sub_agent_states:
+                    sub_agent_states[agent_name]["is_running"] = False
+
+                output_str = (
+                    json.dumps(output, ensure_ascii=False)[:200]
+                    if isinstance(output, dict)
+                    else str(output)[:200]
+                )
+                results.append({
+                    "type": "sub_agent_event",
+                    "agent": agent_name,
+                    "event_type": "message_output",
+                    "is_running": False,
+                    "data": {"output_preview": output_str},
+                })
+            else:
+                output_str = (
+                    json.dumps(output, ensure_ascii=False)[:4000]
+                    if isinstance(output, dict)
+                    else str(output)[:4000]
+                )
+                results.append({
+                    "type": "tool_result",
+                    "call_id": str(uuid.uuid4()),
+                    "output": output_str,
+                })
+
+        # Function call (tool invocation)
+        elif hasattr(part, "function_call") and part.function_call:
+            fc = part.function_call
+            tool_name = getattr(fc, "name", "unknown")
+
+            if tool_name.endswith("Agent"):
+                agent_name = self._normalize_agent_name(tool_name)
+                sub_agent_states[agent_name] = {"is_running": True}
+                results.append({
+                    "type": "sub_agent_event",
+                    "agent": agent_name,
+                    "event_type": "started",
+                    "is_running": True,
+                    "data": {},
+                })
+            else:
+                results.append({
+                    "type": "tool_call",
+                    "call_id": str(uuid.uuid4()),
+                    "name": tool_name,
+                    "arguments": json.dumps(getattr(fc, "args", {}), ensure_ascii=False),
+                })
+
+        return results if results else None
+
     def _process_adk_event(
         self,
         event: Any,
         sub_agent_states: Dict[str, dict],
+        sent_text_tracker: Optional[Dict[str, str]] = None,
     ) -> Optional[List[Dict[str, Any]]]:
         """
         Convert ADK event to SSE event format.
@@ -356,9 +435,14 @@ class ADKAgentService:
 
         In SSE streaming mode:
         - partial=True: Streaming chunk (should be sent immediately)
-        - partial=False/None: Final event (may contain full text, skip if already sent via partial)
+        - partial=False: Final event with complete text (deduplicated against sent text)
+        - partial=None: Non-streaming mode (send as-is)
 
         Returns a list of SSE events (since one ADK event can contain multiple parts).
+
+        Args:
+            sent_text_tracker: Optional dict with "text" key tracking all sent text.
+                               Used for deduplication of partial=False events.
         """
         results = []
 
@@ -368,6 +452,62 @@ class ADKAgentService:
         # ADK events have content.parts[]
         if hasattr(event, "content") and event.content:
             if hasattr(event.content, "parts"):
+                # For partial=False (final) events, collect all text parts first for deduplication
+                # This is necessary because Gemini may split the response into multiple parts
+                if is_partial is False and sent_text_tracker is not None:
+                    # Collect all text parts
+                    all_text_parts = []
+                    non_text_parts = []
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            all_text_parts.append(part.text)
+                        else:
+                            non_text_parts.append(part)
+
+                    # Process non-text parts (function_call, function_response)
+                    for part in non_text_parts:
+                        part_result = self._process_non_text_part(
+                            part, sub_agent_states
+                        )
+                        if part_result:
+                            results.extend(part_result)
+
+                    # Deduplicate concatenated text
+                    if all_text_parts:
+                        full_text = "".join(all_text_parts)
+                        already_sent = sent_text_tracker.get("text", "")
+
+                        if already_sent and full_text.startswith(already_sent):
+                            # Only send the NEW portion
+                            new_text = full_text[len(already_sent):]
+                            if new_text:
+                                logger.debug(f"[ADK] Sending new text from final event: {len(new_text)} chars")
+                                results.append({
+                                    "type": "text_delta",
+                                    "content": new_text,
+                                })
+                            else:
+                                logger.debug(f"[ADK] Skipping duplicate final text ({len(full_text)} chars)")
+                        elif already_sent == full_text:
+                            logger.debug(f"[ADK] Skipping exact duplicate final text")
+                        elif not already_sent:
+                            # No streaming events received - send full text
+                            logger.debug(f"[ADK] No streaming text received, sending full final text")
+                            results.append({
+                                "type": "text_delta",
+                                "content": full_text,
+                            })
+                        else:
+                            # Text doesn't match - might be a different response format
+                            logger.warning(f"[ADK] Final text doesn't match streamed text, sending full final text")
+                            results.append({
+                                "type": "text_delta",
+                                "content": full_text,
+                            })
+
+                    return results if results else None
+
+                # For partial=True or partial=None, process each part individually
                 for part in event.content.parts:
                     # Use elif to ensure only one event type per part
                     # Priority: function_response > function_call > text
@@ -443,26 +583,12 @@ class ADKAgentService:
 
                     # --- Text content (lowest priority) ---
                     elif hasattr(part, "text") and part.text:
-                        # SSE streaming mode event flow:
-                        # 1. partial=True: Streaming chunk (send immediately)
-                        # 2. partial=False: Final event with complete text (skip - already sent via partial)
-                        # 3. partial=None: Non-streaming mode (send - no partial events)
-                        if is_partial is True:
-                            # Streaming chunk - send immediately
-                            results.append({
-                                "type": "text_delta",
-                                "content": part.text,
-                            })
-                        elif is_partial is False:
-                            # Final event in SSE mode - skip to avoid duplication
-                            # The same text was already sent via partial=True events
-                            logger.debug(f"[ADK] Skipping final text (partial=False): {part.text[:50]}...")
-                        elif is_partial is None:
-                            # Non-streaming mode (e.g., sub-agent) - send the text
-                            results.append({
-                                "type": "text_delta",
-                                "content": part.text,
-                            })
+                        # For partial=True or partial=None, send text immediately
+                        # (partial=False is handled separately above with concatenation)
+                        results.append({
+                            "type": "text_delta",
+                            "content": part.text,
+                        })
 
         # Return results if any, otherwise None
         return results if results else None
