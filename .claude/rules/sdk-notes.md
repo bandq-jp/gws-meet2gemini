@@ -64,6 +64,38 @@ agent = Agent(
 )
 ```
 
+### ADK Plugin システム
+サブエージェント内部のイベント（ツール呼び出し、推論、エラー）をキャプチャするための強力な仕組み。
+
+**利用可能なコールバック** (`BasePlugin`):
+| コールバック | タイミング | 用途 |
+|-------------|----------|------|
+| `before_tool_callback` | ツール呼び出し前 | サブエージェント内のツール開始を検知 |
+| `after_tool_callback` | ツール呼び出し後 | サブエージェント内のツール完了を検知 |
+| `after_model_callback` | LLMレスポンス後 | 推論/思考をキャプチャ |
+| `on_tool_error_callback` | ツールエラー時 | エラーハンドリング |
+| `before_agent_callback` | エージェント開始前 | エージェント切り替え追跡 |
+| `after_agent_callback` | エージェント完了後 | エージェント切り替え追跡 |
+
+**重要**: `AgentTool`はデフォルトで`include_plugins=True`なので、親のPluginがサブエージェントに継承される。
+
+```python
+from google.adk.plugins.base_plugin import BasePlugin
+from google.adk.runners import Runner
+
+class SubAgentStreamingPlugin(BasePlugin):
+    async def before_tool_callback(self, *, tool, tool_args, tool_context):
+        # サブエージェント内のツール呼び出しをキャプチャ
+        pass
+
+runner = Runner(
+    agent=orchestrator,
+    plugins=[SubAgentStreamingPlugin(emit_callback=queue.put)],
+)
+```
+
+**実装**: `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py`
+
 ## Gemini 3 Flash (gemini-3-flash-preview)
 - **モデルID**: `gemini-3-flash-preview`
 - **最大入力トークン**: 1,048,576 (1M)

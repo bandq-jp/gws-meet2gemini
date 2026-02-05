@@ -388,6 +388,23 @@ export function useMarketingChat(
                   isRunning: false,
                 };
               }
+            } else if (event.event_type === "tool_error") {
+              // Tool error in sub-agent - mark tool as failed
+              if (existingIdx !== -1) {
+                const subItem = items[existingIdx] as SubAgentActivityItem;
+                const callId = event.data?.call_id;
+                const toolName = event.data?.tool_name;
+                const toolCalls = (subItem.toolCalls || []).map((tc) =>
+                  tc.callId === callId || tc.toolName === toolName
+                    ? { ...tc, isComplete: true, error: event.data?.error }
+                    : tc
+                );
+                items[existingIdx] = {
+                  ...subItem,
+                  eventType: event.event_type,
+                  toolCalls,
+                };
+              }
             }
             break;
           }

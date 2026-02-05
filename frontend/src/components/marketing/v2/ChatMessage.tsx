@@ -393,23 +393,34 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
           {toolCalls.map((tc, idx) => {
             const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
             const toolLabel = TOOL_LABELS[tc.toolName] || tc.toolName;
+            const hasError = !!tc.error;
             return (
-              <div
-                key={tc.callId || idx}
-                className={`
-                  inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[10px]
-                  ${tc.isComplete
-                    ? "bg-[#ecfdf5] text-[#065f46]"
-                    : "bg-[#f8f9fb] text-[#6b7280]"
-                  }
-                `}
-              >
-                <ToolIcon className="w-2.5 h-2.5 shrink-0" />
-                <span className="truncate max-w-[200px]">{toolLabel}</span>
-                {tc.isComplete ? (
-                  <span className="text-[#10b981]">✓</span>
-                ) : (
-                  <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              <div key={tc.callId || idx} className="space-y-0.5">
+                <div
+                  className={`
+                    inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[10px]
+                    ${hasError
+                      ? "bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]"
+                      : tc.isComplete
+                        ? "bg-[#ecfdf5] text-[#065f46]"
+                        : "bg-[#f8f9fb] text-[#6b7280]"
+                    }
+                  `}
+                >
+                  <ToolIcon className="w-2.5 h-2.5 shrink-0" />
+                  <span className="truncate max-w-[200px]">{toolLabel}</span>
+                  {hasError ? (
+                    <span className="text-[#dc2626]">✗</span>
+                  ) : tc.isComplete ? (
+                    <span className="text-[#10b981]">✓</span>
+                  ) : (
+                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                  )}
+                </div>
+                {hasError && (
+                  <div className="ml-3 text-[9px] text-[#dc2626] truncate max-w-[250px]">
+                    {tc.error}
+                  </div>
                 )}
               </div>
             );

@@ -31,6 +31,7 @@ from google.genai import types
 
 from .agents import OrchestratorAgentFactory
 from .mcp_manager import ADKMCPManager
+from .plugins import SubAgentStreamingPlugin
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -306,12 +307,17 @@ class ADKAgentService:
                 mcp_toolsets=mcp_toolsets,
             )
 
-            # Create runner with memory service
+            # Create plugin for streaming sub-agent internal events
+            # This captures tool calls, reasoning, and errors from within sub-agents
+            sub_agent_plugin = SubAgentStreamingPlugin(emit_callback=emit_event)
+
+            # Create runner with memory service and sub-agent streaming plugin
             runner = Runner(
                 agent=orchestrator,
                 app_name="marketing_ai",
                 session_service=self._session_service,
                 memory_service=self._memory_service if self._settings.memory_preload_enabled else None,
+                plugins=[sub_agent_plugin],
             )
 
             # Create user content
