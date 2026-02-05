@@ -144,6 +144,8 @@ class Settings:
     # Max LLM calls per run (0 or negative = unlimited, default 500)
     # Set higher for complex multi-agent workflows, set to 0 for unlimited deep investigation
     adk_max_llm_calls: int = int(os.getenv("ADK_MAX_LLM_CALLS", "0"))
+    # Max output tokens per response (Gemini 3 Flash max: 65536)
+    adk_max_output_tokens: int = int(os.getenv("ADK_MAX_OUTPUT_TOKENS", "65536"))
 
     # ADK Memory Service settings
     memory_service_type: str = os.getenv("MEMORY_SERVICE_TYPE", "supabase")
