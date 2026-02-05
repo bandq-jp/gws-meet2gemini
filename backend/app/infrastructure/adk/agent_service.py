@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict
 
 from google.adk.agents import Agent
 from google.adk.agents.run_config import StreamingMode
+from google.adk.memory import InMemoryMemoryService
 from google.adk.runners import Runner, RunConfig
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -84,8 +85,22 @@ class ADKAgentService:
     def __init__(self, settings: "Settings"):
         self._settings = settings
         self._session_service = InMemorySessionService()
+        self._memory_service = self._create_memory_service()
         self._mcp_manager = ADKMCPManager(settings)
         self._orchestrator_factory = OrchestratorAgentFactory(settings)
+
+    def _create_memory_service(self):
+        """Create memory service based on settings."""
+        service_type = self._settings.memory_service_type
+
+        if service_type == "supabase":
+            from .memory import SupabaseMemoryService
+            logger.info("[ADK] Using SupabaseMemoryService with pgvector")
+            return SupabaseMemoryService(self._settings)
+        else:
+            # Default: in-memory for development
+            logger.info("[ADK] Using InMemoryMemoryService (dev mode)")
+            return InMemoryMemoryService()
 
     def _is_simple_query(self, message: str) -> bool:
         """Detect simple queries that don't need sub-agents."""
@@ -129,6 +144,25 @@ class ADKAgentService:
             result.append(char.lower())
 
         return "".join(result)
+
+    async def _save_session_to_memory(self, session: Any, user_email: str) -> None:
+        """
+        Save session to memory service (non-blocking background task).
+
+        Args:
+            session: ADK Session object
+            user_email: User email for tagging
+        """
+        try:
+            # Add user_email to session for better tagging
+            # Note: ADK Session may not have user_email by default
+            if hasattr(session, "user_email"):
+                session.user_email = user_email
+
+            await self._memory_service.add_session_to_memory(session)
+            logger.info(f"[ADK Memory] Saved session {session.id} to memory")
+        except Exception as e:
+            logger.error(f"[ADK Memory] Failed to save session: {e}")
 
     async def _stream_simple_response(
         self,
@@ -268,11 +302,12 @@ class ADKAgentService:
                 mcp_toolsets=mcp_toolsets,
             )
 
-            # Create runner
+            # Create runner with memory service
             runner = Runner(
                 agent=orchestrator,
                 app_name="marketing_ai",
                 session_service=self._session_service,
+                memory_service=self._memory_service if self._settings.memory_preload_enabled else None,
             )
 
             # Create user content
@@ -343,6 +378,7 @@ class ADKAgentService:
             # Build context items from session history for next turn
             # ADK stores conversation history in the session
             context_items = []
+            updated_session = None
             try:
                 updated_session = await self._session_service.get_session(
                     app_name="marketing_ai",
@@ -380,6 +416,16 @@ class ADKAgentService:
                 logger.debug(f"[ADK] Built {len(context_items)} context items from session")
             except Exception as ctx_err:
                 logger.warning(f"[ADK] Failed to build context items: {ctx_err}")
+
+            # Save session to memory for semantic search (non-blocking)
+            if self._settings.memory_auto_save and self._memory_service and updated_session:
+                try:
+                    # Fire and forget - don't block response
+                    asyncio.create_task(
+                        self._save_session_to_memory(updated_session, user_email)
+                    )
+                except Exception as mem_err:
+                    logger.warning(f"[ADK] Failed to start memory save task: {mem_err}")
 
             yield {"type": "_context_items", "items": context_items}
             yield {"type": "done", "conversation_id": session_id}

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from google.adk.agents import Agent
 from google.adk.planners import BuiltInPlanner
 from google.adk.tools import AgentTool
+from google.adk.tools.preload_memory_tool import PreloadMemoryTool
 from google.genai import types
 
 from .analytics_agent import AnalyticsAgentFactory
@@ -38,6 +39,7 @@ ORCHESTRATOR_INSTRUCTIONS = """
 2. **データは必ずツールで取得**: 自分でデータを推測・捏造してはならない
 3. **並列実行を活用**: 独立した複数サブエージェントは並列で呼び出す
 4. **挨拶や一般知識のみ**: サブエージェント不要
+5. **記憶を活用**: <PAST_CONVERSATIONS>タグに過去の会話が自動注入される。ユーザーの文脈や前提を理解して回答せよ
 
 ---
 
@@ -227,6 +229,12 @@ class OrchestratorAgentFactory:
 
         # Combine sub-agent tools with chart tools
         all_tools = sub_agent_tools + list(ADK_CHART_TOOLS)
+
+        # Add PreloadMemoryTool if memory is enabled
+        # This automatically injects relevant past conversations into system prompt
+        if self._settings.memory_preload_enabled:
+            all_tools.append(PreloadMemoryTool())
+            logger.info("[ADK Orchestrator] PreloadMemoryTool enabled")
 
         return Agent(
             name="MarketingOrchestrator",

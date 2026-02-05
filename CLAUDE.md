@@ -3228,6 +3228,113 @@ async def after_agent_callback(callback_context):
 - **SDKソース**: `backend/.venv/lib/python3.12/site-packages/google/adk/`
 - **Google Cloud Blog**: https://cloud.google.com/blog/topics/developers-practitioners/remember-this-agent-state-and-memory-with-adk
 
+### 33. ADK Memory機能 Supabase + pgvector 実装 (2026-02-05)
+
+**背景**: マーケティングAIにセマンティックメモリ検索を実装し、過去の会話を自動的に参照できるようにする
+
+**アーキテクチャ**:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      ADKAgentService                             │
+├─────────────────────────────────────────────────────────────────┤
+│  InMemorySessionService   │   SupabaseMemoryService             │
+│  (ADK標準)                │  ┌────────────────────────────────┐ │
+│                           │  │ - Gemini Embedding API         │ │
+│                           │  │ - pgvector セマンティック検索  │ │
+│                           │  │ - 768次元 (Matryoshka)         │ │
+│                           │  └────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────────────┤
+│  Runner(memory_service=SupabaseMemoryService)                   │
+│    ↓                                                            │
+│  Orchestrator Agent                                              │
+│    tools: [PreloadMemoryTool, sub_agents, chart_tools]          │
+├─────────────────────────────────────────────────────────────────┤
+│  ストリーム完了後: memory_service.add_session_to_memory(session)│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**新規ファイル**:
+
+| ファイル | 説明 |
+|---------|------|
+| `backend/app/infrastructure/adk/memory/__init__.py` | メモリモジュール |
+| `backend/app/infrastructure/adk/memory/supabase_memory_service.py` | Supabaseメモリサービス (pgvector) |
+| `supabase/migrations/0020_add_memory_table.sql` | メモリテーブル + RPC関数 |
+
+**変更ファイル**:
+
+| ファイル | 変更内容 |
+|---------|---------|
+| `settings.py` | メモリ設定追加 (6項目) |
+| `agent_service.py` | `_create_memory_service()`, `_save_session_to_memory()` |
+| `orchestrator.py` | `PreloadMemoryTool` 追加 |
+| `.env.example` | ADK/メモリ設定ドキュメント |
+
+**環境変数**:
+```bash
+MEMORY_SERVICE_TYPE=supabase     # inmemory | supabase
+MEMORY_AUTO_SAVE=true            # 会話終了後に自動保存
+MEMORY_PRELOAD_ENABLED=true      # PreloadMemoryTool有効化
+MEMORY_MAX_RESULTS=5             # 検索結果最大件数
+MEMORY_EMBEDDING_MODEL=gemini-embedding-001
+MEMORY_EMBEDDING_DIMENSIONS=768  # 768=効率重視, 3072=品質重視
+```
+
+**SupabaseMemoryService の主要メソッド**:
+
+| メソッド | 説明 |
+|---------|------|
+| `_get_embedding(text)` | Gemini Embedding APIでベクトル生成 |
+| `add_session_to_memory(session)` | セッションイベントをDBに保存 |
+| `search_memory(app_name, user_id, query)` | pgvectorでセマンティック検索 |
+
+**PreloadMemoryTool の動作**:
+1. LLMリクエスト前に自動実行（モデルは呼び出さない）
+2. `tool_context.search_memory(query)` で過去会話検索
+3. 関連メモリを `<PAST_CONVERSATIONS>` タグでシステム指示に注入
+
+**Supabase pgvector テーブル**:
+```sql
+create table marketing_memories (
+  id uuid primary key,
+  app_name text not null,
+  user_id text not null,
+  session_id text,
+  content_text text not null,
+  embedding vector(768),  -- Gemini embedding
+  author text,
+  metadata jsonb,
+  created_at timestamptz
+);
+
+-- IVFFlat インデックス (高速近似最近傍検索)
+create index idx_memories_embedding
+  on marketing_memories using ivfflat (embedding vector_cosine_ops);
+```
+
+**RPC関数** (`search_memories_by_embedding`):
+```sql
+-- コサイン類似度で上位N件を検索
+select id, content_text, 1 - (embedding <=> query_embedding) as similarity
+from marketing_memories
+where app_name = $1 and user_id = $2
+order by embedding <=> query_embedding
+limit $3;
+```
+
+**技術的知見**:
+- `gemini-embedding-001`: Matryoshka技術で768/1536/3072次元に対応
+- pgvector `<=>` 演算子: コサイン距離（昇順=類似度高）
+- IVFFlat: lists=100 は ~100k レコードまで有効
+- PreloadMemoryToolは `process_llm_request()` で自動実行
+
+**コスト見積もり**:
+| 項目 | 単価 | 月間使用量 | 月額 |
+|------|------|-----------|------|
+| Gemini Embedding | $0.025/1M chars | 1M chars | ~$0.025 |
+| Supabase Storage | 含む | - | $0 |
+| **合計** | | | **~$0.03/月** |
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

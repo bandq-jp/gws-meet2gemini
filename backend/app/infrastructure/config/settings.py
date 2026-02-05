@@ -149,6 +149,20 @@ class Settings:
     # ADK sub-agent model (Gemini 3 Flash for speed and cost)
     adk_sub_agent_model: str = os.getenv("ADK_SUB_AGENT_MODEL", "gemini-3-flash-preview")
 
+    # ADK Memory Service settings
+    # Memory service type: "inmemory" (dev) | "supabase" (prod with pgvector)
+    memory_service_type: str = os.getenv("MEMORY_SERVICE_TYPE", "supabase")
+    # Auto-save session to memory after completion
+    memory_auto_save: bool = os.getenv("MEMORY_AUTO_SAVE", "true").lower() == "true"
+    # Enable PreloadMemoryTool for automatic memory injection
+    memory_preload_enabled: bool = os.getenv("MEMORY_PRELOAD_ENABLED", "true").lower() == "true"
+    # Max results from memory search
+    memory_max_results: int = int(os.getenv("MEMORY_MAX_RESULTS", "5"))
+    # Embedding model for semantic search (gemini-embedding-001: 768-3072 dims)
+    memory_embedding_model: str = os.getenv("MEMORY_EMBEDDING_MODEL", "gemini-embedding-001")
+    # Embedding dimensions (768 for efficiency, 3072 for max quality)
+    memory_embedding_dimensions: int = int(os.getenv("MEMORY_EMBEDDING_DIMENSIONS", "768"))
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
