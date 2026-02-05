@@ -155,6 +155,10 @@ class Settings:
     memory_embedding_model: str = os.getenv("MEMORY_EMBEDDING_MODEL", "gemini-embedding-001")
     memory_embedding_dimensions: int = int(os.getenv("MEMORY_EMBEDDING_DIMENSIONS", "768"))
 
+    # Company Database (Google Sheets)
+    company_db_spreadsheet_id: str = os.getenv("COMPANY_DB_SPREADSHEET_ID", "")
+    company_db_cache_ttl: int = int(os.getenv("COMPANY_DB_CACHE_TTL", "300"))
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

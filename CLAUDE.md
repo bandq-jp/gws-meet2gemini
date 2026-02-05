@@ -67,6 +67,20 @@
 - **メモリ最適化実施**: CLAUDE.md (879行) → コア (約70行) + `.claude/rules/` (10ファイル) + `docs/session-history/` に分割。約90%削減。
 - **モデル名の確認不足**: ユーザーが使用しているモデル名（`gemini-3-flash-preview`）を確認せずに「Gemini 2.5 Flash」の情報を調査・実装してしまった。**必ず現在の設定ファイルを確認してから調査を開始すること**。
 
+### 2026-02-06
+- **CompanyDatabaseAgent実装完了（ADK版）**: Google Sheets企業DBを活用した新規サブエージェントを追加
+  - 新規ファイル:
+    - `backend/app/infrastructure/google/sheets_service.py` - Sheets APIクライアント+TTLキャッシュ
+    - `backend/app/infrastructure/adk/tools/company_db_tools.py` - 7つの関数ツール
+    - `backend/app/infrastructure/adk/agents/company_db_agent.py` - SubAgentFactory実装
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - サブエージェント登録+キーワードマトリクス
+    - `backend/app/infrastructure/adk/agents/__init__.py` - エクスポート追加
+    - `backend/app/infrastructure/config/settings.py` - 環境変数追加
+    - `backend/.env.example` - 設定例追加
+  - 環境変数: `COMPANY_DB_SPREADSHEET_ID`, `COMPANY_DB_CACHE_TTL`
+  - 認証: 既存のSERVICE_ACCOUNT_JSON（drive_docs_collector.pyパターン）を流用
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

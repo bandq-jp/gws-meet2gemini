@@ -19,6 +19,7 @@ from .seo_agent import SEOAgentFactory
 from .wordpress_agent import WordPressAgentFactory
 from .zoho_crm_agent import ZohoCRMAgentFactory
 from .candidate_insight_agent import CandidateInsightAgentFactory
+from .company_db_agent import CompanyDatabaseAgentFactory
 
 __all__ = [
     "SubAgentFactory",
@@ -29,4 +30,5 @@ __all__ = [
     "WordPressAgentFactory",
     "ZohoCRMAgentFactory",
     "CandidateInsightAgentFactory",
+    "CompanyDatabaseAgentFactory",
 ]

@@ -22,6 +22,7 @@ from .seo_agent import SEOAgentFactory
 from .wordpress_agent import WordPressAgentFactory
 from .zoho_crm_agent import ZohoCRMAgentFactory
 from .candidate_insight_agent import CandidateInsightAgentFactory
+from .company_db_agent import CompanyDatabaseAgentFactory
 from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
 from app.infrastructure.adk.mcp_manager import ADKMCPToolsets
 
@@ -56,6 +57,9 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | 記事、ブログ、WordPress、SEO記事 | call_wordpress_agent |
 | 求職者、チャネル別、成約率、ファネル | call_zoho_crm_agent |
 | 高リスク、緊急度、競合エージェント、面談準備 | call_candidate_insight_agent |
+| 企業検索、採用要件、訴求ポイント | call_company_db_agent |
+| 候補者マッチング、おすすめ企業、推奨企業 | call_company_db_agent |
+| 担当者の企業、PIC企業、アドバイザー担当 | call_company_db_agent |
 
 ---
 
@@ -95,6 +99,13 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 転職理由・パターン分析
 - 面談ブリーフィング
 
+### call_company_db_agent (企業DB)
+- 企業検索（業種・勤務地・年収・年齢等）
+- 採用要件確認（年齢上限・学歴・経験社数）
+- ニーズ別訴求ポイント（salary/growth/wlb/atmosphere/future）
+- 候補者→企業マッチング（スコア付き推薦）
+- 担当者別推奨企業リスト
+
 ---
 
 ## 並列呼び出しパターン
@@ -114,6 +125,18 @@ ORCHESTRATOR_INSTRUCTIONS = """
 **全体レポート**
 「今月のマーケティング全体レポート」
 → call_analytics_agent + call_seo_agent + call_zoho_crm_agent
+
+**候補者への企業提案（CA向け）**
+「山田さん（Zoho ID: xxx）に合う企業を提案して」
+→ call_zoho_crm_agent + call_candidate_insight_agent + call_company_db_agent
+
+**チャネル×企業分析（マーケ向け）**
+「Indeed経由の候補者に効果的な企業訴求は？」
+→ call_zoho_crm_agent + call_company_db_agent
+
+**一気通貫レポート**
+「今月の流入→候補者→企業マッチングを分析」
+→ call_analytics_agent + call_zoho_crm_agent + call_company_db_agent
 
 ---
 
@@ -153,6 +176,7 @@ class OrchestratorAgentFactory:
             "wordpress": WordPressAgentFactory(settings),
             "zoho_crm": ZohoCRMAgentFactory(settings),
             "candidate_insight": CandidateInsightAgentFactory(settings),
+            "company_db": CompanyDatabaseAgentFactory(settings),
         }
 
     @property
@@ -193,6 +217,7 @@ class OrchestratorAgentFactory:
             "wordpress": [],
             "zoho_crm": [],  # Uses function tools, no MCP
             "candidate_insight": [],  # Uses function tools, no MCP
+            "company_db": [],  # Uses function tools (Google Sheets), no MCP
         }
 
         # Populate MCP mapping if toolsets are provided
