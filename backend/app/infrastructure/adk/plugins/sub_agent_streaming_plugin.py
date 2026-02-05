@@ -47,6 +47,8 @@ class SubAgentStreamingPlugin(BasePlugin):
         "WordPressAgent",
         "ZohoCRMAgent",
         "CandidateInsightAgent",
+        "CompanyDatabaseAgent",
+        "CASupportAgent",
     }
 
     def __init__(

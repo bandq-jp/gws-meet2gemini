@@ -222,6 +222,8 @@ export interface SubAgentActivityItem extends BaseActivityItem {
     toolName: string;
     isComplete: boolean;
     error?: string;
+    /** Raw JSON arguments from the tool call (for contextual display) */
+    arguments?: string;
   }>;
   reasoningContent?: string;
   outputPreview?: string;
@@ -260,6 +262,8 @@ export interface Message {
   activityItems: ActivityItem[];
   isStreaming: boolean;
   createdAt: Date;
+  /** Transient: latest progress text from backend (not persisted) */
+  progressText?: string;
 }
 
 // =============================================================================

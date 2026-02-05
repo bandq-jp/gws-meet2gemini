@@ -116,6 +116,27 @@
   - 新機能を追加する際、別エージェントを作るか既存エージェントに統合するかはユーザーに確認すべき
   - 同じドメイン（企業検索）の機能は同じエージェントにまとめるのが原則
 
+- **サブエージェントUX改善（バグ修正+機能強化）**
+  - **致命バグ修正**: `SubAgentStreamingPlugin.SUB_AGENT_NAMES`に`CompanyDatabaseAgent`と`CASupportAgent`が未登録
+    - この2エージェントの全ツール実行イベントがフロントエンドに届いていなかった
+  - **ツール引数のコンテキスト表示**: ツール実行時に企業名・検索クエリなどを表示
+    - 例: 「企業詳細 株式会社MyVision ✓」（以前は「get_company_detail ✓」のみ）
+  - **ThinkingIndicator改善**: バックエンドの実際のprogressイベントを表示（偽タイマーラベル廃止）
+  - **ツールラベル追加**: Company DB(9個), Candidate Insight(4個), Meeting(4個), Chart(1個)のラベル追加
+  - **エージェントUI設定追加**: CompanyDatabaseAgent(企業DB/indigo), CASupportAgent(CA支援/rose)の色・アイコン設定
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py` - SUB_AGENT_NAMES追加
+    - `backend/app/infrastructure/adk/agent_service.py` - progressイベント整理
+    - `backend/app/presentation/api/v1/marketing_v2.py` - 即時progressイベント
+    - `frontend/src/lib/marketing/types.ts` - Message.progressText, toolCalls.arguments追加
+    - `frontend/src/hooks/use-marketing-chat-v2.ts` - progressイベント反映, ツール引数保存
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - extractToolContext, ラベル・色追加
+    - `frontend/src/components/marketing/v2/ThinkingIndicator.tsx` - 実進捗表示
+  - **自己改善**:
+    - 新しいエージェントを追加したら、Plugin/UI設定も必ず同時に更新すべき
+    - MCP初期化は<1msであり、想定値(1.2-1.7s)は完全に誤りだった。**実測値を確認せずに推測で実装するな**
+    - 表面的なUI変更（ラベルテキスト変更）ではなく、データフロー全体を追跡して根本原因を修正すべき
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

@@ -266,7 +266,7 @@ class OrchestratorAgentFactory:
                 tool = AgentTool(agent=sub_agent)
                 sub_agent_tools.append(tool)
                 mcp_count = len(domain_mcp)
-                logger.info(f"[ADK Orchestrator] Sub-agent registered: {factory.tool_name} ({mcp_count} MCP toolsets)")
+                logger.info(f"[ADK Orchestrator] Sub-agent registered: {factory.agent_name} ({mcp_count} MCP toolsets)")
             except Exception as e:
                 logger.warning(f"Failed to build sub-agent {name}: {e}")
 

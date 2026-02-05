@@ -173,6 +173,44 @@ const SUB_AGENT_CONFIG: Record<string, AgentUIConfig> = {
     borderColor: "border-cyan-200",
     accentColor: "#06b6d4",
   },
+  // Company Database Agent
+  companydatabaseagent: {
+    label: "企業DB",
+    icon: Database,
+    gradient: "from-indigo-500 to-blue-500",
+    bgLight: "bg-indigo-50",
+    textColor: "text-indigo-700",
+    borderColor: "border-indigo-200",
+    accentColor: "#6366f1",
+  },
+  company_database: {
+    label: "企業DB",
+    icon: Database,
+    gradient: "from-indigo-500 to-blue-500",
+    bgLight: "bg-indigo-50",
+    textColor: "text-indigo-700",
+    borderColor: "border-indigo-200",
+    accentColor: "#6366f1",
+  },
+  // CA Support Agent
+  casupportagent: {
+    label: "CA支援",
+    icon: Users,
+    gradient: "from-rose-500 to-pink-500",
+    bgLight: "bg-rose-50",
+    textColor: "text-rose-700",
+    borderColor: "border-rose-200",
+    accentColor: "#f43f5e",
+  },
+  ca_support: {
+    label: "CA支援",
+    icon: Users,
+    gradient: "from-rose-500 to-pink-500",
+    bgLight: "bg-rose-50",
+    textColor: "text-rose-700",
+    borderColor: "border-rose-200",
+    accentColor: "#f43f5e",
+  },
   default: {
     label: "Agent",
     icon: Bot,
@@ -195,36 +233,112 @@ function getAgentConfig(agentName: string): AgentUIConfig {
 // ---------------------------------------------------------------------------
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
+  // Analytics (GA4/GSC)
   run_report: BarChart3,
   run_realtime_report: BarChart3,
   get_search_analytics: Search,
   get_performance_overview: Search,
   list_properties: Database,
+  // Zoho CRM
   search_job_seekers: Users,
   get_job_seeker_detail: Users,
   aggregate_by_channel: BarChart3,
+  // Meta Ads
   get_campaigns: Megaphone,
   get_adsets: Megaphone,
+  // WordPress
   list_posts: FileText,
+  // Company DB
+  get_company_detail: Database,
+  search_companies: Search,
+  get_company_definitions: Database,
+  get_appeal_points: Sparkles,
+  match_companies_for_candidate: Users,
+  get_pic_recommendations: Users,
+  compare_companies: BarChart3,
+  semantic_search_companies: Search,
+  find_companies_for_candidate: Users,
+  // Candidate Insight
+  analyze_competitor_risk: TrendingUp,
+  assess_urgency: TrendingUp,
+  analyze_career_pattern: Users,
+  generate_briefing: FileText,
+  // Meeting
+  search_meeting_notes: FileText,
+  get_meeting_text: FileText,
+  get_structured_data: Database,
+  get_integrated_profile: Users,
+  // General
   code_interpreter: Code2,
   web_search: Globe,
+  render_chart: BarChart3,
 };
 
 const TOOL_LABELS: Record<string, string> = {
+  // Analytics
   run_report: "レポート取得",
   run_realtime_report: "リアルタイム取得",
   get_search_analytics: "検索分析",
   get_performance_overview: "パフォーマンス概要",
   list_properties: "プロパティ一覧",
+  // Zoho CRM
   search_job_seekers: "求職者検索",
   get_job_seeker_detail: "求職者詳細",
   aggregate_by_channel: "チャネル集計",
+  // Meta Ads
   get_campaigns: "キャンペーン取得",
   get_adsets: "広告セット取得",
+  // WordPress
   list_posts: "記事一覧",
+  // Company DB
+  get_company_detail: "企業詳細",
+  search_companies: "企業検索",
+  get_company_definitions: "企業一覧",
+  get_appeal_points: "訴求ポイント",
+  match_companies_for_candidate: "候補者マッチング",
+  get_pic_recommendations: "担当者推奨",
+  compare_companies: "企業比較",
+  semantic_search_companies: "セマンティック検索",
+  find_companies_for_candidate: "候補者向け企業検索",
+  // Candidate Insight
+  analyze_competitor_risk: "競合リスク分析",
+  assess_urgency: "緊急度評価",
+  analyze_career_pattern: "キャリアパターン",
+  generate_briefing: "ブリーフィング",
+  // Meeting
+  search_meeting_notes: "議事録検索",
+  get_meeting_text: "議事録本文",
+  get_structured_data: "構造化データ",
+  get_integrated_profile: "統合プロファイル",
+  // General
   code_interpreter: "コード実行",
   web_search: "Web検索",
+  render_chart: "チャート作成",
 };
+
+/**
+ * Extract contextual label from tool arguments.
+ * e.g., get_company_detail({company_name: "株式会社MyVision"}) → "株式会社MyVision"
+ */
+function extractToolContext(toolName: string, argsJson?: string): string | null {
+  if (!argsJson) return null;
+  try {
+    const args = JSON.parse(argsJson);
+    // Company name
+    if (args.company_name) return args.company_name;
+    // Search query
+    if (args.query && typeof args.query === "string") return args.query.slice(0, 40);
+    // Candidate reasons (for find_companies_for_candidate)
+    if (args.reasons && typeof args.reasons === "string") return args.reasons.slice(0, 40);
+    // Job seeker search
+    if (args.name) return args.name;
+    // Meeting search
+    if (args.keyword) return args.keyword;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Markdown components
@@ -346,6 +460,8 @@ const AGENT_PROGRESS_LABELS: Record<string, string[]> = {
   zoho_crm: ["CRMに接続中", "候補者を検索中", "データを集計中", "レポートを作成中"],
   candidate_insight: ["データを統合中", "リスクを評価中", "緊急度を分析中", "ブリーフィングを生成中"],
   wordpress: ["WordPressに接続中", "記事を検索中", "コンテンツを取得中", "メタ情報を確認中"],
+  company_database: ["企業DBを検索中", "企業情報を取得中", "マッチングを実行中", "結果を整理中"],
+  ca_support: ["データを統合中", "候補者情報を収集中", "企業情報を確認中", "分析レポートを作成中"],
   default: ["準備中", "データを取得中", "処理中", "結果を整理中"],
 };
 
@@ -526,6 +642,7 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
           {toolCalls.map((tc, idx) => {
             const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
             const toolLabel = TOOL_LABELS[tc.toolName] || tc.toolName;
+            const contextLabel = extractToolContext(tc.toolName, tc.arguments);
             const hasError = !!tc.error;
             const isLast = idx === toolCalls.length - 1;
             return (
@@ -558,7 +675,13 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
                     `}
                   >
                     <ToolIcon className="w-2.5 h-2.5 shrink-0" />
-                    <span className="truncate max-w-[200px]">{toolLabel}</span>
+                    <span className="truncate max-w-[120px]">{toolLabel}</span>
+                    {/* Contextual detail from tool arguments */}
+                    {contextLabel && (
+                      <span className="text-[9px] text-[#9ca3af] truncate max-w-[150px] hidden sm:inline">
+                        {contextLabel}
+                      </span>
+                    )}
                     {hasError ? (
                       <span className="text-[#dc2626]">✗</span>
                     ) : tc.isComplete ? (
@@ -809,7 +932,7 @@ function AssistantMessage({ message }: { message: Message }) {
   return (
     <div className="assistant-response overflow-hidden min-w-0">
       {showThinking ? (
-        <ThinkingIndicator />
+        <ThinkingIndicator progressText={message.progressText} />
       ) : hasItems ? (
         <ActivityTimeline items={items} isStreaming={message.isStreaming} />
       ) : message.content ? (

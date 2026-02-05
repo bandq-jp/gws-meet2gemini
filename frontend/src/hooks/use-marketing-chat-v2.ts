@@ -303,6 +303,7 @@ export function useMarketingChat(
             } else if (event.event_type === "tool_called") {
               const toolName = event.data?.tool_name || "unknown";
               const callId = event.data?.call_id || generateId();
+              const toolArgs = event.data?.arguments;
 
               if (existingIdx !== -1) {
                 // Update existing sub-agent card with new tool call
@@ -314,7 +315,7 @@ export function useMarketingChat(
                   isRunning: true,
                   toolCalls: [
                     ...toolCalls,
-                    { callId, toolName, isComplete: false },
+                    { callId, toolName, isComplete: false, arguments: toolArgs },
                   ],
                 };
               } else {
@@ -327,7 +328,7 @@ export function useMarketingChat(
                   eventType: event.event_type,
                   data: event.data,
                   isRunning: true,
-                  toolCalls: [{ callId, toolName, isComplete: false }],
+                  toolCalls: [{ callId, toolName, isComplete: false, arguments: toolArgs }],
                 } as SubAgentActivityItem);
               }
             } else if (event.event_type === "tool_output") {
@@ -415,7 +416,8 @@ export function useMarketingChat(
           }
 
           case "progress": {
-            // Keepalive - no UI update needed
+            // Real progress from backend initialization phases
+            assistant.progressText = event.text;
             break;
           }
 

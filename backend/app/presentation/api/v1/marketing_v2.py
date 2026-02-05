@@ -145,6 +145,9 @@ async def chat_stream(
     is_new_conversation = not body.conversation_id
 
     async def event_generator():
+        # --- Immediate feedback: Client receives this before any heavy work ---
+        yield f"data: {json.dumps({'type': 'progress', 'text': 'リクエストを処理中...'}, ensure_ascii=False)}\n\n"
+
         # --- DB: Save user message before streaming ---
         user_msg_id = str(uuid.uuid4())
         try:

@@ -326,6 +326,9 @@ class ADKAgentService:
                 parts=[types.Part(text=message)],
             )
 
+            # Progress: all setup done, LLM analysis starting
+            yield {"type": "progress", "text": "エージェントを選択中..."}
+
             # Emit initial event
             await queue.put({"type": "response_created"})
 

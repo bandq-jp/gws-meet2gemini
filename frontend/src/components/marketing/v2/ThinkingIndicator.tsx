@@ -2,43 +2,50 @@
 
 import { useState, useEffect, useRef } from "react";
 
-// Concrete, action-oriented labels that show what's actually happening
-// Ordered to match the actual system flow: init → routing → connection → execution → synthesis
-const LABELS = [
-  "メッセージを分析中...",
-  "専門エージェントを選択中...",
-  "データソースに接続中...",
-  "情報を取得しています...",
-  "分析を実行中...",
-  "結果を整理しています...",
-];
+// Fallback label: shown only until the first real progress event arrives from backend.
+// Typically visible for <500ms (time between SSE connection and first progress event).
+const FALLBACK_LABEL = "処理を開始しています...";
 
-// Progressive intervals: start fast (feels responsive), slow down (feels stable)
-// Total cycle: 1.2 + 1.5 + 2.0 + 2.5 + 3.0 + 3.5 = 13.7s before repeat
-const INTERVALS_MS = [1200, 1500, 2000, 2500, 3000, 3500];
+// After a real progress event, if no new event arrives within this timeout,
+// show a generic continuation label to indicate the system is still working.
+const STALE_TIMEOUT_MS = 8000;
+const STALE_LABEL = "処理中...";
 
-export function ThinkingIndicator() {
-  const [labelIndex, setLabelIndex] = useState(0);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+interface ThinkingIndicatorProps {
+  /** Real progress text from backend SSE events */
+  progressText?: string;
+}
 
+export function ThinkingIndicator({ progressText }: ThinkingIndicatorProps) {
+  const [isStale, setIsStale] = useState(false);
+  const staleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastProgressRef = useRef(progressText);
+
+  // Reset stale timer when progressText changes
   useEffect(() => {
-    const scheduleNext = (currentIndex: number) => {
-      const interval = INTERVALS_MS[currentIndex] || INTERVALS_MS[INTERVALS_MS.length - 1];
-      timerRef.current = setTimeout(() => {
-        const nextIndex = (currentIndex + 1) % LABELS.length;
-        setLabelIndex(nextIndex);
-        scheduleNext(nextIndex);
-      }, interval);
-    };
+    if (progressText && progressText !== lastProgressRef.current) {
+      lastProgressRef.current = progressText;
+      setIsStale(false);
 
-    scheduleNext(labelIndex);
+      // Start stale timer: if no new progress arrives, show generic label
+      if (staleTimerRef.current) clearTimeout(staleTimerRef.current);
+      staleTimerRef.current = setTimeout(() => setIsStale(true), STALE_TIMEOUT_MS);
+    }
 
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
+      if (staleTimerRef.current) clearTimeout(staleTimerRef.current);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [progressText]);
+
+  // Determine displayed label:
+  // 1. If backend sent progress text and it's fresh → show it
+  // 2. If progress text is stale (no update for 8s) → show generic "処理中..."
+  // 3. If no progress text yet → show fallback
+  const displayLabel = progressText
+    ? isStale
+      ? STALE_LABEL
+      : progressText
+    : FALLBACK_LABEL;
 
   return (
     <div
@@ -52,10 +59,10 @@ export function ThinkingIndicator() {
         <span className="thinking-dot thinking-dot-3" />
       </div>
       <span
-        key={labelIndex}
+        key={displayLabel}
         className="thinking-label text-[12px] text-[#9ca3af] font-light tracking-wide"
       >
-        {LABELS[labelIndex]}
+        {displayLabel}
       </span>
     </div>
   );
