@@ -208,8 +208,12 @@ class ADKAgentService:
                 parts=[types.Part(text=message)],
             )
 
-            # Enable SSE streaming mode
-            run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+            # Enable SSE streaming mode with configurable max_llm_calls
+            # 0 or negative = unlimited (for deep investigation)
+            run_config = RunConfig(
+                streaming_mode=StreamingMode.SSE,
+                max_llm_calls=self._settings.adk_max_llm_calls,
+            )
             async for event in runner.run_async(
                 user_id="default",
                 session_id=session_id,
@@ -327,8 +331,12 @@ class ADKAgentService:
                 """Background task: read ADK stream events and put into queue."""
                 nonlocal accumulated_text
                 try:
-                    # Enable SSE streaming mode
-                    run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+                    # Enable SSE streaming mode with configurable max_llm_calls
+                    # 0 or negative = unlimited (for deep investigation)
+                    run_config = RunConfig(
+                        streaming_mode=StreamingMode.SSE,
+                        max_llm_calls=self._settings.adk_max_llm_calls,
+                    )
                     async for event in runner.run_async(
                         user_id="default",
                         session_id=session_id,

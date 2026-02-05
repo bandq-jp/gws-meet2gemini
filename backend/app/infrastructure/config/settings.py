@@ -141,6 +141,9 @@ class Settings:
     use_adk: bool = os.getenv("USE_ADK", "false").lower() == "true"
     adk_orchestrator_model: str = os.getenv("ADK_ORCHESTRATOR_MODEL", "gemini-3-flash-preview")
     adk_sub_agent_model: str = os.getenv("ADK_SUB_AGENT_MODEL", "gemini-3-flash-preview")
+    # Max LLM calls per run (0 or negative = unlimited, default 500)
+    # Set higher for complex multi-agent workflows, set to 0 for unlimited deep investigation
+    adk_max_llm_calls: int = int(os.getenv("ADK_MAX_LLM_CALLS", "0"))
 
     # ADK Memory Service settings
     memory_service_type: str = os.getenv("MEMORY_SERVICE_TYPE", "supabase")
