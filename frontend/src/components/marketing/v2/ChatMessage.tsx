@@ -338,19 +338,51 @@ const markdownComponents: Components = {
 // SubAgentBadge - Inline badge for sub-agent (matches main agent tool style)
 // ---------------------------------------------------------------------------
 
-// Progress labels for each agent type
+// Progress labels for each agent type - detailed phase-based labels
 const AGENT_PROGRESS_LABELS: Record<string, string[]> = {
-  analytics: ["データを分析中", "GA4に接続中", "メトリクスを取得中"],
-  seo: ["SEOを調査中", "バックリンクを分析中", "キーワードを確認中"],
-  ad_platform: ["広告データを取得中", "キャンペーンを分析中", "パフォーマンスを確認中"],
-  zoho_crm: ["CRMを検索中", "候補者情報を取得中", "データを集計中"],
-  candidate_insight: ["候補者を分析中", "リスクを評価中", "ブリーフィングを生成中"],
-  wordpress: ["記事を検索中", "コンテンツを取得中", "ページを確認中"],
-  default: ["処理中", "データを取得中", "分析中"],
+  analytics: ["GA4に接続中", "データを取得中", "メトリクスを分析中", "レポートを生成中"],
+  seo: ["Ahrefsに接続中", "バックリンクを確認中", "キーワードを分析中", "競合を調査中"],
+  ad_platform: ["Meta APIに接続中", "キャンペーンを取得中", "パフォーマンスを分析中", "インサイトを抽出中"],
+  zoho_crm: ["CRMに接続中", "候補者を検索中", "データを集計中", "レポートを作成中"],
+  candidate_insight: ["データを統合中", "リスクを評価中", "緊急度を分析中", "ブリーフィングを生成中"],
+  wordpress: ["WordPressに接続中", "記事を検索中", "コンテンツを取得中", "メタ情報を確認中"],
+  default: ["準備中", "データを取得中", "処理中", "結果を整理中"],
+};
+
+// Sub-agent execution states for state machine visualization
+type SubAgentState = "pending" | "thinking" | "executing" | "outputting" | "complete" | "error";
+
+function getSubAgentState(item: SubAgentActivityItem): SubAgentState {
+  if (!item.isRunning) {
+    // Check for errors
+    const hasError = item.toolCalls?.some(tc => tc.error);
+    return hasError ? "error" : "complete";
+  }
+
+  // Running - determine phase
+  const toolCalls = item.toolCalls || [];
+  const runningTools = toolCalls.filter(tc => !tc.isComplete).length;
+  const hasReasoning = !!item.reasoningContent;
+  const hasOutput = !!item.outputPreview;
+
+  if (hasOutput) return "outputting";
+  if (runningTools > 0) return "executing";
+  if (hasReasoning) return "thinking";
+  return "pending";
+}
+
+// State icons and colors for state machine visualization
+const STATE_CONFIG: Record<SubAgentState, { icon: string; label: string; color: string }> = {
+  pending: { icon: "○", label: "準備中", color: "text-[#9ca3af]" },
+  thinking: { icon: "◐", label: "思考中", color: "text-[#f59e0b]" },
+  executing: { icon: "◑", label: "実行中", color: "text-[#3b82f6]" },
+  outputting: { icon: "◕", label: "出力中", color: "text-[#8b5cf6]" },
+  complete: { icon: "●", label: "完了", color: "text-[#10b981]" },
+  error: { icon: "✗", label: "エラー", color: "text-[#dc2626]" },
 };
 
 function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
-  // Default expanded when running (user requested)
+  // Default expanded when running or has details (user requested: no auto-collapse)
   const [isExpanded, setIsExpanded] = useState(item.isRunning);
   const [progressLabelIndex, setProgressLabelIndex] = useState(0);
   const config = getAgentConfig(item.agent);
@@ -360,8 +392,18 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
   const hasDetails = toolCalls.length > 0 || item.reasoningContent;
   const runningToolCount = toolCalls.filter(tc => !tc.isComplete).length;
   const completedToolCount = toolCalls.filter(tc => tc.isComplete && !tc.error).length;
+  const errorCount = toolCalls.filter(tc => tc.error).length;
 
-  // Rotate progress labels every 3 seconds when running
+  // Get state machine state
+  const state = getSubAgentState(item);
+  const stateConfig = STATE_CONFIG[state];
+
+  // Extract first sentence of reasoning for preview chip
+  const reasoningPreview = item.reasoningContent
+    ? item.reasoningContent.split(/[。.!！?\?]/)[0]?.trim()?.slice(0, 50) + (item.reasoningContent.length > 50 ? "..." : "")
+    : null;
+
+  // Rotate progress labels every 2.5 seconds when running (faster rotation for better feedback)
   useEffect(() => {
     if (!item.isRunning) return;
 
@@ -370,20 +412,17 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
 
     const interval = setInterval(() => {
       setProgressLabelIndex((prev) => (prev + 1) % labels.length);
-    }, 3000);
+    }, 2500);
 
     return () => clearInterval(interval);
   }, [item.isRunning, item.agent]);
 
-  // Auto-expand when running with details, smoother collapse after completion
+  // Auto-expand when running with details (NO auto-collapse - user keeps control)
   useEffect(() => {
     if (item.isRunning && hasDetails) {
       setIsExpanded(true);
-    } else if (!item.isRunning) {
-      // Smoother auto-collapse 2 seconds after completion
-      const timer = setTimeout(() => setIsExpanded(false), 2000);
-      return () => clearTimeout(timer);
     }
+    // Removed auto-collapse: users prefer to see details after completion
   }, [item.isRunning, hasDetails]);
 
   // Get current progress label
@@ -394,93 +433,153 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
   return (
     <div className="space-y-1.5">
       {/* Main badge - inline with other activity items */}
-      <button
-        onClick={() => hasDetails && setIsExpanded(!isExpanded)}
-        className={`
-          inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] sm:text-xs
-          transition-all duration-300 cursor-pointer
-          ${item.isRunning
-            ? "bg-[#f0f1f5] text-[#374151] border border-[#e5e7eb]"
-            : "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
-          }
-        `}
-      >
-        <Icon className="w-3 h-3 shrink-0" />
-        <span className="font-medium">{config.label}</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          onClick={() => hasDetails && setIsExpanded(!isExpanded)}
+          className={`
+            inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] sm:text-xs
+            transition-all duration-300 cursor-pointer
+            ${state === "error"
+              ? "bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]"
+              : state === "complete"
+                ? "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
+                : "bg-[#f0f1f5] text-[#374151] border border-[#e5e7eb]"
+            }
+          `}
+        >
+          <Icon className="w-3 h-3 shrink-0" />
+          <span className="font-medium">{config.label}</span>
 
-        {/* Status indicator */}
-        {item.isRunning ? (
-          <>
-            <Loader2 className="w-3 h-3 animate-spin text-[#6b7280]" />
-            {/* Progress label - shows what the agent is doing */}
-            <span className="text-[10px] text-[#9ca3af] ml-0.5 hidden sm:inline transition-opacity duration-300">
-              {progressLabel}
-            </span>
-          </>
-        ) : (
-          <>
-            <CheckCircle2 className="w-3 h-3 text-[#10b981]" />
-            {/* Show tool count when completed */}
-            {completedToolCount > 0 && (
-              <span className="text-[10px] text-[#10b981] ml-0.5">
-                {completedToolCount}件完了
+          {/* State machine indicator */}
+          <span className={`text-[10px] ${stateConfig.color} font-medium`}>
+            {stateConfig.icon}
+          </span>
+
+          {/* Status details */}
+          {item.isRunning ? (
+            <>
+              <Loader2 className="w-3 h-3 animate-spin text-[#6b7280]" />
+              {/* Progress label - shows what the agent is doing */}
+              <span className="text-[10px] text-[#9ca3af] ml-0.5 hidden sm:inline transition-opacity duration-300">
+                {progressLabel}
               </span>
-            )}
-          </>
-        )}
+              {/* Running tool count indicator */}
+              {runningToolCount > 0 && (
+                <span className="text-[10px] text-[#3b82f6] ml-0.5 hidden sm:inline">
+                  [{runningToolCount}実行中]
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Show tool count and status when completed */}
+              {completedToolCount > 0 && (
+                <span className="text-[10px] text-[#10b981] ml-0.5">
+                  {completedToolCount}件
+                </span>
+              )}
+              {errorCount > 0 && (
+                <span className="text-[10px] text-[#dc2626] ml-0.5">
+                  {errorCount}件エラー
+                </span>
+              )}
+            </>
+          )}
 
-        {/* Expand/collapse indicator */}
-        {hasDetails && (
-          <span className="text-[#9ca3af] ml-0.5 text-[10px]">
-            {isExpanded ? "▼" : "▶"}
+          {/* Expand/collapse indicator */}
+          {hasDetails && (
+            <span className="text-[#9ca3af] ml-0.5 text-[10px]">
+              {isExpanded ? "▼" : "▶"}
+            </span>
+          )}
+        </button>
+
+        {/* Reasoning preview chip - shown when collapsed and has reasoning */}
+        {!isExpanded && reasoningPreview && (
+          <span className="text-[10px] text-[#9ca3af] bg-[#f8f9fb] px-2 py-0.5 rounded-full max-w-[200px] truncate hidden sm:inline">
+            💭 {reasoningPreview}
           </span>
         )}
-      </button>
+      </div>
 
       {/* Expanded details - tool calls and reasoning (full content, no line-clamp) */}
       {isExpanded && hasDetails && (
-        <div className="ml-3 pl-2.5 border-l-2 border-[#e5e7eb] space-y-1.5 animate-in slide-in-from-top-1 duration-200">
-          {/* Tool calls - chronological display */}
+        <div className="ml-3 pl-2.5 border-l-2 border-[#e5e7eb] space-y-2 animate-in slide-in-from-top-1 duration-200">
+          {/* Progress bar for tool execution (visual timeline) */}
+          {toolCalls.length > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-1.5 bg-[#f0f1f5] rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-[#3b82f6] to-[#10b981] rounded-full transition-all duration-500"
+                  style={{
+                    width: `${toolCalls.length > 0 ? (completedToolCount / toolCalls.length) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+              <span className="text-[9px] text-[#9ca3af] whitespace-nowrap">
+                {completedToolCount}/{toolCalls.length}
+              </span>
+            </div>
+          )}
+
+          {/* Tool calls - chronological display with timeline dots */}
           {toolCalls.map((tc, idx) => {
             const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
             const toolLabel = TOOL_LABELS[tc.toolName] || tc.toolName;
             const hasError = !!tc.error;
+            const isLast = idx === toolCalls.length - 1;
             return (
-              <div key={tc.callId || idx} className="space-y-0.5">
-                <div
-                  className={`
-                    inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[10px]
-                    transition-all duration-200
-                    ${hasError
-                      ? "bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]"
-                      : tc.isComplete
-                        ? "bg-[#ecfdf5] text-[#065f46]"
-                        : "bg-[#f8f9fb] text-[#6b7280]"
-                    }
-                  `}
-                >
-                  <ToolIcon className="w-2.5 h-2.5 shrink-0" />
-                  <span className="truncate max-w-[200px]">{toolLabel}</span>
-                  {hasError ? (
-                    <span className="text-[#dc2626]">✗</span>
-                  ) : tc.isComplete ? (
-                    <span className="text-[#10b981]">✓</span>
-                  ) : (
-                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              <div key={tc.callId || idx} className="flex items-start gap-2">
+                {/* Timeline dot */}
+                <div className="flex flex-col items-center">
+                  <div
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      hasError
+                        ? "bg-[#dc2626]"
+                        : tc.isComplete
+                          ? "bg-[#10b981]"
+                          : "bg-[#3b82f6] animate-pulse"
+                    }`}
+                  />
+                  {!isLast && <div className="w-px h-4 bg-[#e5e7eb]" />}
+                </div>
+                {/* Tool info */}
+                <div className="flex-1 -mt-0.5 space-y-0.5">
+                  <div
+                    className={`
+                      inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[10px]
+                      transition-all duration-200
+                      ${hasError
+                        ? "bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]"
+                        : tc.isComplete
+                          ? "bg-[#ecfdf5] text-[#065f46]"
+                          : "bg-[#f8f9fb] text-[#6b7280]"
+                      }
+                    `}
+                  >
+                    <ToolIcon className="w-2.5 h-2.5 shrink-0" />
+                    <span className="truncate max-w-[200px]">{toolLabel}</span>
+                    {hasError ? (
+                      <span className="text-[#dc2626]">✗</span>
+                    ) : tc.isComplete ? (
+                      <span className="text-[#10b981]">✓</span>
+                    ) : (
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    )}
+                  </div>
+                  {hasError && (
+                    <div className="text-[9px] text-[#dc2626] truncate max-w-[250px]">
+                      {tc.error}
+                    </div>
                   )}
                 </div>
-                {hasError && (
-                  <div className="ml-3 text-[9px] text-[#dc2626] truncate max-w-[250px]">
-                    {tc.error}
-                  </div>
-                )}
               </div>
             );
           })}
 
           {/* Reasoning - FULL content with markdown rendering (no line-clamp) */}
           {item.reasoningContent && (
-            <div className="flex items-start gap-1.5">
+            <div className="flex items-start gap-1.5 mt-1">
               <Brain className="w-3 h-3 shrink-0 mt-0.5 text-[#c0c4cc]" />
               <div className="text-[10px] text-[#9ca3af] leading-relaxed [&_p]:my-0.5 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_li]:text-[10px] [&_li]:text-[#9ca3af] [&_strong]:text-[#7f8694] [&_*]:text-[10px] [&_p]:last:mb-0">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>

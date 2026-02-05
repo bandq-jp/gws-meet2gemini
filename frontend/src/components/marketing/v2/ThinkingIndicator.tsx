@@ -2,14 +2,16 @@
 
 import { useState, useEffect } from "react";
 
+// Phase-based thinking labels for better user feedback
 const LABELS = [
-  "考えています",
-  "データを確認しています",
-  "分析しています",
-  "情報を整理しています",
+  "リクエストを理解しています",
+  "最適なエージェントを選択中",
+  "データソースを確認中",
+  "分析方針を策定中",
+  "結果を準備しています",
 ];
 
-const LABEL_INTERVAL_MS = 3000;
+const LABEL_INTERVAL_MS = 2500; // Faster rotation for better perceived progress
 
 export function ThinkingIndicator() {
   const [labelIndex, setLabelIndex] = useState(0);
