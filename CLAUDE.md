@@ -855,6 +855,61 @@ cd backend && uv run python scripts/test_token_usage.py
 - システム指示の情報は専用ツール（`get_channel_definitions`）に移動可能
 - ツールdocstringは最初の1文が最も重要（OpenAI APIでトランケートされる場合あり）
 
+### 12. Google ADK 移行可能性調査 (2026-02-05)
+
+**調査目的**: マーケティングチャット機能のOpenAI Agents SDK → Google Agent Development Kit (ADK) 移行の技術的実現可能性を調査
+
+**Google ADK概要**:
+- **バージョン**: v1.0.0 stable (production-ready)
+- **PyPI**: `google-adk`
+- **モデル**: Gemini最適化、他LLMも対応可能（LiteLLM経由）
+- **公式ドキュメント**: https://google.github.io/adk-docs/
+- **GitHub**: https://github.com/google/adk-python
+
+**機能比較**:
+| 機能 | OpenAI Agents SDK + ChatKit | Google ADK + CopilotKit | 互換性 |
+|------|---------------------------|------------------------|--------|
+| Agent定義 | `Agent(name, instructions, tools)` | `Agent(name, instruction, tools)` | ✅ 高 |
+| ストリーミング | `Runner.run_streamed()` | `runner.run_async()` | ✅ 高 |
+| MCP STDIO | `MCPServerStdio` | `McpToolset(StdioConnectionParams)` | ✅ 高 |
+| MCP SSE | `HostedMCPTool` | `McpToolset(SseConnectionParams)` | ✅ 高 |
+| Function Tools | `@function_tool` | Python関数直接渡し | ✅ 高 |
+| 推論表示 | `Reasoning(effort, summary)` | ❌ Geminiは非公開 | ❌ 低 |
+| Web検索 | `WebSearchTool` | `google_search` built-in | ✅ 高 |
+| Code Interpreter | `CodeInterpreterTool` | Gemini Code Execution (制限あり) | ⚠️ 中 |
+| フロントエンドUI | `@openai/chatkit-react` | CopilotKit or カスタム | ❌ 全面置換必要 |
+
+**最大の課題: ChatKit依存の解消**:
+現在の実装は以下のChatKit固有クラスに深く依存:
+- `ChatKitServer`, `ThreadStreamEvent`, `ThreadMetadata`, `ThreadItem`
+- `UserMessageItem`, `AssistantMessageItem`, `WorkflowItem`
+- `ProgressUpdateEvent`, `AgentContext`, `ThreadItemConverter`
+
+**ADKのフロントエンド選択肢**:
+1. **adk web**: 開発用DevUI（本番非推奨）
+2. **AG-UI + CopilotKit**: 公式推奨 (https://www.copilotkit.ai/blog/build-a-frontend-for-your-adk-agents-with-ag-ui)
+3. **カスタム実装**: FastAPI SSE + 独自Reactコンポーネント
+
+**結論: 現時点で移行は非推奨**:
+| 評価軸 | スコア | 理由 |
+|--------|--------|------|
+| 技術的実現可能性 | ⭐⭐⭐☆☆ | MCP/ツール互換、SSE/UI非互換 |
+| 工数 | ⭐⭐☆☆☆ | フロントエンド全面改修必須 |
+| リスク | ⭐⭐☆☆☆ | Code Interpreter/推論表示が不完全 |
+| メリット | ⭐⭐⭐☆☆ | コスト削減・GCP統合の可能性 |
+
+**推奨事項**:
+- **短期**: 既存実装を維持しつつ、ADKの進化をウォッチ
+- **中期**: 特定の新機能（バッチ分析、画像生成統合）でADKを試験導入
+- **長期条件**: ChatKit→CopilotKit移行ガイド公開、Gemini推論サマリー対応
+
+**情報ソース**:
+- [Google ADK Documentation](https://google.github.io/adk-docs/)
+- [Google ADK Python GitHub](https://github.com/google/adk-python)
+- [ADK MCP Tools](https://google.github.io/adk-docs/tools-custom/mcp-tools/)
+- [AG-UI + CopilotKit Integration](https://www.copilotkit.ai/blog/build-a-frontend-for-your-adk-agents-with-ag-ui)
+- [OpenAI Agents SDK vs Google ADK](https://iamulya.one/posts/a-developer-guide-to-ai-agents-openai-agents-sdk-vs-google-adk/)
+
 ---
 
 ## 自己改善ログ
