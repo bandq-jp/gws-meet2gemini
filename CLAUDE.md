@@ -2915,6 +2915,321 @@ const groupable =
 
 ---
 
+## Google ADK メモリ・セッション管理 完全調査 (2026-02-05)
+
+6並列エージェントによる大規模調査を実施し、ADKのメモリ・セッション管理機能を完全に把握した。
+
+### ADK 3層アーキテクチャ概要
+
+| 概念 | 役割 | スコープ | 永続性 |
+|------|------|---------|--------|
+| **Session** | 単一の会話スレッド追跡 | 1つの会話 | サービス依存 |
+| **State** | 会話中の一時的なデータ | 会話内/ユーザー/アプリ | スコープ依存 |
+| **Memory** | 複数会話にまたがる知識 | ユーザー/アプリ全体 | 永続化可能 |
+
+### 1. SessionService (3種類)
+
+#### InMemorySessionService
+- **用途**: 開発・テスト専用
+- **永続化**: なし（プロセス内メモリのみ）
+- **スレッドセーフ**: なし
+- **本番使用**: ❌
+
+```python
+from google.adk.sessions import InMemorySessionService
+session_service = InMemorySessionService()
+```
+
+#### DatabaseSessionService (本番推奨)
+- **用途**: 本番環境
+- **永続化**: SQLAlchemy経由（SQLite, PostgreSQL, MySQL）
+- **スレッドセーフ**: あり（非同期ロック）
+- **本番使用**: ✅
+
+```python
+from google.adk.sessions import DatabaseSessionService
+
+# SQLite (開発)
+session_service = DatabaseSessionService(
+    db_url="sqlite+aiosqlite:///sessions.db"
+)
+
+# PostgreSQL (本番)
+session_service = DatabaseSessionService(
+    db_url="postgresql+asyncpg://user:pass@localhost/adk_sessions"
+)
+```
+
+**DBスキーマ**（自動作成）:
+- `sessions` - セッションメタデータ
+- `events` - イベント履歴
+- `app_state` - アプリ全体共有状態
+- `user_state` - ユーザー共有状態
+- `adk_internal_metadata` - スキーマバージョン
+
+#### VertexAiSessionService
+- **用途**: Google Cloud Vertex AI連携
+- **永続化**: Vertex AI プラットフォーム
+- **スレッドセーフ**: あり
+- **本番使用**: ✅ (Google Cloud推奨)
+
+```python
+from google.adk.sessions import VertexAiSessionService
+session_service = VertexAiSessionService(
+    project="my-project",
+    location="us-central1",
+    agent_engine_id="my-engine-id"
+)
+```
+
+### 2. MemoryService (3種類)
+
+#### InMemoryMemoryService
+- **検索方式**: キーワードマッチング（セマンティック検索なし）
+- **用途**: 開発・テスト専用
+- **本番使用**: ❌
+
+```python
+from google.adk.memory import InMemoryMemoryService
+memory_service = InMemoryMemoryService()
+```
+
+#### VertexAiMemoryBankService (本番推奨)
+- **検索方式**: セマンティック検索（Memory Bank API）
+- **用途**: 本番環境
+- **本番使用**: ✅
+
+```python
+from google.adk.memory import VertexAiMemoryBankService
+memory_service = VertexAiMemoryBankService(
+    project="my-project",
+    location="us-central1",
+    agent_engine_id="my-engine-id"
+)
+```
+
+#### VertexAiRagMemoryService
+- **検索方式**: ベクトル検索（RAG API）
+- **用途**: 高度なベクトル検索が必要な場合
+- **本番使用**: ✅
+
+```python
+from google.adk.memory import VertexAiRagMemoryService
+memory_service = VertexAiRagMemoryService(
+    rag_corpus="projects/.../ragCorpora/...",
+    similarity_top_k=10,
+    vector_distance_threshold=10
+)
+```
+
+### 3. ArtifactService (4種類)
+
+| Service | 永続化先 | 用途 |
+|---------|---------|------|
+| **InMemoryArtifactService** | プロセス内メモリ | 開発・テスト |
+| **FileArtifactService** | ローカルファイル | ローカル開発 |
+| **GcsArtifactService** | Google Cloud Storage | 本番推奨 |
+| **DatabaseArtifactService** | データベース | DB連携 |
+
+**Artifact URI形式**:
+```
+artifact://apps/{app_name}/users/{user_id}/sessions/{session_id}/artifacts/{filename}/versions/{version}
+```
+
+### 4. State管理の重要なルール
+
+#### Stateスコーププレフィックス
+
+| プレフィックス | スコープ | 永続性 | 用途 |
+|--------------|---------|--------|------|
+| **(なし)** | セッション固有 | セッションとともに | 会話内の一時データ |
+| `user:` | ユーザー全体 | ✅ 永続 | ユーザー設定、履歴 |
+| `app:` | アプリ全体 | ✅ 永続 | グローバル設定 |
+| `temp:` | 現在のinvocationのみ | ❌ 削除 | ターン内の一時データ |
+
+**使用例**:
+```python
+# セッション固有
+ctx.state["order_items"] = ["item1", "item2"]
+
+# ユーザー全体（セッション跨ぎ永続）
+ctx.state["user:preferences"] = {"theme": "dark"}
+
+# アプリ全体（全ユーザー共有）
+ctx.state["app:version"] = "1.0"
+
+# 一時的（ターン終了時に削除）
+ctx.state["temp:working_data"] = temporary_value
+```
+
+#### State更新の正しいパターン
+
+**❌ 避けるべき**（直接修正）:
+```python
+session.state["key"] = value  # Thread-safety問題、DB保存されない
+```
+
+**✅ 推奨パターン**:
+
+1. **Agent の `output_key`** - 最終出力を自動保存
+   ```python
+   agent = Agent(model=..., output_key="summary")
+   ```
+
+2. **Tool の `ToolContext`** - ツール内で状態更新
+   ```python
+   @function_tool
+   async def update_preference(ctx: ToolContext, key: str, value: str) -> str:
+       ctx.state[f"user:{key}"] = value  # ← 安全
+       return f"Updated {key}"
+   ```
+
+3. **Callback で `EventActions.state_delta`** - 複雑な更新
+   ```python
+   def on_tool_call(event, callback_context):
+       state_delta = {"step_count": callback_context.state.get("step_count", 0) + 1}
+       return EventActions(state_delta=state_delta)
+   ```
+
+### 5. Event構造とpartialフラグ
+
+**Event 構造**:
+```python
+class Event:
+    invocation_id: str           # 呼び出しID（マルチターン追跡の中核）
+    author: str                  # "user" またはエージェント名
+    content: types.Content       # テキスト/ツール呼び出し/結果
+    partial: Optional[bool]      # ストリーミングチャンク判定
+    actions: EventActions        # state_delta, artifact_delta等
+    timestamp: float             # イベント生成時刻
+```
+
+**partialフラグの意味**:
+
+| partial値 | 意味 | DB保存 | 用途 |
+|-----------|------|--------|------|
+| `True` | ストリーミング中（チャンク） | ❌ | SSEストリーミング表示 |
+| `False` | 完了イベント | ✅ | DB永続化 |
+| `None` | 非ストリーミング（通常） | ✅ | DB永続化 |
+
+### 6. Memory Tools (2種類)
+
+#### LoadMemoryTool
+- **特徴**: エージェントが明示的に呼び出す
+- **使用方式**: `load_memory(query)` 関数ツール
+- **タイミング**: エージェントの判断で検索
+
+```python
+from google.adk.tools import LoadMemoryTool
+agent = Agent(
+    model=...,
+    tools=[LoadMemoryTool()]  # エージェントが必要な時に呼び出す
+)
+```
+
+#### PreloadMemoryTool
+- **特徴**: 自動実行（エージェント呼び出し不要）
+- **使用方式**: 各LLMリクエスト前に自動実行
+- **タイミング**: ユーザーメッセージが到着した時点
+
+```python
+from google.adk.tools import PreloadMemoryTool
+agent = Agent(
+    model=...,
+    tools=[PreloadMemoryTool()]  # 各リクエスト前に自動検索
+)
+```
+
+### 7. セッション履歴からの再開機能
+
+**invocation_idによる復元**:
+```python
+# 前回の途中から再開
+async for event in runner.run_async(
+    user_id="user123",
+    session_id="session456",
+    invocation_id="inv-previous",  # 前回のinvocation_idを指定
+    new_message=None,              # 新規メッセージなしで再開
+):
+    yield event
+```
+
+**rewind_async()による巻き戻し**:
+```python
+# 特定のターンまで巻き戻し
+await runner.rewind_async(
+    user_id="user123",
+    session_id="session456",
+    rewind_before_invocation_id="inv-to-rewind"
+)
+```
+
+### 8. 実装推奨パターン（マーケティングAI向け）
+
+#### 開発環境
+```python
+from google.adk.sessions import InMemorySessionService
+from google.adk.memory import InMemoryMemoryService
+from google.adk.artifacts import FileArtifactService
+
+session_service = InMemorySessionService()
+memory_service = InMemoryMemoryService()
+artifact_service = FileArtifactService(root_dir="./artifacts")
+```
+
+#### 本番環境（Supabase連携）
+```python
+from google.adk.sessions import DatabaseSessionService
+from google.adk.memory import VertexAiMemoryBankService
+from google.adk.artifacts import GcsArtifactService
+
+session_service = DatabaseSessionService(
+    db_url="postgresql+asyncpg://user:pass@supabase-host/postgres"
+)
+memory_service = VertexAiMemoryBankService(
+    project=settings.gcp_project,
+    location=settings.gcp_location
+)
+artifact_service = GcsArtifactService(bucket_name="marketing-artifacts")
+```
+
+#### Runner統合
+```python
+from google.adk.runners import Runner
+
+runner = Runner(
+    app_name="marketing_ai",
+    agent=orchestrator_agent,
+    session_service=session_service,
+    memory_service=memory_service,
+    artifact_service=artifact_service,
+)
+
+# メモリへの追加（会話終了後）
+async def after_agent_callback(callback_context):
+    await callback_context.add_session_to_memory()
+```
+
+### 9. 技術的知見
+
+- **SQLite接続**: `sqlite://` ではなく `sqlite+aiosqlite://` を使用（非同期対応）
+- **PostgreSQL接続**: `asyncpg` ドライバ必須
+- **スキーマバージョン**: v0 (pickle) → v1 (JSON) への移行あり
+- **部分イベント**: `partial=True` のイベントはDB保存されない（SSE専用）
+- **branchフィールド**: マルチエージェント時のサブエージェント間の隔離に使用
+- **invocation_id**: マルチターン会話追跡の中核（自動UUID生成）
+
+### 情報ソース
+
+- **公式ドキュメント**: https://google.github.io/adk-docs/sessions/
+- **Session管理**: https://google.github.io/adk-docs/sessions/session/
+- **State管理**: https://google.github.io/adk-docs/sessions/state/
+- **Memory管理**: https://google.github.io/adk-docs/sessions/memory/
+- **SDKソース**: `backend/.venv/lib/python3.12/site-packages/google/adk/`
+- **Google Cloud Blog**: https://cloud.google.com/blog/topics/developers-practitioners/remember-this-agent-state-and-memory-with-adk
+
+---
+
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
 > **このファイルの冒頭にも書いたが、改めて念押しする。**
 > 作業が完了したら、コミットする前に、必ずこのファイルに変更内容を記録せよ。
