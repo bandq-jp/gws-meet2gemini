@@ -2689,6 +2689,190 @@ Event 3: partial=False, text="こんにちは..." (完了イベント、同じ�
 - ADKの`McpToolset`はSTDIO/SSE接続パラメータのみを保持
 - ドメイン別のツール配布はオーケストレーターファクトリで集中管理
 
+### 32. ADK会話履歴・セッション管理実装 & 二重化修正 (2026-02-05)
+
+**背景**: 大規模調査（6並列エージェント）の結果、ADK実装は会話履歴永続化が~40%しか完了していないことが判明
+
+**調査結果 - 主要な問題点**:
+1. `_context_items`イベントが空の`[]`を返していた（コンテキスト継続不可）
+2. チャートイベントが`activity_items`に蓄積されていなかった（UI復元不可）
+3. `InMemorySessionService`のみ使用（セッション間永続化なし）
+
+**修正内容**:
+
+1. **`adk/agent_service.py`** - Context Items構築:
+   ```python
+   # After streaming completes, build context_items from session history
+   updated_session = await self._session_service.get_session(
+       app_name="marketing_ai",
+       user_id="default",
+       session_id=session_id,
+   )
+   if updated_session and hasattr(updated_session, "events"):
+       for event in updated_session.events:
+           # Convert ADK events to serializable context items
+           if hasattr(event, "content") and event.content:
+               role = getattr(event.content, "role", "assistant")
+               parts_data = []
+               for part in event.content.parts:
+                   if hasattr(part, "text") and part.text:
+                       parts_data.append({"text": part.text})
+                   elif hasattr(part, "function_call") and part.function_call:
+                       parts_data.append({"function_call": {...}})
+                   elif hasattr(part, "function_response") and part.function_response:
+                       parts_data.append({"function_response": {...}})
+               if parts_data:
+                   context_items.append({"role": role, "parts": parts_data})
+
+   yield {"type": "_context_items", "items": context_items}
+   ```
+
+2. **`marketing.py`** - チャートイベント蓄積:
+   ```python
+   elif event_type == "chart":
+       activity_items.append({
+           "kind": "chart",
+           "sequence": seq,
+           "id": str(uuid.uuid4()),
+           "spec": event.get("spec"),
+       })
+       seq += 1
+   ```
+
+**ADK Session構造**:
+| 属性 | 型 | 用途 |
+|------|-----|------|
+| `id` | `str` | セッションID |
+| `events` | `list[Event]` | 会話イベント履歴 |
+| `state` | `dict[str, Any]` | カスタム状態 |
+| `last_update_time` | `float` | 最終更新時刻 |
+
+**ADK Event.content構造**:
+| 属性 | 型 | 内容 |
+|------|-----|------|
+| `role` | `Optional[str]` | "user" / "model" |
+| `parts` | `list[Part]` | コンテンツパーツ |
+
+**ADK Part構造**:
+| 属性 | 型 | 内容 |
+|------|-----|------|
+| `text` | `Optional[str]` | テキストコンテンツ |
+| `function_call` | `Optional[FunctionCall]` | ツール呼び出し |
+| `function_response` | `Optional[FunctionResponse]` | ツール結果 |
+| `thought` | `Optional[bool]` | 思考過程フラグ |
+
+**データフロー（修正後）**:
+```
+1. ストリーミング中
+   ADK events → _process_adk_event() → SSE events → Frontend
+
+2. ストリーミング完了後
+   Session.events → context_items構築 → _context_items event → DB保存 & Frontend
+
+3. 次のターン
+   marketing_conversations.metadata.context_items → stream_chat(context_items=...) → ADK Session
+```
+
+**永続化パターン（OpenAI SDK互換）**:
+| 項目 | 保存先 | 目的 |
+|------|--------|------|
+| context_items | `marketing_conversations.metadata` | 次ターンコンテキスト継続 |
+| activity_items | `marketing_messages.content` | UI復元用 |
+| full_text | `marketing_messages.plain_text` | 検索用 |
+
+**期待効果**:
+- マルチターン会話でコンテキストが継続される
+- ページリロード後もチャートが復元される
+- 会話ダッシュボードに正しく表示される
+
+**技術的知見**:
+- ADK `InMemorySessionService`はプロセス内メモリのみ（再起動で消失）
+- `DatabaseSessionService`は将来の永続化オプション
+- `session.events`はストリーミング完了後にアクセス可能
+- `Event.content.role`は"user"または"model"（OpenAI SDKの"assistant"と異なる）
+
+### 32-2. ADKマルチターンでのテキスト二重化修正 (2026-02-05)
+
+**問題**: 中間報告テキストが二重に表示される
+```
+GSCのデータが取得できました。続いて、...
+GSCのデータが取得できました。続いて、...  ← 重複！
+```
+
+**根本原因**:
+ADKのマルチターン実行では各ターンで:
+1. `partial=True` でテキストをストリーミング
+2. `partial=False` でそのターンの完全なテキストを送信
+
+旧ロジックでは`partial=False`のテキストを`sent_text_tracker`と比較して重複排除していたが、各ターンの`partial=False`テキストには前のターンのテキストが含まれないため、不一致と判断され再送信されていた。
+
+**修正** (`adk/agent_service.py`):
+```python
+# Before: 複雑な重複排除ロジック
+if is_partial is False and sent_text_tracker is not None:
+    # ... 28行の重複排除コード
+    # 問題: マルチターンで不一致と判断され再送信
+
+# After: シンプルにスキップ
+if is_partial is False:
+    for part in event.content.parts:
+        if hasattr(part, "text") and part.text:
+            # Skip - already sent via partial=True streaming
+            logger.debug(f"[ADK] Skipping final text (partial=False): {len(part.text)} chars")
+            continue
+        # Process non-text parts only
+        part_result = self._process_non_text_part(part, sub_agent_states)
+```
+
+**ADK partial イベントフロー（修正後）**:
+| イベント | partial | アクション |
+|---------|---------|-----------|
+| ストリーミングチャンク | `True` | **送信** |
+| ターン完了テキスト | `False` | **スキップ** (既に送信済み) |
+| サブエージェント出力 | `None` | **送信** |
+
+### 32-3. Activity Items 順序保持修正 (2026-02-05)
+
+**問題**: テキスト→ツール→テキストの順序がDB保存・UI復元で崩れる
+
+**根本原因** (`marketing.py`):
+`tool_call`, `chart`, `sub_agent_event` の後に `current_text_id` がリセットされていなかったため、ツール呼び出し後のテキストが前のテキストブロックに追記されていた。
+
+**修正** (`marketing.py`):
+```python
+elif event_type == "tool_call":
+    current_text_id = None  # ← 追加: 新しいテキストブロックを開始
+    activity_items.append({...})
+
+elif event_type == "chart":
+    current_text_id = None  # ← 追加
+    activity_items.append({...})
+
+elif event_type == "sub_agent_event":
+    current_text_id = None  # ← 追加
+    activity_items.append({...})
+```
+
+**修正** (`use-marketing-chat.ts`):
+```typescript
+// Restore activity items with new IDs, sorted by sequence
+const activityItems = (msg.activity_items || [])
+  .map((item, idx) => ({ ...item, sequence: item.sequence ?? idx }))
+  .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));  // ← 追加
+```
+
+**正しいActivity Items順序**:
+```
+[
+  {kind: "text", sequence: 0, content: "SEOを確認します。"},
+  {kind: "sub_agent", sequence: 1, agent: "analytics"},
+  {kind: "text", sequence: 2, content: "GSCデータが取得できました。"},
+  {kind: "sub_agent", sequence: 3, agent: "seo"},
+  {kind: "chart", sequence: 4, spec: {...}},
+  {kind: "text", sequence: 5, content: "分析結果をまとめます。"}
+]
+```
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

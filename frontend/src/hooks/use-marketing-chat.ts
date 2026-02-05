@@ -665,14 +665,14 @@ export function useMarketingChat(
             activity_items?: ActivityItem[];
             created_at?: string;
           }) => {
-            // Restore activity items with new IDs
-            const activityItems: ActivityItem[] = (msg.activity_items || []).map(
-              (item: ActivityItem, idx: number) => ({
+            // Restore activity items with new IDs, sorted by sequence
+            const activityItems: ActivityItem[] = (msg.activity_items || [])
+              .map((item: ActivityItem, idx: number) => ({
                 ...item,
                 id: item.id || generateId(),
                 sequence: item.sequence ?? idx,
-              })
-            );
+              }))
+              .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
 
             return {
               id: msg.id,

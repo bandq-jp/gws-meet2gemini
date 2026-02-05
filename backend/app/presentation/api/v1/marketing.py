@@ -787,6 +787,8 @@ async def chat_stream(
                     current_text_id = None  # Reset for new response
 
                 elif event_type == "tool_call":
+                    # Reset text ID so subsequent text starts a new block
+                    current_text_id = None
                     activity_items.append({
                         "kind": "tool",
                         "sequence": seq,
@@ -819,6 +821,8 @@ async def chat_stream(
                     seq += 1
 
                 elif event_type == "sub_agent_event":
+                    # Reset text ID so subsequent text starts a new block
+                    current_text_id = None
                     activity_items.append({
                         "kind": "sub_agent",
                         "sequence": seq,
@@ -827,6 +831,18 @@ async def chat_stream(
                         "event_type": event.get("event_type"),
                         "is_running": event.get("is_running"),  # Track sub-agent completion
                         "data": event.get("data"),
+                    })
+                    seq += 1
+
+                elif event_type == "chart":
+                    # Reset text ID so subsequent text starts a new block
+                    current_text_id = None
+                    # Accumulate chart events for DB persistence
+                    activity_items.append({
+                        "kind": "chart",
+                        "sequence": seq,
+                        "id": str(uuid.uuid4()),
+                        "spec": event.get("spec"),
                     })
                     seq += 1
 

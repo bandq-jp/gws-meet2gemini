@@ -114,6 +114,9 @@ class ADKAgentService:
         # Remove "Agent" suffix
         name = tool_name.replace("Agent", "")
 
+        # Special cases for compound words (keep together)
+        name = name.replace("WordPress", "Wordpress")  # WordPress -> wordpress (no underscore)
+
         # Special cases for acronyms
         name = name.replace("CRM", "Crm")
         name = name.replace("SEO", "Seo")
@@ -337,8 +340,48 @@ class ADKAgentService:
                     except (asyncio.CancelledError, Exception):
                         pass
 
-            # Return context for next turn
-            yield {"type": "_context_items", "items": []}
+            # Build context items from session history for next turn
+            # ADK stores conversation history in the session
+            context_items = []
+            try:
+                updated_session = await self._session_service.get_session(
+                    app_name="marketing_ai",
+                    user_id="default",
+                    session_id=session_id,
+                )
+                if updated_session and hasattr(updated_session, "events"):
+                    # Convert ADK session events to serializable context items
+                    for event in updated_session.events:
+                        if hasattr(event, "content") and event.content:
+                            role = getattr(event.content, "role", "assistant")
+                            parts_data = []
+                            if hasattr(event.content, "parts"):
+                                for part in event.content.parts:
+                                    if hasattr(part, "text") and part.text:
+                                        parts_data.append({"text": part.text})
+                                    elif hasattr(part, "function_call") and part.function_call:
+                                        fc = part.function_call
+                                        parts_data.append({
+                                            "function_call": {
+                                                "name": getattr(fc, "name", ""),
+                                                "args": getattr(fc, "args", {}),
+                                            }
+                                        })
+                                    elif hasattr(part, "function_response") and part.function_response:
+                                        fr = part.function_response
+                                        parts_data.append({
+                                            "function_response": {
+                                                "name": getattr(fr, "name", ""),
+                                                "response": getattr(fr, "response", {}),
+                                            }
+                                        })
+                            if parts_data:
+                                context_items.append({"role": role, "parts": parts_data})
+                logger.debug(f"[ADK] Built {len(context_items)} context items from session")
+            except Exception as ctx_err:
+                logger.warning(f"[ADK] Failed to build context items: {ctx_err}")
+
+            yield {"type": "_context_items", "items": context_items}
             yield {"type": "done", "conversation_id": session_id}
 
         except Exception as e:
@@ -452,59 +495,21 @@ class ADKAgentService:
         # ADK events have content.parts[]
         if hasattr(event, "content") and event.content:
             if hasattr(event.content, "parts"):
-                # For partial=False (final) events, collect all text parts first for deduplication
-                # This is necessary because Gemini may split the response into multiple parts
-                if is_partial is False and sent_text_tracker is not None:
-                    # Collect all text parts
-                    all_text_parts = []
-                    non_text_parts = []
+                # For partial=False (final/turn-complete) events:
+                # - Text was already streamed via partial=True, so SKIP text parts
+                # - Only process non-text parts (function_call, function_response)
+                # This prevents duplicate text in multi-turn conversations where each turn
+                # sends partial=False with that turn's complete text
+                if is_partial is False:
                     for part in event.content.parts:
                         if hasattr(part, "text") and part.text:
-                            all_text_parts.append(part.text)
-                        else:
-                            non_text_parts.append(part)
-
-                    # Process non-text parts (function_call, function_response)
-                    for part in non_text_parts:
-                        part_result = self._process_non_text_part(
-                            part, sub_agent_states
-                        )
+                            # Skip text - already sent via partial=True streaming
+                            logger.debug(f"[ADK] Skipping final text (partial=False): {len(part.text)} chars")
+                            continue
+                        # Process non-text parts
+                        part_result = self._process_non_text_part(part, sub_agent_states)
                         if part_result:
                             results.extend(part_result)
-
-                    # Deduplicate concatenated text
-                    if all_text_parts:
-                        full_text = "".join(all_text_parts)
-                        already_sent = sent_text_tracker.get("text", "")
-
-                        if already_sent and full_text.startswith(already_sent):
-                            # Only send the NEW portion
-                            new_text = full_text[len(already_sent):]
-                            if new_text:
-                                logger.debug(f"[ADK] Sending new text from final event: {len(new_text)} chars")
-                                results.append({
-                                    "type": "text_delta",
-                                    "content": new_text,
-                                })
-                            else:
-                                logger.debug(f"[ADK] Skipping duplicate final text ({len(full_text)} chars)")
-                        elif already_sent == full_text:
-                            logger.debug(f"[ADK] Skipping exact duplicate final text")
-                        elif not already_sent:
-                            # No streaming events received - send full text
-                            logger.debug(f"[ADK] No streaming text received, sending full final text")
-                            results.append({
-                                "type": "text_delta",
-                                "content": full_text,
-                            })
-                        else:
-                            # Text doesn't match - might be a different response format
-                            logger.warning(f"[ADK] Final text doesn't match streamed text, sending full final text")
-                            results.append({
-                                "type": "text_delta",
-                                "content": full_text,
-                            })
-
                     return results if results else None
 
                 # For partial=True or partial=None, process each part individually
