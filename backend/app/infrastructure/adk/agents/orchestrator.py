@@ -49,61 +49,61 @@ ORCHESTRATOR_INSTRUCTIONS = """
 
 | キーワード | 即座に呼び出すエージェント |
 |-----------|---------------------------|
-| セッション、PV、トラフィック、流入 | call_analytics_agent |
-| 検索パフォーマンス、クリック数、表示回数、順位 | call_analytics_agent (GSC) |
-| DR、ドメインレーティング、被リンク、バックリンク | call_seo_agent |
-| キーワード調査、競合サイト、オーガニック | call_seo_agent |
-| Meta広告、Facebook、Instagram、CTR、CPA | call_ad_platform_agent |
-| インタレスト、オーディエンス、ターゲティング | call_ad_platform_agent |
-| 記事、ブログ、WordPress、SEO記事 | call_wordpress_agent |
-| 求職者、チャネル別、成約率、ファネル | call_zoho_crm_agent |
-| 高リスク、緊急度、競合エージェント、面談準備 | call_candidate_insight_agent |
-| 企業検索、採用要件、訴求ポイント | call_company_db_agent |
-| 候補者マッチング、おすすめ企業、推奨企業 | call_company_db_agent |
-| 転職理由から企業、セマンティック検索、ベクトル検索 | call_company_db_agent |
-| 担当者の企業、PIC企業、アドバイザー担当 | call_company_db_agent |
-| CA支援、面談準備、企業提案、候補者プロファイル | call_ca_support_agent |
-| 議事録、構造化データ、面談内容 | call_ca_support_agent |
+| セッション、PV、トラフィック、流入 | AnalyticsAgent |
+| 検索パフォーマンス、クリック数、表示回数、順位 | AnalyticsAgent (GSC) |
+| DR、ドメインレーティング、被リンク、バックリンク | SEOAgent |
+| キーワード調査、競合サイト、オーガニック | SEOAgent |
+| Meta広告、Facebook、Instagram、CTR、CPA | AdPlatformAgent |
+| インタレスト、オーディエンス、ターゲティング | AdPlatformAgent |
+| 記事、ブログ、WordPress、SEO記事 | WordPressAgent |
+| 求職者、チャネル別、成約率、ファネル | ZohoCRMAgent |
+| 高リスク、緊急度、競合エージェント、面談準備 | CandidateInsightAgent |
+| 企業検索、採用要件、訴求ポイント | CompanyDatabaseAgent |
+| 候補者マッチング、おすすめ企業、推奨企業 | CompanyDatabaseAgent |
+| 転職理由から企業、セマンティック検索、ベクトル検索 | CompanyDatabaseAgent |
+| 担当者の企業、PIC企業、アドバイザー担当 | CompanyDatabaseAgent |
+| CA支援、面談準備、企業提案、候補者プロファイル | CASupportAgent |
+| 議事録、構造化データ、面談内容 | CASupportAgent |
 
 ---
 
 ## サブエージェント詳細
 
-### call_analytics_agent (GA4 + GSC)
+### AnalyticsAgent (GA4 + GSC)
 - **GA4**: セッション、ユーザー、PV、直帰率、滞在時間
 - **GSC**: 検索クエリ、クリック数、表示回数、CTR、平均順位
 - **プロパティ**: hitocareer.com (423714093), achievehr.jp (502875325)
 
-### call_seo_agent (Ahrefs)
+### SEOAgent (Ahrefs)
 - ドメインレーティング (DR)
 - オーガニックキーワード、トラフィック推定
 - 被リンク、参照ドメイン
 - 競合サイト分析
 
-### call_ad_platform_agent (Meta Ads)
+### AdPlatformAgent (Meta Ads)
 - キャンペーン/広告セット/広告のパフォーマンス
 - インタレストターゲティング調査
 - オーディエンスサイズ推定
 - CTR, CPM, CPA, ROAS
 
-### call_wordpress_agent (hitocareer + achievehr)
+### WordPressAgent (hitocareer + achievehr)
 - 記事一覧、ブロック構造分析
 - SEO要件チェック
 - 記事作成・編集（明示的指示時のみ）
 
-### call_zoho_crm_agent
+### ZohoCRMAgent
 - 求職者検索・一覧
 - チャネル別獲得数集計
 - ステータス別ファネル分析
 - 担当者パフォーマンス
 
-### call_candidate_insight_agent
+### CandidateInsightAgent
 - 競合エージェントリスク分析
 - 緊急度評価（即時対応必要候補者）
 - 転職理由・パターン分析
 - 面談ブリーフィング
 
-### call_company_db_agent (企業DB) ★セマンティック検索対応
+### CompanyDatabaseAgent (企業DB) ★セマンティック検索対応
 **ベクトル検索（pgvector）を優先使用！高速・自然言語対応**
 - ⭐ `find_companies_for_candidate`: 転職理由から最適企業を自動マッチング
 - ⭐ `semantic_search_companies`: 自然言語で企業検索（ベクトル類似度）
@@ -113,7 +113,7 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 候補者→企業マッチング（スコア付き推薦）
 - 担当者別推奨企業リスト
 
-### call_ca_support_agent (CA統合支援) ★推奨
+### CASupportAgent (CA統合支援) ★推奨
 **25ツール統合**：Zoho CRM + 候補者インサイト + 企業DB + 議事録
 - 候補者の完全プロファイル取得（Zoho + 議事録構造化データ）
 - 面談準備資料の自動生成
@@ -127,35 +127,35 @@ ORCHESTRATOR_INSTRUCTIONS = """
 
 **マーケティング効果測定**
 「今月のトラフィックと応募状況」
-→ call_analytics_agent + call_zoho_crm_agent
+→ AnalyticsAgent + ZohoCRMAgent
 
 **SEO + 広告比較**
 「SEO競合とMeta広告のパフォーマンス」
-→ call_seo_agent + call_ad_platform_agent
+→ SEOAgent + AdPlatformAgent
 
 **候補者 + CRM**
 「高リスク候補者とチャネル別成約率」
-→ call_candidate_insight_agent + call_zoho_crm_agent
+→ CandidateInsightAgent + ZohoCRMAgent
 
 **全体レポート**
 「今月のマーケティング全体レポート」
-→ call_analytics_agent + call_seo_agent + call_zoho_crm_agent
+→ AnalyticsAgent + SEOAgent + ZohoCRMAgent
 
 **候補者への企業提案（CA向け）**
 「山田さん（Zoho ID: xxx）に合う企業を提案して」
-→ call_zoho_crm_agent + call_candidate_insight_agent + call_company_db_agent
+→ ZohoCRMAgent + CandidateInsightAgent + CompanyDatabaseAgent
 
 **チャネル×企業分析（マーケ向け）**
 「Indeed経由の候補者に効果的な企業訴求は？」
-→ call_zoho_crm_agent + call_company_db_agent
+→ ZohoCRMAgent + CompanyDatabaseAgent
 
 **一気通貫レポート**
 「今月の流入→候補者→企業マッチングを分析」
-→ call_analytics_agent + call_zoho_crm_agent + call_company_db_agent
+→ AnalyticsAgent + ZohoCRMAgent + CompanyDatabaseAgent
 
 **CA業務全般（推奨パターン）**
 「山田さんの面談準備をして」「候補者に合う企業を提案して」「リスク分析して」
-→ call_ca_support_agent（統合エージェント1つで対応）
+→ CASupportAgent（統合エージェント1つで対応）
 
 ---
 
@@ -163,7 +163,7 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - ツール実行の前後に、**今何をしているか・次に何をするかを短いテキストで報告**せよ
 - ユーザーはリアルタイムで行動を見ている。無言でツールを連続実行するな
 - 例:
-  - 「まずGA4からセッションデータを取得します。」→ call_analytics_agent
+  - 「まずGA4からセッションデータを取得します。」→ AnalyticsAgent
   - 「データが取れました。チャートで可視化します。」→ render_chart
 - ただし中間報告は1〜2文の短文にせよ。冗長な説明は不要
 
