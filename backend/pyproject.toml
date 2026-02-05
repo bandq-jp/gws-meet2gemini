@@ -15,6 +15,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.6",
     "supabase>=2.9.0",
     "google-genai>=1.28.0",
+    "google-adk>=0.5.0",  # Google Agent Development Kit for V2 marketing
     "python-dotenv>=1.1.1",
     "zohocrmsdk8-0>=3.0.0",
     "google-cloud-tasks>=2.19.3",
