@@ -15,7 +15,7 @@ dependencies = [
     "uvicorn[standard]>=0.30.6",
     "supabase>=2.9.0",
     "google-genai>=1.28.0",
-    "google-adk>=0.5.0",  # Google Agent Development Kit for V2 marketing
+    "google-adk>=0.5.0", # Google Agent Development Kit for V2 marketing
     "python-dotenv>=1.1.1",
     "zohocrmsdk8-0>=3.0.0",
     "google-cloud-tasks>=2.19.3",
@@ -27,6 +27,7 @@ dependencies = [
     "analytics-mcp>=0.1.1", # GA4 MCP
     "mcp>=1.0.0", # FastMCP for GSC
     "meta-ads-mcp>=1.0.0", # Meta Ads MCP
+    "google-generativeai>=0.8.6",
 ]
 
 [dependency-groups]
