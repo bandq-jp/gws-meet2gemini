@@ -93,17 +93,20 @@ class ADKMCPManager:
             return None
 
         try:
+            # Use configurable timeout (default 120s) instead of ADK's default 5s
+            timeout = float(self._settings.mcp_client_timeout_seconds)
             toolset = McpToolset(
                 connection_params=StdioConnectionParams(
                     server_params=StdioServerParameters(
                         command="analytics-mcp",
                         args=[],
                         env={"GOOGLE_APPLICATION_CREDENTIALS": sa_path},
-                    )
+                    ),
+                    timeout=timeout,  # Override default 5s timeout
                 ),
                 # Note: tool_filter can be used to limit which tools are exposed
             )
-            logger.info("[ADK MCP] GA4: ready (analytics-mcp)")
+            logger.info("[ADK MCP] GA4: ready (analytics-mcp, timeout=%ds)", int(timeout))
             return toolset
         except Exception as e:
             logger.warning(f"[ADK MCP] GA4: failed to create toolset: {e}")
@@ -134,16 +137,18 @@ class ADKMCPManager:
             return None
 
         try:
+            timeout = float(self._settings.mcp_client_timeout_seconds)
             toolset = McpToolset(
                 connection_params=StdioConnectionParams(
                     server_params=StdioServerParameters(
                         command="python",
                         args=[gsc_server_path],
                         env={"GOOGLE_APPLICATION_CREDENTIALS": sa_path},
-                    )
+                    ),
+                    timeout=timeout,  # Override default 5s timeout
                 ),
             )
-            logger.info("[ADK MCP] GSC: ready (gsc_server.py)")
+            logger.info("[ADK MCP] GSC: ready (gsc_server.py, timeout=%ds)", int(timeout))
             return toolset
         except Exception as e:
             logger.warning(f"[ADK MCP] GSC: failed to create toolset: {e}")
@@ -160,16 +165,18 @@ class ADKMCPManager:
             return None
 
         try:
+            timeout = float(self._settings.mcp_client_timeout_seconds)
             toolset = McpToolset(
                 connection_params=StdioConnectionParams(
                     server_params=StdioServerParameters(
                         command="meta-ads-mcp",
                         args=[],
                         env={"META_ACCESS_TOKEN": self._settings.meta_access_token},
-                    )
+                    ),
+                    timeout=timeout,  # Override default 5s timeout
                 ),
             )
-            logger.info("[ADK MCP] Meta Ads: ready (meta-ads-mcp)")
+            logger.info("[ADK MCP] Meta Ads: ready (meta-ads-mcp, timeout=%ds)", int(timeout))
             return toolset
         except Exception as e:
             logger.warning(f"[ADK MCP] Meta Ads: failed to create toolset: {e}")

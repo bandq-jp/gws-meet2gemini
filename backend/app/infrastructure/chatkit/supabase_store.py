@@ -302,21 +302,16 @@ class SupabaseChatStore(Store[MarketingRequestContext]):
                 thread_item = self._item_adapter.validate_python(content)
                 logger.debug(f"Successfully validated item: type={item_type}, id={item_id[:8]}...")
             except Exception as e:
-                # 1.4 系以降で追加された item.type がある場合、厳密検証だと落ちる。
-                # モデル構築のみで通し、コンテキスト欠落を防ぐ。
-                logger.info(f"Strict validation failed for type={item_type}, trying lenient construction: {e}")
-                try:
-                    thread_item = ThreadItem.model_construct(**content)
-                    logger.warning(
-                        "Leniently accepted unknown ThreadItem type=%s id=%s",
-                        content.get("type"),
-                        row.get("id"),
-                    )
-                except Exception as e2:
-                    logger.exception(
-                        "Failed to deserialize marketing message id=%s type=%s: %s", row.get("id"), item_type, e2
-                    )
-                    continue
+                # ThreadItem is a Union type (Annotated[UnionType, Field(discriminator="type")])
+                # model_construct() doesn't exist on Union types - skip unknown items gracefully
+                # This prevents errors when new item types are added in future ChatKit versions
+                logger.warning(
+                    "Skipping unknown ThreadItem type=%s id=%s (validation error: %s)",
+                    item_type,
+                    row.get("id", "?")[:8],
+                    str(e)[:100],
+                )
+                continue
             items.append(thread_item)
             logger.debug(f"Added item to list: type={thread_item.type}, id={thread_item.id[:8]}...")
         next_after = rows[-1]["id"] if has_more and rows else None
