@@ -51,17 +51,15 @@ class AdPlatformAgentFactory(SubAgentFactory):
         mcp_servers: List[Any] | None = None,
         asset: dict[str, Any] | None = None,
     ) -> List[Any]:
-        """Return MCP toolset for Meta Ads."""
-        tools: List[Any] = []
+        """
+        Return MCP toolset for Meta Ads.
 
+        Orchestrator passes pre-filtered toolsets for this domain.
+        """
         if mcp_servers:
-            for server in mcp_servers:
-                server_name = getattr(server, "name", "")
-                if server_name in ("meta_ads", "meta", "facebook"):
-                    tools.append(server)
-                    logger.info(f"[AdPlatformAgent] Added MCP toolset: {server_name}")
-
-        return tools
+            logger.info(f"[AdPlatformAgent] Using {len(mcp_servers)} MCP toolsets")
+            return list(mcp_servers)
+        return []
 
     def _build_instructions(self) -> str:
         return """

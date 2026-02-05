@@ -20,6 +20,7 @@ from .wordpress_agent import WordPressAgentFactory
 from .zoho_crm_agent import ZohoCRMAgentFactory
 from .candidate_insight_agent import CandidateInsightAgentFactory
 from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
+from app.infrastructure.adk.mcp_manager import ADKMCPToolsets
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -163,7 +164,7 @@ class OrchestratorAgentFactory:
         self,
         asset: Dict[str, Any] | None = None,
         disabled_mcp_servers: set[str] | None = None,
-        mcp_servers: List[Any] | None = None,
+        mcp_toolsets: ADKMCPToolsets | None = None,
     ) -> Agent:
         """
         Build the Orchestrator agent with sub-agent tools.
@@ -171,7 +172,7 @@ class OrchestratorAgentFactory:
         Args:
             asset: Model asset configuration
             disabled_mcp_servers: Set of MCP server labels to disable
-            mcp_servers: MCP toolset instances
+            mcp_toolsets: ADK MCP toolsets container (GA4, GSC, Meta Ads, etc.)
 
         Returns:
             Configured ADK Orchestrator Agent
@@ -180,14 +181,42 @@ class OrchestratorAgentFactory:
         sub_agent_tools = []
         logger.info("[ADK Orchestrator] Building sub-agent tools")
 
+        # Map sub-agent factories to their MCP toolsets
+        mcp_mapping: Dict[str, List[Any]] = {
+            "analytics": [],
+            "ad_platform": [],
+            "seo": [],
+            "wordpress": [],
+            "zoho_crm": [],  # Uses function tools, no MCP
+            "candidate_insight": [],  # Uses function tools, no MCP
+        }
+
+        # Populate MCP mapping if toolsets are provided
+        if mcp_toolsets:
+            if mcp_toolsets.ga4:
+                mcp_mapping["analytics"].append(mcp_toolsets.ga4)
+            if mcp_toolsets.gsc:
+                mcp_mapping["analytics"].append(mcp_toolsets.gsc)
+            if mcp_toolsets.meta_ads:
+                mcp_mapping["ad_platform"].append(mcp_toolsets.meta_ads)
+            if mcp_toolsets.ahrefs:
+                mcp_mapping["seo"].append(mcp_toolsets.ahrefs)
+            if mcp_toolsets.wordpress_hitocareer:
+                mcp_mapping["wordpress"].append(mcp_toolsets.wordpress_hitocareer)
+            if mcp_toolsets.wordpress_achievehr:
+                mcp_mapping["wordpress"].append(mcp_toolsets.wordpress_achievehr)
+
         for name, factory in self._sub_factories.items():
             try:
-                sub_agent = factory.build_agent(mcp_servers=mcp_servers, asset=asset)
+                # Get domain-specific MCP toolsets
+                domain_mcp = mcp_mapping.get(name, [])
+                sub_agent = factory.build_agent(mcp_servers=domain_mcp, asset=asset)
 
                 # Wrap sub-agent as AgentTool
                 tool = AgentTool(agent=sub_agent)
                 sub_agent_tools.append(tool)
-                logger.info(f"[ADK Orchestrator] Sub-agent registered: {factory.tool_name}")
+                mcp_count = len(domain_mcp)
+                logger.info(f"[ADK Orchestrator] Sub-agent registered: {factory.tool_name} ({mcp_count} MCP toolsets)")
             except Exception as e:
                 logger.warning(f"Failed to build sub-agent {name}: {e}")
 

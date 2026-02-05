@@ -51,17 +51,15 @@ class SEOAgentFactory(SubAgentFactory):
         mcp_servers: List[Any] | None = None,
         asset: dict[str, Any] | None = None,
     ) -> List[Any]:
-        """Return MCP toolset for Ahrefs."""
-        tools: List[Any] = []
+        """
+        Return MCP toolset for Ahrefs.
 
+        Orchestrator passes pre-filtered toolsets for this domain.
+        """
         if mcp_servers:
-            for server in mcp_servers:
-                server_name = getattr(server, "name", "")
-                if server_name in ("ahrefs", "seo"):
-                    tools.append(server)
-                    logger.info(f"[SEOAgent] Added MCP toolset: {server_name}")
-
-        return tools
+            logger.info(f"[SEOAgent] Using {len(mcp_servers)} MCP toolsets")
+            return list(mcp_servers)
+        return []
 
     def _build_instructions(self) -> str:
         return """

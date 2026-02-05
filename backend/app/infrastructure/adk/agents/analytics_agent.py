@@ -53,20 +53,14 @@ class AnalyticsAgentFactory(SubAgentFactory):
         """
         Return MCP toolsets for GA4 and GSC.
 
-        In ADK, MCP servers are passed as tools (McpToolset).
+        In ADK, MCP toolsets are pre-filtered by the orchestrator
+        and passed directly to this agent.
         """
-        tools: List[Any] = []
-
-        # MCP toolsets are passed from the orchestrator
+        # Orchestrator passes pre-filtered toolsets for this domain
         if mcp_servers:
-            for server in mcp_servers:
-                # Filter for GA4/GSC toolsets
-                server_name = getattr(server, "name", "")
-                if server_name in ("ga4", "gsc", "analytics"):
-                    tools.append(server)
-                    logger.info(f"[AnalyticsAgent] Added MCP toolset: {server_name}")
-
-        return tools
+            logger.info(f"[AnalyticsAgent] Using {len(mcp_servers)} MCP toolsets")
+            return list(mcp_servers)
+        return []
 
     def _build_instructions(self) -> str:
         return """

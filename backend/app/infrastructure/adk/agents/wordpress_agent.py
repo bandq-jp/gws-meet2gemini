@@ -51,17 +51,15 @@ class WordPressAgentFactory(SubAgentFactory):
         mcp_servers: List[Any] | None = None,
         asset: dict[str, Any] | None = None,
     ) -> List[Any]:
-        """Return MCP toolsets for WordPress sites."""
-        tools: List[Any] = []
+        """
+        Return MCP toolsets for WordPress sites.
 
+        Orchestrator passes pre-filtered toolsets for this domain.
+        """
         if mcp_servers:
-            for server in mcp_servers:
-                server_name = getattr(server, "name", "")
-                if server_name in ("wordpress", "wp_hitocareer", "wp_achievehr"):
-                    tools.append(server)
-                    logger.info(f"[WordPressAgent] Added MCP toolset: {server_name}")
-
-        return tools
+            logger.info(f"[WordPressAgent] Using {len(mcp_servers)} MCP toolsets")
+            return list(mcp_servers)
+        return []
 
     def _build_instructions(self) -> str:
         return """

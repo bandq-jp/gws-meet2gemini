@@ -2556,6 +2556,15 @@ CandidateInsightAgent → candidate_insight
 - ADKツールは plain Python function を自動ラップ（`@function_tool`不要）
 - `AgentTool(agent=sub_agent)` でサブエージェントをツール化
 - モデルID: `gemini-3-flash-preview` (Gemini 3 Flash)
+- **ストリーミング**: デフォルトは `StreamingMode.NONE` (stream: False) → 明示的に `RunConfig(streaming_mode=StreamingMode.SSE)` を渡す必要あり
+  ```python
+  from google.adk.agents.run_config import StreamingMode
+  from google.adk.runners import RunConfig
+
+  run_config = RunConfig(streaming_mode=StreamingMode.SSE)
+  async for event in runner.run_async(..., run_config=run_config):
+      ...
+  ```
 
 **コスト比較**:
 | モデル | 入力 | 出力 | 削減率 |
@@ -2567,6 +2576,118 @@ CandidateInsightAgent → candidate_insight
 - [Google ADK Documentation](https://google.github.io/adk-docs/)
 - [google/adk-python GitHub](https://github.com/google/adk-python)
 - ADK Source: `google/adk/agents/`, `google/adk/runners/`
+
+### 30. ADK テキスト重複バグ修正 (2026-02-05)
+
+**問題**: フロントエンドで同じメッセージが2回表示される
+
+**根本原因**: ADK SSEストリーミングのイベント構造
+```
+Event 1: partial=True, text="こんにちは..." (ストリーミングチャンク)
+Event 2: partial=True, no text
+Event 3: partial=False, text="こんにちは..." (完了イベント、同じテキスト)
+```
+
+`_process_adk_event()` で `partial` フラグをチェックせずに全イベントのテキストを送信していたため、同じテキストが2回（partial=TrueとFalse）送信されていた。
+
+**修正内容** (`agent_service.py`):
+
+1. `event.partial` フラグを確認して重複防止:
+   ```python
+   is_partial = getattr(event, "partial", None)
+
+   # テキスト処理
+   if is_partial is True:
+       # ストリーミングチャンク → 送信
+       results.append({"type": "text_delta", "content": part.text})
+   elif is_partial is False:
+       # 完了イベント → スキップ（既にpartial=Trueで送信済み）
+       logger.debug("Skipping final text...")
+   elif is_partial is None:
+       # 非ストリーミング（サブエージェント等）→ 送信
+       results.append({"type": "text_delta", "content": part.text})
+   ```
+
+2. 条件を `if` → `elif` に変更（排他的条件化）:
+   - 同じ `part` から複数のSSEイベントが生成されない
+   - 優先順位: function_response > function_call > text
+
+**ADK SSEイベントフロー**:
+| partial値 | 意味 | アクション |
+|-----------|------|-----------|
+| `True` | ストリーミングチャンク | **送信** |
+| `False` | 完了イベント（全テキスト含む）| **スキップ** |
+| `None` | 非ストリーミング | **送信** |
+
+**技術的知見**:
+- ADK の `StreamingMode.SSE` では、`partial=True` でチャンクが到着し、`partial=False` で完全なテキストが到着
+- サブエージェント（`stream: False`）では `partial=None`
+- `Event.partial` は `Optional[bool]` 型
+
+### 31. ADK MCPツールセット配布アーキテクチャ修正 (2026-02-05)
+
+**問題**: サブエージェントへのMCPツール配布が正しく動作しない（Analytics, SEO, AdPlatform, WordPressが0ツール）
+
+**根本原因**:
+1. `McpToolset`クラスには`name`属性が存在しない
+2. 各サブエージェントファクトリが `getattr(server, "name", "")` でフィルタリングしようとしていた
+3. 結果: `name`が空文字列となりフィルタに一致せず、ツールが0になる
+
+**修正内容**:
+
+1. **`orchestrator.py`** - MCPツールセットのドメイン別配布:
+   ```python
+   def build_agent(self, ..., mcp_toolsets: ADKMCPToolsets | None = None):
+       mcp_mapping = {
+           "analytics": [],      # GA4 + GSC
+           "ad_platform": [],    # Meta Ads
+           "seo": [],            # Ahrefs
+           "wordpress": [],      # WordPress x2
+       }
+       if mcp_toolsets:
+           if mcp_toolsets.ga4:
+               mcp_mapping["analytics"].append(mcp_toolsets.ga4)
+           if mcp_toolsets.gsc:
+               mcp_mapping["analytics"].append(mcp_toolsets.gsc)
+           # ... etc
+
+       for name, factory in self._sub_factories.items():
+           domain_mcp = mcp_mapping.get(name, [])
+           sub_agent = factory.build_agent(mcp_servers=domain_mcp, asset=asset)
+   ```
+
+2. **サブエージェントファクトリの簡素化**:
+   ```python
+   # Before (バグ)
+   for server in mcp_servers:
+       if getattr(server, "name", "") in ("ga4", "gsc"):
+           tools.append(server)
+
+   # After (修正)
+   if mcp_servers:
+       return list(mcp_servers)  # オーケストレーターが事前フィルタ済み
+   ```
+
+3. **`agent_service.py`** - `ADKMCPToolsets`オブジェクトを直接渡す:
+   ```python
+   mcp_toolsets = await self._mcp_manager.create_toolsets()
+   orchestrator = self._orchestrator_factory.build_agent(mcp_toolsets=mcp_toolsets)
+   ```
+
+**修正後のサブエージェントツール数**:
+| エージェント | ツール数 | ソース |
+|-------------|---------|--------|
+| AnalyticsAgent | 2 | GA4 + GSC MCPToolset |
+| AdPlatformAgent | 1 | Meta Ads MCPToolset |
+| SEOAgent | 0 | Ahrefs MCPToolset未設定 |
+| WordPressAgent | 0 | WordPress MCPToolset未設定 |
+| ZohoCRMAgent | 10 | Function tools |
+| CandidateInsightAgent | 4 | Function tools |
+
+**技術的知見**:
+- `McpToolset`には`name`属性がない - フィルタリングは呼び出し元で行う
+- ADKの`McpToolset`はSTDIO/SSE接続パラメータのみを保持
+- ドメイン別のツール配布はオーケストレーターファクトリで集中管理
 
 ---
 

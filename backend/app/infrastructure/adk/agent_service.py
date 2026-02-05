@@ -23,7 +23,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict, List, Optional
 
 from google.adk.agents import Agent
-from google.adk.runners import Runner
+from google.adk.agents.run_config import StreamingMode
+from google.adk.runners import Runner, RunConfig
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 
@@ -170,10 +171,13 @@ class ADKAgentService:
                 parts=[types.Part(text=message)],
             )
 
+            # Enable SSE streaming mode
+            run_config = RunConfig(streaming_mode=StreamingMode.SSE)
             async for event in runner.run_async(
                 user_id="default",
                 session_id=session_id,
                 new_message=user_content,
+                run_config=run_config,
             ):
                 if hasattr(event, "content") and event.content:
                     if hasattr(event.content, "parts"):
@@ -239,8 +243,7 @@ class ADKAgentService:
         sub_agent_states: Dict[str, dict] = {}
 
         # Initialize MCP toolsets
-        toolsets = await self._mcp_manager.create_toolsets()
-        mcp_tools = toolsets.all()
+        mcp_toolsets = await self._mcp_manager.create_toolsets()
 
         try:
             # Create or get session
@@ -256,10 +259,10 @@ class ADKAgentService:
                     session_id=session_id,
                 )
 
-            # Build orchestrator agent
+            # Build orchestrator agent with domain-specific MCP toolsets
             orchestrator = self._orchestrator_factory.build_agent(
                 asset=model_asset,
-                mcp_servers=mcp_tools,
+                mcp_toolsets=mcp_toolsets,
             )
 
             # Create runner
@@ -285,10 +288,13 @@ class ADKAgentService:
                 """Background task: read ADK stream events and put into queue."""
                 nonlocal accumulated_text
                 try:
+                    # Enable SSE streaming mode
+                    run_config = RunConfig(streaming_mode=StreamingMode.SSE)
                     async for event in runner.run_async(
                         user_id="default",
                         session_id=session_id,
                         new_message=user_content,
+                        run_config=run_config,
                     ):
                         sse_events = self._process_adk_event(event, sub_agent_states)
                         if sse_events is not None:
@@ -348,48 +354,25 @@ class ADKAgentService:
         - function_call (with name attribute)
         - function_response (with name attribute)
 
+        In SSE streaming mode:
+        - partial=True: Streaming chunk (should be sent immediately)
+        - partial=False/None: Final event (may contain full text, skip if already sent via partial)
+
         Returns a list of SSE events (since one ADK event can contain multiple parts).
         """
         results = []
+
+        # Check if this is a partial (streaming) event
+        is_partial = getattr(event, "partial", None)
 
         # ADK events have content.parts[]
         if hasattr(event, "content") and event.content:
             if hasattr(event.content, "parts"):
                 for part in event.content.parts:
-                    # --- Text content ---
-                    if hasattr(part, "text") and part.text:
-                        results.append({
-                            "type": "text_delta",
-                            "content": part.text,
-                        })
+                    # Use elif to ensure only one event type per part
+                    # Priority: function_response > function_call > text
 
-                    # --- Function call (tool invocation) ---
-                    if hasattr(part, "function_call") and part.function_call:
-                        fc = part.function_call
-                        tool_name = getattr(fc, "name", "unknown")
-
-                        # Check if this is a sub-agent call (AgentTool)
-                        if tool_name.endswith("Agent"):
-                            # Extract agent name (e.g., "ZohoCRMAgent" -> "zoho_crm")
-                            agent_name = self._normalize_agent_name(tool_name)
-                            sub_agent_states[agent_name] = {"is_running": True}
-                            results.append({
-                                "type": "sub_agent_event",
-                                "agent": agent_name,
-                                "event_type": "started",
-                                "is_running": True,
-                                "data": {},
-                            })
-                        else:
-                            # Regular tool call
-                            results.append({
-                                "type": "tool_call",
-                                "call_id": str(uuid.uuid4()),
-                                "name": tool_name,
-                                "arguments": json.dumps(getattr(fc, "args", {}), ensure_ascii=False),
-                            })
-
-                    # --- Function response (tool result) ---
+                    # --- Function response (tool result) - highest priority ---
                     if hasattr(part, "function_response") and part.function_response:
                         fr = part.function_response
                         tool_name = getattr(fr, "name", "unknown")
@@ -430,6 +413,55 @@ class ADKAgentService:
                                 "type": "tool_result",
                                 "call_id": str(uuid.uuid4()),
                                 "output": output_str,
+                            })
+
+                    # --- Function call (tool invocation) ---
+                    elif hasattr(part, "function_call") and part.function_call:
+                        fc = part.function_call
+                        tool_name = getattr(fc, "name", "unknown")
+
+                        # Check if this is a sub-agent call (AgentTool)
+                        if tool_name.endswith("Agent"):
+                            # Extract agent name (e.g., "ZohoCRMAgent" -> "zoho_crm")
+                            agent_name = self._normalize_agent_name(tool_name)
+                            sub_agent_states[agent_name] = {"is_running": True}
+                            results.append({
+                                "type": "sub_agent_event",
+                                "agent": agent_name,
+                                "event_type": "started",
+                                "is_running": True,
+                                "data": {},
+                            })
+                        else:
+                            # Regular tool call
+                            results.append({
+                                "type": "tool_call",
+                                "call_id": str(uuid.uuid4()),
+                                "name": tool_name,
+                                "arguments": json.dumps(getattr(fc, "args", {}), ensure_ascii=False),
+                            })
+
+                    # --- Text content (lowest priority) ---
+                    elif hasattr(part, "text") and part.text:
+                        # SSE streaming mode event flow:
+                        # 1. partial=True: Streaming chunk (send immediately)
+                        # 2. partial=False: Final event with complete text (skip - already sent via partial)
+                        # 3. partial=None: Non-streaming mode (send - no partial events)
+                        if is_partial is True:
+                            # Streaming chunk - send immediately
+                            results.append({
+                                "type": "text_delta",
+                                "content": part.text,
+                            })
+                        elif is_partial is False:
+                            # Final event in SSE mode - skip to avoid duplication
+                            # The same text was already sent via partial=True events
+                            logger.debug(f"[ADK] Skipping final text (partial=False): {part.text[:50]}...")
+                        elif is_partial is None:
+                            # Non-streaming mode (e.g., sub-agent) - send the text
+                            results.append({
+                                "type": "text_delta",
+                                "content": part.text,
                             })
 
         # Return results if any, otherwise None
