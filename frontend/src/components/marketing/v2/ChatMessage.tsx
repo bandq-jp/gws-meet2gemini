@@ -338,25 +338,58 @@ const markdownComponents: Components = {
 // SubAgentBadge - Inline badge for sub-agent (matches main agent tool style)
 // ---------------------------------------------------------------------------
 
+// Progress labels for each agent type
+const AGENT_PROGRESS_LABELS: Record<string, string[]> = {
+  analytics: ["データを分析中", "GA4に接続中", "メトリクスを取得中"],
+  seo: ["SEOを調査中", "バックリンクを分析中", "キーワードを確認中"],
+  ad_platform: ["広告データを取得中", "キャンペーンを分析中", "パフォーマンスを確認中"],
+  zoho_crm: ["CRMを検索中", "候補者情報を取得中", "データを集計中"],
+  candidate_insight: ["候補者を分析中", "リスクを評価中", "ブリーフィングを生成中"],
+  wordpress: ["記事を検索中", "コンテンツを取得中", "ページを確認中"],
+  default: ["処理中", "データを取得中", "分析中"],
+};
+
 function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
   // Default expanded when running (user requested)
   const [isExpanded, setIsExpanded] = useState(item.isRunning);
+  const [progressLabelIndex, setProgressLabelIndex] = useState(0);
   const config = getAgentConfig(item.agent);
   const Icon = config.icon;
 
   const toolCalls = item.toolCalls || [];
   const hasDetails = toolCalls.length > 0 || item.reasoningContent;
+  const runningToolCount = toolCalls.filter(tc => !tc.isComplete).length;
+  const completedToolCount = toolCalls.filter(tc => tc.isComplete && !tc.error).length;
 
-  // Auto-expand when running, auto-collapse after completion
+  // Rotate progress labels every 3 seconds when running
+  useEffect(() => {
+    if (!item.isRunning) return;
+
+    const agentKey = item.agent.toLowerCase().replace(/[^a-z0-9_]/g, "");
+    const labels = AGENT_PROGRESS_LABELS[agentKey] || AGENT_PROGRESS_LABELS.default;
+
+    const interval = setInterval(() => {
+      setProgressLabelIndex((prev) => (prev + 1) % labels.length);
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [item.isRunning, item.agent]);
+
+  // Auto-expand when running with details, smoother collapse after completion
   useEffect(() => {
     if (item.isRunning && hasDetails) {
       setIsExpanded(true);
     } else if (!item.isRunning) {
-      // Auto-collapse 1 second after completion
-      const timer = setTimeout(() => setIsExpanded(false), 1000);
+      // Smoother auto-collapse 2 seconds after completion
+      const timer = setTimeout(() => setIsExpanded(false), 2000);
       return () => clearTimeout(timer);
     }
   }, [item.isRunning, hasDetails]);
+
+  // Get current progress label
+  const agentKey = item.agent.toLowerCase().replace(/[^a-z0-9_]/g, "");
+  const labels = AGENT_PROGRESS_LABELS[agentKey] || AGENT_PROGRESS_LABELS.default;
+  const progressLabel = labels[progressLabelIndex % labels.length];
 
   return (
     <div className="space-y-1.5">
@@ -365,7 +398,7 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
         onClick={() => hasDetails && setIsExpanded(!isExpanded)}
         className={`
           inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] sm:text-xs
-          transition-all duration-200 cursor-pointer
+          transition-all duration-300 cursor-pointer
           ${item.isRunning
             ? "bg-[#f0f1f5] text-[#374151] border border-[#e5e7eb]"
             : "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
@@ -374,13 +407,31 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
       >
         <Icon className="w-3 h-3 shrink-0" />
         <span className="font-medium">{config.label}</span>
+
+        {/* Status indicator */}
         {item.isRunning ? (
-          <Loader2 className="w-3 h-3 animate-spin" />
+          <>
+            <Loader2 className="w-3 h-3 animate-spin text-[#6b7280]" />
+            {/* Progress label - shows what the agent is doing */}
+            <span className="text-[10px] text-[#9ca3af] ml-0.5 hidden sm:inline transition-opacity duration-300">
+              {progressLabel}
+            </span>
+          </>
         ) : (
-          <CheckCircle2 className="w-3 h-3 text-[#10b981]" />
+          <>
+            <CheckCircle2 className="w-3 h-3 text-[#10b981]" />
+            {/* Show tool count when completed */}
+            {completedToolCount > 0 && (
+              <span className="text-[10px] text-[#10b981] ml-0.5">
+                {completedToolCount}件完了
+              </span>
+            )}
+          </>
         )}
+
+        {/* Expand/collapse indicator */}
         {hasDetails && (
-          <span className="text-[#9ca3af] ml-0.5">
+          <span className="text-[#9ca3af] ml-0.5 text-[10px]">
             {isExpanded ? "▼" : "▶"}
           </span>
         )}
@@ -388,7 +439,7 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
 
       {/* Expanded details - tool calls and reasoning (full content, no line-clamp) */}
       {isExpanded && hasDetails && (
-        <div className="ml-3 pl-2.5 border-l border-[#e5e7eb] space-y-1.5">
+        <div className="ml-3 pl-2.5 border-l-2 border-[#e5e7eb] space-y-1.5 animate-in slide-in-from-top-1 duration-200">
           {/* Tool calls - chronological display */}
           {toolCalls.map((tc, idx) => {
             const ToolIcon = TOOL_ICONS[tc.toolName] || Wrench;
@@ -399,6 +450,7 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
                 <div
                   className={`
                     inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[10px]
+                    transition-all duration-200
                     ${hasError
                       ? "bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]"
                       : tc.isComplete
