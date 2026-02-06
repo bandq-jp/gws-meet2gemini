@@ -159,6 +159,10 @@ class Settings:
     company_db_spreadsheet_id: str = os.getenv("COMPANY_DB_SPREADSHEET_ID", "")
     company_db_cache_ttl: int = int(os.getenv("COMPANY_DB_CACHE_TTL", "300"))
 
+    # Slack Integration
+    slack_bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
+    slack_user_token: str = os.getenv("SLACK_USER_TOKEN", "")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

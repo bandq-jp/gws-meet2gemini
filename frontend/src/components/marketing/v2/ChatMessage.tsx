@@ -36,6 +36,8 @@ import {
   Image as ImageIcon,
   Mail,
   Calendar,
+  MessageSquare,
+  Hash,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -274,6 +276,24 @@ const SUB_AGENT_CONFIG: Record<string, AgentUIConfig> = {
     borderColor: "border-red-200",
     accentColor: "#ef4444",
   },
+  slackagent: {
+    label: "Slack",
+    icon: MessageSquare,
+    gradient: "from-fuchsia-500 to-purple-600",
+    bgLight: "bg-fuchsia-50",
+    textColor: "text-fuchsia-700",
+    borderColor: "border-fuchsia-200",
+    accentColor: "#a855f7",
+  },
+  slack: {
+    label: "Slack",
+    icon: MessageSquare,
+    gradient: "from-fuchsia-500 to-purple-600",
+    bgLight: "bg-fuchsia-50",
+    textColor: "text-fuchsia-700",
+    borderColor: "border-fuchsia-200",
+    accentColor: "#a855f7",
+  },
   default: {
     label: "Agent",
     icon: Bot,
@@ -351,6 +371,13 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   list_calendar_events: Calendar,
   search_calendar_events: Calendar,
   get_event_detail: Calendar,
+  // Slack
+  search_slack_messages: Search,
+  get_channel_messages: Hash,
+  get_thread_replies: MessageSquare,
+  list_slack_channels: Hash,
+  search_company_in_slack: Database,
+  search_candidate_in_slack: Users,
   // General
   code_interpreter: Code2,
   web_search: Globe,
@@ -413,6 +440,13 @@ const TOOL_LABELS: Record<string, string> = {
   list_calendar_events: "予定一覧",
   search_calendar_events: "予定検索",
   get_event_detail: "予定詳細",
+  // Slack
+  search_slack_messages: "Slack検索",
+  get_channel_messages: "チャネル履歴",
+  get_thread_replies: "スレッド取得",
+  list_slack_channels: "チャネル一覧",
+  search_company_in_slack: "企業Slack検索",
+  search_candidate_in_slack: "候補者Slack検索",
   // General
   code_interpreter: "コード実行",
   web_search: "Web検索",
@@ -443,6 +477,11 @@ function extractToolContext(toolName: string, argsJson?: string): string | null 
     if (args.name) return args.name;
     // Meeting search
     if (args.keyword) return args.keyword;
+    // Slack channel/thread
+    if (args.candidate_name) return args.candidate_name;
+    if (args.channel_name_or_id) return `#${args.channel_name_or_id}`;
+    if (args.thread_ts) return `Thread: ${String(args.thread_ts).slice(0, 15)}`;
+    if (args.days_back) return `直近${args.days_back}日`;
     // Gmail/Calendar IDs
     if (args.message_id) return `ID: ${String(args.message_id).slice(0, 12)}...`;
     if (args.thread_id) return `Thread: ${String(args.thread_id).slice(0, 12)}...`;

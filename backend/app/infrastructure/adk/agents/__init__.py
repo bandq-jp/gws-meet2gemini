@@ -24,6 +24,7 @@ from .ca_support_agent import CASupportAgentFactory
 from .google_search_agent import GoogleSearchAgentFactory
 from .code_execution_agent import CodeExecutionAgentFactory
 from .workspace_agent import GoogleWorkspaceAgentFactory
+from .slack_agent import SlackAgentFactory
 
 __all__ = [
     "SubAgentFactory",
@@ -39,4 +40,5 @@ __all__ = [
     "GoogleSearchAgentFactory",
     "CodeExecutionAgentFactory",
     "GoogleWorkspaceAgentFactory",
+    "SlackAgentFactory",
 ]

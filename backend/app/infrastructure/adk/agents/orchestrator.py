@@ -27,6 +27,7 @@ from .ca_support_agent import CASupportAgentFactory
 from .google_search_agent import GoogleSearchAgentFactory
 from .code_execution_agent import CodeExecutionAgentFactory
 from .workspace_agent import GoogleWorkspaceAgentFactory
+from .slack_agent import SlackAgentFactory
 from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
 from app.infrastructure.adk.mcp_manager import ADKMCPToolsets
 
@@ -81,6 +82,9 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | 予定、カレンダー、スケジュール、会議予定 | GoogleWorkspaceAgent |
 | 今日の予定、来週の予定、空き時間 | GoogleWorkspaceAgent |
 | メールスレッド、やり取り、返信、添付 | GoogleWorkspaceAgent |
+| Slack、チャネル、スレッド、メンション、投稿 | SlackAgent |
+| Slackで検索、Slack上のやり取り、Slack言及 | SlackAgent |
+| 企業のSlack情報、候補者のSlack状況 | SlackAgent |
 | 上記に該当しない質問 | 最も関連性の高いエージェントを推測して即実行 |
 
 ---
@@ -169,6 +173,14 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - Gmail検索構文サポート（from:, subject:, after:, is:unread等）
 - **プライバシー保護**: メール全文は出力せず、要約・引用形式
 
+### SlackAgent (Slack検索)
+- Slack全チャネル横断のフルテキスト検索（search.messages）
+- 特定チャネルの最近のメッセージ取得
+- スレッド会話の追跡
+- 企業名・候補者名でのSlack横断検索（構造化出力）
+- チャネル一覧の取得
+- **DMは対象外**（パブリック・プライベートチャネルのみ）
+
 ### CASupportAgent (CA統合支援) ★推奨
 **25ツール統合**：Zoho CRM + 候補者インサイト + 企業DB + 議事録
 - 候補者の完全プロファイル取得（Zoho + 議事録構造化データ）
@@ -247,6 +259,18 @@ ORCHESTRATOR_INSTRUCTIONS = """
 「山田さんの面談準備と最近のメール確認」
 → CASupportAgent + GoogleWorkspaceAgent
 
+**Slack + CRM横断確認**
+「山田さんのSlackでの状況とCRM情報」
+→ SlackAgent + ZohoCRMAgent
+
+**企業情報の多面的調査**
+「ラフロジックの企業DB情報とSlackでの言及」
+→ CompanyDatabaseAgent + SlackAgent
+
+**Slack + 面談準備**
+「候補者の面談準備とSlackでの直近のやり取り」
+→ CASupportAgent + SlackAgent
+
 ---
 
 ## 中間報告ルール（重要）
@@ -311,6 +335,7 @@ class OrchestratorAgentFactory:
             "google_search": GoogleSearchAgentFactory(settings),
             "code_execution": CodeExecutionAgentFactory(settings),
             "google_workspace": GoogleWorkspaceAgentFactory(settings),
+            "slack": SlackAgentFactory(settings),
         }
 
     @property
@@ -356,6 +381,7 @@ class OrchestratorAgentFactory:
             "google_search": [],  # Uses built-in google_search, no MCP
             "code_execution": [],  # Uses BuiltInCodeExecutor, no MCP
             "google_workspace": [],  # Uses function tools (Gmail/Calendar API), no MCP
+            "slack": [],  # Uses function tools (Slack API), no MCP
         }
 
         # Populate MCP mapping if toolsets are provided

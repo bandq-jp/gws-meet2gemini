@@ -329,6 +329,34 @@
   - ドキュメント調査だけでなく、実際のAPIを呼んでレスポンスを確認してから設計すべき
   - Zoho API v2とv7の挙動差異（必須パラメータの違い等）は実測でしか発見できない
 
+- **SlackAgent実装（Slack検索・チャンネル履歴）**
+  - **目的**: Slackチャンネル（パブリック+プライベート、DM除外）のメッセージ検索をAIエージェント経由で実現
+  - **認証**: User Token (`xoxp-`) + Bot Token (`xoxb-`) のハイブリッド
+    - `search.messages`（全文検索）= User Token必須（Slack API仕様制限）
+    - `conversations.history/replies/list` = Bot Token
+  - **依存追加**: `slack-sdk>=3.39.0` (`uv add slack-sdk`)
+  - 新規ファイル:
+    - `backend/app/infrastructure/slack/__init__.py` - パッケージ初期化
+    - `backend/app/infrastructure/slack/slack_service.py` - Slack APIクライアント（スレッドセーフシングルトン、チャンネル/ユーザーキャッシュTTL 1時間）
+    - `backend/app/infrastructure/adk/tools/slack_tools.py` - 6ツール
+    - `backend/app/infrastructure/adk/agents/slack_agent.py` - SlackAgentFactory
+  - 変更ファイル:
+    - `backend/app/infrastructure/config/settings.py` - `slack_bot_token`, `slack_user_token` 追加
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - サブエージェント登録、キーワードマトリクス追加
+    - `backend/app/infrastructure/adk/agents/__init__.py` - エクスポート追加
+    - `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py` - `SUB_AGENT_NAMES`追加
+    - `backend/.env.example` - Slack環境変数追加
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - UI設定（fuchsia/purple、MessageSquareアイコン）
+  - ツール一覧:
+    - `search_slack_messages`: 全文横断検索（in:, from:, after: 構文サポート）
+    - `get_channel_messages`: 特定チャンネル直近N時間の履歴
+    - `get_thread_replies`: スレッド全返信取得
+    - `list_slack_channels`: チャンネル一覧（im/mpim除外強制）
+    - `search_company_in_slack`: 企業名検索→Fee・条件構造化
+    - `search_candidate_in_slack`: 候補者名検索→進捗構造化
+  - 環境変数: `SLACK_BOT_TOKEN`, `SLACK_USER_TOKEN`
+  - **Slack API制約**: `search.messages`はUser Token(`xoxp-`)のみ対応、Bot Token(`xoxb-`)では`not_allowed_token_type`エラー
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

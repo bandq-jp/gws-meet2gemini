@@ -28,6 +28,7 @@ dependencies = [
     "mcp>=1.0.0", # FastMCP for GSC
     "meta-ads-mcp>=1.0.0", # Meta Ads MCP
     "google-generativeai>=0.8.6",
+    "slack-sdk>=3.39.0",
 ]
 
 [dependency-groups]
