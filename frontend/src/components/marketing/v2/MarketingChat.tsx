@@ -259,8 +259,8 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
         <h2 className="text-[15px] font-semibold text-foreground tracking-tight mb-1">
           b&q エージェント
         </h2>
-        <p className="text-[13px] text-muted-foreground/80 max-w-sm leading-relaxed">
-          GA4・CRM・企業DB・Gmail・カレンダーを横断して分析・提案
+        <p className="text-[12.5px] text-muted-foreground/80 max-w-md leading-relaxed">
+          11人のエージェントと150以上のツールを搭載した、GA4・GSC・Zoho CRM・企業DB・Meta広告・Ahrefs・Gmail・カレンダー・Google検索・コード実行を横断できるマルチエージェントシステム。
         </p>
       </div>
 
