@@ -302,10 +302,21 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   get_search_analytics: Search,
   get_performance_overview: Search,
   list_properties: Database,
-  // Zoho CRM
-  search_job_seekers: Users,
-  get_job_seeker_detail: Users,
-  aggregate_by_channel: BarChart3,
+  // Zoho CRM - Tier 1 (Metadata)
+  list_crm_modules: Database,
+  get_module_schema: Database,
+  get_module_layout: Database,
+  // Zoho CRM - Tier 2 (Universal Query)
+  query_crm_records: Search,
+  aggregate_crm_data: BarChart3,
+  get_record_detail: Users,
+  get_related_records: Users,
+  // Zoho CRM - Tier 3 (Specialized)
+  analyze_funnel_by_channel: TrendingUp,
+  trend_analysis_by_period: TrendingUp,
+  compare_channels: BarChart3,
+  get_pic_performance: Users,
+  get_conversion_metrics: BarChart3,
   // Meta Ads
   get_campaigns: Megaphone,
   get_adsets: Megaphone,
@@ -353,10 +364,21 @@ const TOOL_LABELS: Record<string, string> = {
   get_search_analytics: "検索分析",
   get_performance_overview: "パフォーマンス概要",
   list_properties: "プロパティ一覧",
-  // Zoho CRM
-  search_job_seekers: "求職者検索",
-  get_job_seeker_detail: "求職者詳細",
-  aggregate_by_channel: "チャネル集計",
+  // Zoho CRM - Tier 1
+  list_crm_modules: "モジュール一覧",
+  get_module_schema: "スキーマ取得",
+  get_module_layout: "レイアウト取得",
+  // Zoho CRM - Tier 2
+  query_crm_records: "CRMクエリ",
+  aggregate_crm_data: "CRM集計",
+  get_record_detail: "レコード詳細",
+  get_related_records: "関連レコード",
+  // Zoho CRM - Tier 3
+  analyze_funnel_by_channel: "ファネル分析",
+  trend_analysis_by_period: "トレンド分析",
+  compare_channels: "チャネル比較",
+  get_pic_performance: "担当者成績",
+  get_conversion_metrics: "コンバージョン指標",
   // Meta Ads
   get_campaigns: "キャンペーン取得",
   get_adsets: "広告セット取得",
@@ -405,13 +427,19 @@ function extractToolContext(toolName: string, argsJson?: string): string | null 
   if (!argsJson) return null;
   try {
     const args = JSON.parse(argsJson);
+    // CRM module context (Tier 1/2)
+    if (args.module_api_name) return args.module_api_name;
+    if (args.module) return args.module;
     // Company name
     if (args.company_name) return args.company_name;
     // Search query
     if (args.query && typeof args.query === "string") return args.query.slice(0, 40);
+    // COQL where clause
+    if (args.where && typeof args.where === "string") return args.where.slice(0, 40);
     // Candidate reasons (for find_companies_for_candidate)
     if (args.reasons && typeof args.reasons === "string") return args.reasons.slice(0, 40);
-    // Job seeker search
+    // Job seeker / channel search
+    if (args.channel && typeof args.channel === "string") return args.channel;
     if (args.name) return args.name;
     // Meeting search
     if (args.keyword) return args.keyword;

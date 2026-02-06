@@ -45,21 +45,23 @@ CA_SUPPORT_INSTRUCTIONS = """
 
 ---
 
-## 利用可能なツール（31個）
+## 利用可能なツール
 
-### Zoho CRM系（10個）
+### Zoho CRM系（12個）— 全モジュール動的アクセス
 | ツール | 用途 |
 |--------|------|
-| `get_channel_definitions` | チャネル・ステータス定義一覧 |
-| `search_job_seekers` | 候補者検索（チャネル・ステータス・名前・日付） |
-| `get_job_seeker_detail` | 候補者詳細（1名） |
-| `get_job_seekers_batch` | 候補者詳細一括取得（最大50名） |
-| `aggregate_by_channel` | チャネル別集計 |
-| `count_job_seekers_by_status` | ステータス別集計（ファネル） |
-| `analyze_funnel_by_channel` | チャネル別ファネル分析 |
+| `list_crm_modules` | 全CRMモジュール一覧（jobSeeker, JOB, HRBP等） |
+| `get_module_schema` | フィールド構造（API名・ピックリスト値・ルックアップ先） |
+| `get_module_layout` | レイアウト（セクション構造） |
+| `query_crm_records` | 任意モジュールのレコード検索（COQL） |
+| `aggregate_crm_data` | 任意モジュールの集計（GROUP BY） |
+| `get_record_detail` | 1レコード全フィールド取得 |
+| `get_related_records` | 関連リスト・サブフォーム取得 |
+| `analyze_funnel_by_channel` | jobSeekerチャネル別ファネル分析 |
 | `trend_analysis_by_period` | 期間別トレンド分析 |
 | `compare_channels` | チャネル比較 |
 | `get_pic_performance` | 担当者別パフォーマンス |
+| `get_conversion_metrics` | 全チャネルKPI一括取得 |
 
 ### 候補者インサイト系（4個）
 | ツール | 用途 |
@@ -126,7 +128,7 @@ CRMや企業DBだけでは得られないリアルな情報が含まれる。面
 
 ### 2. 面談準備
 ```
-1. get_job_seeker_detail(record_id) → 基本情報確認
+1. get_record_detail("jobSeeker", record_id) → 基本情報確認（全293フィールド）
 2. get_structured_data_for_candidate(record_id) → 前回面談の抽出データ
 3. analyze_competitor_risk(record_id) → 競合状況確認
 ```
@@ -149,7 +151,7 @@ CRMや企業DBだけでは得られないリアルな情報が含まれる。面
 ```
 1. search_gmail(query="from:候補者名 OR subject:候補者名 newer_than:30d") → 関連メール一覧
 2. get_email_thread(thread_id) → やり取りの流れを確認
-3. get_job_seeker_detail(record_id) → Zohoの最新情報と突合
+3. get_record_detail("jobSeeker", record_id) → Zohoの最新情報と突合
 ```
 
 ### 5b. 企業の最新情報をメールから補完

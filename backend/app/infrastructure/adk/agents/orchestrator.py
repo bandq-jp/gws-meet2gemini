@@ -60,6 +60,9 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | インタレスト、オーディエンス、ターゲティング | AdPlatformAgent |
 | 記事、ブログ、WordPress、SEO記事 | WordPressAgent |
 | 求職者、チャネル別、成約率、ファネル | ZohoCRMAgent |
+| CRMモジュール、フィールド一覧、Zohoスキーマ | ZohoCRMAgent |
+| COQL、レコード検索、CRM集計、関連レコード | ZohoCRMAgent |
+| 求人、JOB、HRBP、面接記録、interview_hc | ZohoCRMAgent |
 | 高リスク、緊急度、競合エージェント、面談準備 | CandidateInsightAgent |
 | 企業検索、採用要件、訴求ポイント | CompanyDatabaseAgent |
 | 候補者マッチング、おすすめ企業、推奨企業 | CompanyDatabaseAgent |
@@ -120,11 +123,11 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - SEO要件チェック
 - 記事作成・編集（明示的指示時のみ）
 
-### ZohoCRMAgent
-- 求職者検索・一覧
-- チャネル別獲得数集計
-- ステータス別ファネル分析
-- 担当者パフォーマンス
+### ZohoCRMAgent（全モジュール動的アクセス）
+- モジュール・フィールド・レイアウトのメタデータ探索
+- 任意モジュール（jobSeeker, JOB, HRBP, interview_hc等）のレコード検索・集計
+- 関連リスト・サブフォーム取得
+- jobSeeker専門: ファネル分析・トレンド・チャネル比較・担当者パフォーマンス
 
 ### CandidateInsightAgent
 - 競合エージェントリスク分析

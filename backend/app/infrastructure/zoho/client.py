@@ -275,47 +275,187 @@ class ZohoClient:
             body = e.read().decode("utf-8", "ignore")
             raise RuntimeError(f"Zoho GET {path} failed: {e.code} {body}") from e
 
-    # --- Metadata helpers ---
+    # --- Metadata helpers (with 24h TTL cache) ---
+
+    _modules_cache: Optional[List[Dict[str, Any]]] = None
+    _modules_cache_time: float = 0.0
+    _fields_cache: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
+    _layouts_cache: Dict[str, Tuple[List[Dict[str, Any]], float]] = {}
+    _METADATA_TTL: float = 86400.0  # 24時間
+
     def get_field_api_name(self, module_api_name: str, display_label: str) -> Optional[str]:
-        """Resolve field API name by display label for a module (best-effort)."""
-        data = self._get("/crm/v2/settings/fields", {"module": module_api_name}) or {}
-        for f in data.get("fields", []) or []:
-            # Match on display_label (user-facing) or field_label
-            if (f.get("display_label") == display_label) or (f.get("field_label") == display_label):
+        """表示ラベルからフィールドAPI名を解決する。"""
+        fields = self.list_fields_rich(module_api_name)
+        for f in fields:
+            if f.get("display_label") == display_label or f.get("field_label") == display_label:
                 return f.get("api_name")
         return None
 
     def list_modules(self) -> List[Dict[str, Any]]:
-        """List CRM modules (api_name and singular_label/label)."""
-        data = self._get("/crm/v2/settings/modules") or {}
+        """全CRMモジュール一覧を取得（24時間キャッシュ）。
+
+        Returns:
+            各モジュールの api_name, label, generated_type, api_supported, visibility 等
+        """
+        now = time.time()
+        if self._modules_cache is not None and (now - self._modules_cache_time) < self._METADATA_TTL:
+            return self._modules_cache
+
+        data = self._get("/crm/v7/settings/modules") or {}
         items = []
         for m in data.get("modules", []) or []:
-            items.append(
-                {
-                    "api_name": m.get("api_name"),
-                    "singular_label": m.get("singular_label"),
-                    "label": m.get("module_name") or m.get("label"),
-                    "generated_type": m.get("generated_type"),
-                    "deletable": m.get("deletable"),
-                    "creatable": m.get("creatable"),
-                }
-            )
+            items.append({
+                "api_name": m.get("api_name"),
+                "singular_label": m.get("singular_label"),
+                "label": m.get("module_name") or m.get("label"),
+                "generated_type": m.get("generated_type"),
+                "api_supported": m.get("api_supported", False),
+                "visibility": m.get("visibility"),
+            })
+
+        ZohoClient._modules_cache = items
+        ZohoClient._modules_cache_time = now
         return items
 
     def list_fields(self, module_api_name: str) -> List[Dict[str, Any]]:
-        """List fields for a module (api_name and display_label)."""
-        data = self._get("/crm/v2/settings/fields", {"module": module_api_name}) or {}
+        """モジュールの基本フィールド一覧を取得（後方互換）。"""
+        rich = self.list_fields_rich(module_api_name)
+        return [
+            {
+                "api_name": f.get("api_name"),
+                "display_label": f.get("display_label"),
+                "data_type": f.get("data_type"),
+                "system_mandatory": f.get("system_mandatory"),
+            }
+            for f in rich
+        ]
+
+    def list_fields_rich(self, module_api_name: str) -> List[Dict[str, Any]]:
+        """モジュールの詳細フィールド一覧を取得（ピックリスト値・ルックアップ先含む、24時間キャッシュ）。
+
+        Returns:
+            各フィールドの api_name, display_label, data_type, custom_field,
+            pick_list_values (picklist型), lookup_module (lookup型) 等
+        """
+        now = time.time()
+        cached = self._fields_cache.get(module_api_name)
+        if cached and (now - cached[1]) < self._METADATA_TTL:
+            return cached[0]
+
+        data = self._get("/crm/v7/settings/fields", {"module": module_api_name}) or {}
         out: List[Dict[str, Any]] = []
         for f in data.get("fields", []) or []:
-            out.append(
-                {
-                    "api_name": f.get("api_name"),
-                    "display_label": f.get("display_label") or f.get("field_label"),
-                    "data_type": f.get("data_type"),
-                    "system_mandatory": f.get("system_mandatory"),
-                }
-            )
+            dt = f.get("data_type", "")
+            entry: Dict[str, Any] = {
+                "api_name": f.get("api_name"),
+                "display_label": f.get("display_label") or f.get("field_label"),
+                "field_label": f.get("field_label"),
+                "data_type": dt,
+                "system_mandatory": f.get("system_mandatory"),
+                "custom_field": f.get("custom_field", False),
+                "visible": f.get("visible", True),
+            }
+            # ピックリスト値を含める
+            if dt in ("picklist", "multiselectpicklist"):
+                vals = [v.get("display_value") for v in (f.get("pick_list_values") or []) if v.get("display_value")]
+                entry["pick_list_values"] = vals
+            # ルックアップ先モジュール
+            if dt == "lookup":
+                lk = f.get("lookup")
+                if isinstance(lk, dict):
+                    mod = lk.get("module")
+                    if isinstance(mod, dict):
+                        entry["lookup_module"] = mod.get("api_name")
+                    elif isinstance(mod, str):
+                        entry["lookup_module"] = mod
+            out.append(entry)
+
+        ZohoClient._fields_cache[module_api_name] = (out, now)
         return out
+
+    def get_layouts(self, module_api_name: str) -> List[Dict[str, Any]]:
+        """モジュールのレイアウト情報を取得（セクション構造・フィールド配置、24時間キャッシュ）。
+
+        Returns:
+            レイアウトごとの name, status, sections[{display_label, field_count, field_names}]
+        """
+        now = time.time()
+        cached = self._layouts_cache.get(module_api_name)
+        if cached and (now - cached[1]) < self._METADATA_TTL:
+            return cached[0]
+
+        data = self._get("/crm/v7/settings/layouts", {"module": module_api_name}) or {}
+        out: List[Dict[str, Any]] = []
+        for layout in data.get("layouts", []) or []:
+            sections = []
+            for sec in layout.get("sections", []) or []:
+                fields_in_sec = sec.get("fields") or []
+                sections.append({
+                    "display_label": sec.get("display_label"),
+                    "field_count": len(fields_in_sec),
+                    "fields": [
+                        {"api_name": fld.get("api_name"), "display_label": fld.get("field_label")}
+                        for fld in fields_in_sec
+                        if fld.get("api_name")
+                    ],
+                })
+            out.append({
+                "name": layout.get("name"),
+                "id": layout.get("id"),
+                "status": layout.get("status"),
+                "sections": sections,
+            })
+
+        ZohoClient._layouts_cache[module_api_name] = (out, now)
+        return out
+
+    def get_record(self, module_api_name: str, record_id: str) -> Dict[str, Any]:
+        """任意モジュールの1レコードを全フィールド取得。"""
+        data = self._get(f"/crm/v7/{module_api_name}/{record_id}") or {}
+        items = data.get("data") or []
+        return items[0] if items else {}
+
+    def get_related_records(
+        self,
+        module_api_name: str,
+        record_id: str,
+        related_list_api_name: str,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        """レコードの関連リスト（サブフォーム・関連モジュール）を取得。
+        Note: v2 APIを使用（v7はfields必須のため全フィールド取得に不便）"""
+        params = {"per_page": min(limit, 200)}
+        data = self._get(
+            f"/crm/v2/{module_api_name}/{record_id}/{related_list_api_name}",
+            params,
+        ) or {}
+        return data.get("data") or []
+
+    def generic_coql_query(
+        self,
+        select_query: str,
+        limit: int = 200,
+    ) -> Dict[str, Any]:
+        """バリデーション付き汎用COQLクエリ実行。
+
+        ツールレイヤーから安全に呼び出すためのラッパー。
+        SELECTのみ許可、LIMIT強制、危険パターン除去。
+        """
+        # 安全性チェック
+        q_upper = select_query.strip().upper()
+        if not q_upper.startswith("SELECT"):
+            raise ValueError("COQLはSELECTクエリのみ対応しています")
+        for dangerous in ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE"]:
+            if dangerous in q_upper:
+                raise ValueError(f"禁止操作: {dangerous}")
+        # セミコロン・コメント除去
+        clean = select_query.replace(";", "").replace("--", "").replace("/*", "").replace("*/", "")
+        # LIMIT強制
+        effective_limit = min(limit, 2000)
+        if "LIMIT" not in clean.upper():
+            clean += f" LIMIT {effective_limit}"
+
+        return self._coql_query(clean)
 
     # --- APP-hc (CustomModule1) helpers ---
     def search_app_hc_by_name(self, name: str, limit: int = 5) -> List[Dict[str, Any]]:

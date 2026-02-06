@@ -299,6 +299,36 @@
   - 説明文更新: 「GA4・CRM・企業DB・Gmail・カレンダーを横断して分析・提案」
   - Lucideアイコン追加import: Mail, Calendar, Globe, Code2, Megaphone, FileText
 
+- **Zoho CRM 3層アーキテクチャ全面書き換え**
+  - **目的**: 全CRMモジュール（58個）に動的アクセス可能に。旧実装はjobSeekerモジュールの7-17フィールドしかアクセスできなかった
+  - **Tier 1 (メタデータ発見)**: 新規3ツール
+    - `list_crm_modules`: 全モジュール一覧（レコード件数付き可）
+    - `get_module_schema`: フィールド構造（API名・ピックリスト値・ルックアップ先、296フィールド対応）
+    - `get_module_layout`: レイアウト（セクション構造・フィールド配置）
+  - **Tier 2 (汎用クエリ)**: 新規4ツール
+    - `query_crm_records`: 任意モジュールのCOQL検索（SELECT/WHERE/ORDER BY/LIMIT）
+    - `aggregate_crm_data`: 任意モジュールのGROUP BY集計
+    - `get_record_detail`: 1レコード全フィールド取得（全298フィールド返却確認済み）
+    - `get_related_records`: 関連リスト・サブフォーム取得
+  - **Tier 3 (専門分析)**: 既存5ツール維持（バグ修正済み）
+    - `analyze_funnel_by_channel`, `trend_analysis_by_period`, `compare_channels`, `get_pic_performance`, `get_conversion_metrics`
+  - **削除**: 6ツール（Tier 2で代替）
+    - `get_channel_definitions`, `search_job_seekers`, `get_job_seeker_detail`, `get_job_seekers_batch`, `aggregate_by_channel`, `count_job_seekers_by_status`
+  - **バグ修正**: `_format_job_seeker_detail`のfield19→customer_statusバグ修正（関数自体削除、Tier 2のget_record_detailが全フィールド返却）
+  - 変更ファイル:
+    - `backend/app/infrastructure/zoho/client.py` - 24h TTLメタデータキャッシュ、list_modules/list_fields_rich/get_layouts/get_record/get_related_records/generic_coql_query追加
+    - `backend/app/infrastructure/adk/tools/zoho_crm_tools.py` - 全面書き換え（11→12ツール、3層構造）
+    - `backend/app/infrastructure/adk/agents/zoho_crm_agent.py` - 指示文更新（3層ツール体系・COQL Tips）
+    - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - ツール一覧・ワークフロー例更新
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - サブエージェント説明・キーワードマトリクス更新
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - ツールアイコン・ラベル・コンテキスト表示更新
+  - **API検証**: 21テスト中20成功、1件（get_related_records）はv7→v2 API切替で修正完了
+  - **Zoho v7 API知見**: 関連レコードAPIはv7ではfields必須パラメータ、v2では不要。サブフォーム全フィールド取得にはv2を使用
+
+- **自己改善: 実データ検証の重要性**
+  - ドキュメント調査だけでなく、実際のAPIを呼んでレスポンスを確認してから設計すべき
+  - Zoho API v2とv7の挙動差異（必須パラメータの違い等）は実測でしか発見できない
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

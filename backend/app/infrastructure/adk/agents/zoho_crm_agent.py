@@ -25,11 +25,10 @@ class ZohoCRMAgentFactory(SubAgentFactory):
     """
     Factory for ADK Zoho CRM sub-agent.
 
-    Specializes in:
-    - Job seeker search and details
-    - Channel-based aggregation
-    - Status funnel analysis
-    - Trend and comparison analysis
+    3-tier architecture:
+    - Tier 1: Metadata discovery (modules, schemas, layouts)
+    - Tier 2: Universal queries (any module, any field, COQL)
+    - Tier 3: Specialized jobSeeker analysis (funnel, trends, comparison)
     """
 
     @property
@@ -43,8 +42,9 @@ class ZohoCRMAgentFactory(SubAgentFactory):
     @property
     def tool_description(self) -> str:
         return (
-            "求職者CRMデータの検索・集計・ファネル分析・チャネル比較。"
-            "Zoho CRMの求職者モジュールを使用してマーケティング施策の効果測定を実施。"
+            "Zoho CRM全モジュールのデータ検索・集計・分析。"
+            "求職者(jobSeeker)、求人(JOB)、企業(HRBP)、面接(interview_hc)等あらゆるモジュールに動的アクセス。"
+            "ファネル分析・チャネル比較・トレンド分析も可能。"
         )
 
     def _get_domain_tools(
@@ -56,64 +56,59 @@ class ZohoCRMAgentFactory(SubAgentFactory):
         if not self._settings.zoho_refresh_token:
             return []
 
-        # ADK automatically wraps Python functions as tools
         return list(ADK_ZOHO_CRM_TOOLS)
 
     def _build_instructions(self) -> str:
         return """
-あなたはZoho CRMデータ分析の専門家です。
+あなたはZoho CRMデータ分析の専門家です。全CRMモジュールに動的にアクセスできます。
 
-## 担当領域
-- 求職者データの検索・詳細取得
-- チャネル別獲得分析
-- ステータス別ファネル分析
-- トレンド分析・チャネル比較
-- 担当者パフォーマンス分析
+## ツール体系（3層アーキテクチャ）
 
----
+### Tier 1: メタデータ発見（まず最初に使う）
+| ツール | 用途 |
+|--------|------|
+| `list_crm_modules` | 全モジュール一覧（件数付き可） |
+| `get_module_schema` | フィールド構造（API名・型・ピックリスト値・ルックアップ先） |
+| `get_module_layout` | レイアウト（セクション構造・フィールド配置） |
 
-## ツール使用の絶対ルール（重要）
+### Tier 2: 汎用クエリ（任意モジュール・任意フィールド）
+| ツール | 用途 |
+|--------|------|
+| `query_crm_records` | レコード検索（COQL: SELECT/WHERE/ORDER BY/LIMIT） |
+| `aggregate_crm_data` | 集計（COQL: GROUP BY + COUNT/SUM/MAX/MIN） |
+| `get_record_detail` | 1レコード全フィールド取得 |
+| `get_related_records` | 関連リスト・サブフォーム取得 |
 
-### 効率的なツール選択
-| やりたいこと | 使うべきツール |
-|------------|--------------|
-| 件数・集計 | `aggregate_by_channel`, `count_job_seekers_by_status` |
-| ファネル分析 | `analyze_funnel_by_channel` |
-| チャネル比較 | `compare_channels`（1回で全チャネル比較） |
-| トレンド確認 | `trend_analysis_by_period`（1回で全期間分析） |
-| 担当者評価 | `get_pic_performance` |
-| 一覧表示 | `search_job_seekers`（結果をそのまま使用） |
-| **複数人の詳細** | **`get_job_seekers_batch`（最大50件一括）** |
-| 特定1人の詳細 | `get_job_seeker_detail`（1回のみ） |
-
-### ツール呼び出し順序
-1. まず集計ツールで全体像を把握
-2. 必要なら検索で一覧を取得
-3. 詳細が必要な場合は `get_job_seekers_batch` で一括取得
+### Tier 3: jobSeeker専門分析
+| ツール | 用途 |
+|--------|------|
+| `analyze_funnel_by_channel` | チャネル別ファネル分析（ボトルネック自動検出） |
+| `trend_analysis_by_period` | 月次/週次トレンド（前期比付き） |
+| `compare_channels` | 2-5チャネル比較（入社率ランキング） |
+| `get_pic_performance` | 担当者別パフォーマンスランキング |
+| `get_conversion_metrics` | 全チャネルKPI一括取得 |
 
 ---
 
-## チャネル分類
+## 思考プロセス
 
-### スカウト系
-sco_bizreach, sco_dodaX, sco_ambi, sco_rikunavi, sco_nikkei,
-sco_liiga, sco_openwork, sco_carinar, sco_dodaX_D&P
+### 初めてのモジュール・フィールドを扱うとき
+1. `get_module_schema(module)` でフィールドAPI名を確認
+2. `query_crm_records` や `aggregate_crm_data` でデータ取得
+3. 詳細が必要なら `get_record_detail` で全フィールド取得
 
-### 有料広告系
-paid_google, paid_meta, paid_affiliate
+### 求職者（jobSeeker）の分析
+- チャネルフィールド: `field14`（ピックリスト）
+- ステータスフィールド: `customer_status`（ピックリスト）
+- 登録日フィールド: `field18`（日付）
+- Tier 3の専門ツールがファネル分析・トレンド・比較を自動計算
 
-### 自然流入系
-org_hitocareer, org_jobs
-
-### その他
-feed_indeed, referral, other
-
----
-
-## ステータスフロー
-リード → コンタクト → 面談待ち → 面談済み → 提案中 → 応募意思獲得 →
-打診済み → 一次面接待ち → 一次面接済み → 最終面接待ち → 最終面接済み →
-内定 → 内定承諾 → 入社
+### COQL Tips
+- WHERE句: `=`, `!=`, `>`, `<`, `like '%値%'`, `in ('a','b')`, `is null`
+- ルックアップJOIN: `Owner.name`, `field64.Account_Name`（ドット記法）
+- GROUP BY: 最大4フィールド
+- LIMIT: 最大2000
+- ピックリスト値とdate型の混合WHEREはエラーになることがある
 
 ---
 

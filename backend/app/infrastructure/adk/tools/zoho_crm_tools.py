@@ -1,10 +1,14 @@
 """
 Zoho CRM Tools for Google ADK.
 
-ADK-native tool definitions for Zoho CRM operations.
-These are plain Python functions that ADK will automatically wrap.
+3層アーキテクチャ:
+  Tier 1 (メタデータ発見): list_crm_modules, get_module_schema, get_module_layout
+  Tier 2 (汎用クエリ): query_crm_records, aggregate_crm_data, get_record_detail, get_related_records
+  Tier 3 (専門分析): analyze_funnel_by_channel, trend_analysis_by_period, compare_channels,
+                     get_pic_performance, get_conversion_metrics
 
-All tools from OpenAI Agents SDK version have been ported here.
+Tier 1/2: 全CRMモジュールに動的アクセス（フィールドやモジュールをハードコードしない）
+Tier 3: jobSeekerモジュール専用の高度なビジネス分析（ファネル・トレンド・チャネル比較）
 """
 
 from __future__ import annotations
@@ -33,14 +37,14 @@ def _get_zoho_client():
     return _zoho_client_instance
 
 
-# TTL cache for all records
+# TTL cache for all jobSeeker records (Tier 3 specialized tools用)
 _all_records_cache = None
 _all_records_cache_time = 0
 _ALL_RECORDS_CACHE_TTL = 300  # 5分
 
 
 def _get_cached_all_records():
-    """全レコードのTTLキャッシュ。5分間有効。"""
+    """全jobSeekerレコードのTTLキャッシュ。5分間有効。"""
     global _all_records_cache, _all_records_cache_time
     now = time.time()
     if _all_records_cache is not None and (now - _all_records_cache_time) < _ALL_RECORDS_CACHE_TTL:
@@ -63,7 +67,6 @@ def _retry_transient(max_retries: int = 2, delay: float = 1.0):
                 except Exception as e:
                     last_error = e
                     error_str = str(e).lower()
-                    # 認証エラーやバリデーションエラーはリトライしない
                     if any(kw in error_str for kw in ["auth", "invalid", "not found", "permission"]):
                         raise
                     if attempt < max_retries:
@@ -75,407 +78,557 @@ def _retry_transient(max_retries: int = 2, delay: float = 1.0):
     return decorator
 
 
-# Channel definitions
-CHANNEL_DEFINITIONS = {
-    # Scout channels
-    "sco_bizreach": "BizReachスカウト経由で獲得したリード",
-    "sco_dodaX": "dodaXスカウト経由で獲得したリード",
-    "sco_ambi": "Ambiスカウト経由で獲得したリード",
-    "sco_rikunavi": "リクナビスカウト経由で獲得したリード",
-    "sco_nikkei": "日経転職版スカウト経由で獲得したリード",
-    "sco_liiga": "外資就活ネクストスカウト経由で獲得したリード",
-    "sco_openwork": "OpenWorkスカウト経由で獲得したリード",
-    "sco_carinar": "Carinarスカウト経由で獲得したリード",
-    "sco_dodaX_D&P": "dodaXダイヤモンド/プラチナスカウト経由で獲得したリード",
-    # Paid advertising
-    "paid_google": "Googleリスティング広告経由で獲得したリード",
-    "paid_meta": "Meta広告（Facebook/Instagram）経由で獲得したリード",
-    "paid_affiliate": "アフィリエイト広告経由で獲得したリード",
-    # Organic
-    "org_hitocareer": "SEOメディア（hitocareer）経由で獲得したリード",
-    "org_jobs": "自社求人サイト経由で獲得したリード",
-    # Others
-    "feed_indeed": "Indeed経由で獲得したリード",
-    "referral": "紹介経由で獲得したリード",
-    "other": "その他",
-}
-
-# Status definitions
-STATUS_DEFINITIONS = {
-    "1. リード": "初期獲得状態",
-    "2. コンタクト": "連絡済み",
-    "3. 面談待ち": "面談予約済み",
-    "4. 面談済み": "面談完了",
-    "5. 提案中": "求人提案中",
-    "6. 応募意思獲得": "応募意思獲得",
-    "7. 打診済み": "企業へ打診済み",
-    "8. 一次面接待ち": "一次面接待ち",
-    "9. 一次面接済み": "一次面接済み",
-    "10. 最終面接待ち": "最終面接待ち",
-    "11. 最終面接済み": "最終面接済み",
-    "12. 内定": "内定獲得",
-    "13. 内定承諾": "内定承諾",
-    "14. 入社": "入社決定",
-    "15. 入社後退職（入社前退職含む）": "入社後退職",
-    "16. クローズ": "案件終了",
-    "17. 連絡禁止": "連絡禁止",
-    "18. 中長期対応": "中長期対応",
-    "19. 他社送客": "他社送客",
+# チャネルカテゴリ定義（Tier 3内部用）
+_CHANNEL_CATEGORIES = {
+    "sco_": "スカウト",
+    "paid_": "有料広告",
+    "org_": "自然流入",
+    "feed_": "求人フィード",
 }
 
 
-def get_channel_definitions() -> Dict[str, Any]:
-    """流入経路(channel)とステータス(status)の定義一覧を取得。
-
-    Returns:
-        Dict[str, Any]: チャネル・ステータス定義。
-            success: True/False
-            channels: チャネル定義辞書
-            statuses: ステータス定義辞書
-    """
-    return {
-        "success": True,
-        "channels": CHANNEL_DEFINITIONS,
-        "statuses": STATUS_DEFINITIONS,
-        "usage_hint": "search_job_seekers や aggregate_by_channel で使用できる流入経路コードの一覧です。",
-    }
+def _categorize_channel(channel: str) -> str:
+    """チャネルコードからカテゴリを判定。"""
+    if not channel:
+        return "不明"
+    for prefix, category in _CHANNEL_CATEGORIES.items():
+        if channel.startswith(prefix):
+            return category
+    if channel == "referral":
+        return "紹介"
+    return "その他"
 
 
-def search_job_seekers(
-    channel: Optional[str] = None,
-    status: Optional[str] = None,
-    name: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    limit: int = 20,
+# ファネルステージ定義（ビジネスロジック、Tier 3用）
+_FUNNEL_STAGES = [
+    ("1. リード", "初期獲得"),
+    ("2. コンタクト", "連絡済み"),
+    ("3. 面談待ち", "面談予約"),
+    ("4. 面談済み", "面談完了"),
+    ("5. 提案中", "求人提案"),
+    ("6. 応募意思獲得", "応募意思"),
+    ("7. 打診済み", "企業打診"),
+    ("8. 一次面接待ち", "一次面接待ち"),
+    ("9. 一次面接済み", "一次面接完了"),
+    ("10. 最終面接待ち", "最終面接待ち"),
+    ("11. 最終面接済み", "最終面接完了"),
+    ("12. 内定", "内定"),
+    ("13. 内定承諾", "内定承諾"),
+    ("14. 入社", "入社決定"),
+]
+
+
+def _clean_lookup_fields(record: Dict[str, Any]) -> Dict[str, Any]:
+    """ルックアップフィールドを展開し、$系システムフィールドを除去。"""
+    cleaned = {}
+    for k, v in record.items():
+        if k.startswith("$"):
+            continue
+        if isinstance(v, dict) and "name" in v and "id" in v and len(v) <= 3:
+            cleaned[k] = v.get("name")
+            cleaned[f"{k}_id"] = v.get("id")
+        else:
+            cleaned[k] = v
+    return cleaned
+
+
+# ============================================================
+# Tier 1: メタデータ発見ツール
+# ============================================================
+
+def list_crm_modules(
+    include_record_counts: bool = False,
     tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
-    """求職者を検索。channel/statusの定義はget_channel_definitionsで取得。
+    """Zoho CRMの全モジュール（タブ）一覧を取得。
+
+    どのモジュールが利用可能か、どんなデータが入っているかを確認する起点ツール。
+    初めてCRMを探索するときに最初に呼ぶこと。
 
     Args:
-        channel: 流入経路(paid_meta, sco_bizreach等)
-        status: ステータス("1. リード"等)
-        name: 名前(部分一致)
-        date_from: 開始日(YYYY-MM-DD)
-        date_to: 終了日(YYYY-MM-DD)
-        limit: 件数(max100)
+        include_record_counts: Trueにすると各モジュールのレコード件数も取得（やや遅い）
 
     Returns:
-        Dict[str, Any]: 検索結果。
-            success: True/False
-            total: ヒット件数
-            records: 求職者レコードリスト
-            filters_applied: 適用したフィルタ
+        success: True/False
+        modules: モジュール一覧（api_name, label, type）
+        total_modules: モジュール総数
+        hint: 次に使うべきツールのヒント
     """
-    logger.info(f"[ADK Zoho] search_job_seekers: channel={channel}, status={status}")
+    logger.info(f"[ADK Zoho] list_crm_modules: counts={include_record_counts}")
 
     try:
         zoho = _get_zoho_client()
-        results = zoho.search_by_criteria(
-            channel=channel,
-            status=status,
-            name=name,
-            date_from=date_from,
-            date_to=date_to,
-            limit=min(limit, 100),
-        )
+        modules = zoho.list_modules()
 
-        # Track candidate search patterns in user state
-        if tool_context and results:
+        # API対応モジュールのみ
+        api_modules = [m for m in modules if m.get("api_supported")]
+
+        result_modules = []
+        for m in api_modules:
+            entry = {
+                "api_name": m["api_name"],
+                "label": m.get("label") or m.get("singular_label"),
+                "type": m.get("generated_type"),
+            }
+            if include_record_counts:
+                try:
+                    count_result = zoho._coql_query(
+                        f"SELECT COUNT(id) FROM {m['api_name']} WHERE id is not null"
+                    )
+                    data = count_result.get("data") or []
+                    entry["record_count"] = data[0].get("COUNT(id)", 0) if data else 0
+                except Exception:
+                    entry["record_count"] = "取得不可"
+            result_modules.append(entry)
+
+        return {
+            "success": True,
+            "modules": result_modules,
+            "total_modules": len(result_modules),
+            "hint": "get_module_schemaでフィールド構造を確認し、query_crm_recordsでデータを取得できます。",
+        }
+    except ZohoAuthError:
+        return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
+    except Exception as e:
+        logger.error(f"[ADK Zoho] list_crm_modules error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def get_module_schema(
+    module_api_name: str,
+    include_picklist_values: bool = True,
+    tool_context: ToolContext = None,
+) -> Dict[str, Any]:
+    """モジュールのフィールド構造（スキーマ）を取得。
+
+    各フィールドのAPI名、表示名、データ型、ピックリスト選択肢、ルックアップ先を返す。
+    query_crm_recordsでSELECT/WHERE句に使うフィールド名を確認するために必須。
+
+    Args:
+        module_api_name: モジュールAPI名（例: "jobSeeker", "JOB", "HRBP", "Contacts"）
+        include_picklist_values: ピックリストの選択肢一覧も含めるか
+
+    Returns:
+        success: True/False
+        module: モジュール名
+        total_fields: フィールド総数
+        fields: フィールド一覧（api_name, display_label, data_type, pick_list_values, lookup_module）
+        picklist_summary: ピックリストフィールドの要約
+        lookup_summary: ルックアップフィールドの要約
+    """
+    logger.info(f"[ADK Zoho] get_module_schema: module={module_api_name}")
+
+    if not module_api_name:
+        return {"success": False, "error": "module_api_nameを指定してください"}
+
+    try:
+        zoho = _get_zoho_client()
+        fields = zoho.list_fields_rich(module_api_name)
+
+        output_fields = []
+        picklist_fields = []
+        lookup_fields = []
+
+        for f in fields:
+            entry = {
+                "api_name": f["api_name"],
+                "display_label": f.get("display_label"),
+                "data_type": f.get("data_type"),
+                "custom_field": f.get("custom_field", False),
+            }
+
+            dt = f.get("data_type", "")
+            if dt in ("picklist", "multiselectpicklist") and include_picklist_values:
+                vals = f.get("pick_list_values", [])
+                entry["pick_list_values"] = vals
+                picklist_fields.append({
+                    "api_name": f["api_name"],
+                    "display_label": f.get("display_label"),
+                    "value_count": len(vals),
+                    "sample_values": vals[:10],
+                })
+            elif dt == "lookup":
+                lk_module = f.get("lookup_module")
+                entry["lookup_module"] = lk_module
+                lookup_fields.append({
+                    "api_name": f["api_name"],
+                    "display_label": f.get("display_label"),
+                    "lookup_module": lk_module,
+                })
+
+            output_fields.append(entry)
+
+        return {
+            "success": True,
+            "module": module_api_name,
+            "total_fields": len(output_fields),
+            "fields": output_fields,
+            "picklist_summary": picklist_fields if picklist_fields else None,
+            "lookup_summary": lookup_fields if lookup_fields else None,
+            "hint": "query_crm_recordsのfieldsにapi_nameを、whereにピックリスト値を使用できます。",
+        }
+    except ZohoAuthError:
+        return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
+    except Exception as e:
+        logger.error(f"[ADK Zoho] get_module_schema error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def get_module_layout(
+    module_api_name: str,
+    tool_context: ToolContext = None,
+) -> Dict[str, Any]:
+    """モジュールのレイアウト（セクション構造・フィールド配置）を取得。
+
+    UIでどのフィールドがどのセクションにグループ化されているかを確認。
+    フィールドの論理的なまとまり（基本情報、ステータス、面談内容、企業提案検索等）を理解するのに便利。
+
+    Args:
+        module_api_name: モジュールAPI名（例: "jobSeeker", "JOB"）
+
+    Returns:
+        success: True/False
+        module: モジュール名
+        layouts: レイアウト一覧（name, sections[{display_label, field_count, fields}]）
+    """
+    logger.info(f"[ADK Zoho] get_module_layout: module={module_api_name}")
+
+    if not module_api_name:
+        return {"success": False, "error": "module_api_nameを指定してください"}
+
+    try:
+        zoho = _get_zoho_client()
+        layouts = zoho.get_layouts(module_api_name)
+
+        return {
+            "success": True,
+            "module": module_api_name,
+            "layouts": layouts,
+        }
+    except ZohoAuthError:
+        return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
+    except Exception as e:
+        logger.error(f"[ADK Zoho] get_module_layout error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# ============================================================
+# Tier 2: 汎用クエリツール
+# ============================================================
+
+@_retry_transient(max_retries=2)
+def query_crm_records(
+    module: str,
+    fields: str,
+    where: Optional[str] = None,
+    order_by: Optional[str] = None,
+    limit: int = 50,
+    tool_context: ToolContext = None,
+) -> Dict[str, Any]:
+    """任意モジュールのレコードをCOQL（SQL風クエリ）で検索・取得。
+
+    フィールド名はget_module_schemaで確認してから使用すること。
+    ピックリスト値はget_module_schemaのpick_list_valuesから確認可能。
+
+    COQL仕様:
+    - WHERE句: =, !=, >, <, >=, <=, like '%値%', in ('a','b'), is null, is not null
+    - ORDER BY: ASC/DESC
+    - LIMIT: 最大2000
+    - ルックアップJOIN: Owner.name, field64.Account_Name のようにドット記法で参照可能
+
+    Args:
+        module: モジュールAPI名（例: "jobSeeker", "JOB", "HRBP", "Contacts"）
+        fields: カンマ区切りのフィールドAPI名（例: "id, Name, customer_status, field14"）
+        where: WHERE条件（例: "customer_status = '4. 面談済み' AND field14 = 'sco_bizreach'"）
+        order_by: ソート（例: "Modified_Time DESC"）
+        limit: 取得件数（1-2000、デフォルト50）
+
+    Returns:
+        success: True/False
+        module: 対象モジュール
+        total: 取得件数
+        records: レコードリスト
+        has_more: さらにデータがあるか
+        query: 実行したCOQLクエリ（デバッグ用）
+    """
+    logger.info(f"[ADK Zoho] query_crm_records: module={module}, fields={fields[:80] if fields else ''}")
+
+    if not module:
+        return {"success": False, "error": "moduleを指定してください"}
+    if not fields:
+        return {"success": False, "error": "fieldsを指定してください（例: 'id, Name, Modified_Time'）"}
+
+    try:
+        zoho = _get_zoho_client()
+        effective_limit = max(1, min(limit, 2000))
+
+        # COQL構築
+        query = f"SELECT {fields} FROM {module}"
+        if where:
+            query += f" WHERE {where}"
+        else:
+            query += " WHERE id is not null"
+        if order_by:
+            query += f" ORDER BY {order_by}"
+        query += f" LIMIT {effective_limit}"
+
+        result = zoho.generic_coql_query(query, limit=effective_limit)
+        data = result.get("data") or []
+        info = result.get("info") or {}
+
+        cleaned_records = [_clean_lookup_fields(rec) for rec in data]
+
+        # State tracking
+        if tool_context:
             try:
-                searches = tool_context.state.get("user:recent_candidate_searches", [])
-                search_record = {
-                    "filters": {k: v for k, v in {
-                        "channel": channel, "status": status, "name": name,
-                    }.items() if v is not None},
-                    "result_count": len(results),
-                }
-                searches = searches + [search_record]
-                if len(searches) > 10:
-                    searches = searches[-10:]
-                tool_context.state["user:recent_candidate_searches"] = searches
+                queries = tool_context.state.get("user:recent_crm_queries", [])
+                queries = queries + [{"module": module, "where": where, "count": len(data)}]
+                if len(queries) > 20:
+                    queries = queries[-20:]
+                tool_context.state["user:recent_crm_queries"] = queries
             except Exception:
                 pass
 
         return {
             "success": True,
-            "total": len(results),
-            "records": results,
-            "filters_applied": {
-                "channel": channel,
-                "channel_description": CHANNEL_DEFINITIONS.get(channel) if channel else None,
-                "status": status,
-                "name": name,
-                "date_range": f"{date_from or '*'} ~ {date_to or '*'}",
-            },
+            "module": module,
+            "total": len(cleaned_records),
+            "records": cleaned_records,
+            "has_more": info.get("more_records", False),
+            "query": query,
         }
-    except ZohoAuthError as e:
-        logger.error(f"[ADK Zoho] Auth error: {e}")
+    except ZohoAuthError:
         return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
     except Exception as e:
-        logger.error(f"[ADK Zoho] Error: {e}")
+        logger.error(f"[ADK Zoho] query_crm_records error: {e}")
         return {"success": False, "error": str(e)}
 
 
-def get_job_seeker_detail(record_id: str, tool_context: ToolContext = None) -> Dict[str, Any]:
-    """特定求職者1名の詳細取得。日本語ラベル付き整形済みデータを返す。
+@_retry_transient(max_retries=2)
+def aggregate_crm_data(
+    module: str,
+    group_by: str,
+    aggregate: str = "COUNT(id)",
+    where: Optional[str] = None,
+    order_by: Optional[str] = None,
+    limit: int = 200,
+    tool_context: ToolContext = None,
+) -> Dict[str, Any]:
+    """任意モジュールの集計をCOQL GROUP BYで実行。
+
+    チャネル別・ステータス別・担当者別などの件数・集計を高速に取得。
+    クロス集計も最大4フィールドまでGROUP BY可能。
+
+    COQL GROUP BY仕様:
+    - 集計関数: COUNT(id), SUM(field), MAX(field), MIN(field)
+    - GROUP BY: 最大4フィールド
+    - WHERE条件併用可
 
     Args:
-        record_id: Zoho CRMのレコードID
+        module: モジュールAPI名（例: "jobSeeker"）
+        group_by: GROUP BYフィールド（カンマ区切り、例: "customer_status" or "field14, customer_status"）
+        aggregate: 集計式（デフォルト: "COUNT(id)"。"SUM(field17)"など数値フィールドも可）
+        where: WHERE条件（例: "field14 = 'sco_bizreach'"）
+        order_by: ソート（例: "customer_status ASC"）
+        limit: 最大行数（デフォルト200）
 
     Returns:
         success: True/False
-        record_id: レコードID
-        record: 整形済み求職者データ（日本語ラベル）
+        module: 対象モジュール
+        total_groups: グループ数
+        data: 集計結果リスト
+        query: 実行したCOQLクエリ
     """
-    logger.info(f"[ADK Zoho] get_job_seeker_detail: record_id={record_id}")
+    logger.info(f"[ADK Zoho] aggregate_crm_data: module={module}, group_by={group_by}")
 
-    if not record_id:
-        return {"success": False, "error": "record_idが指定されていません"}
+    if not module:
+        return {"success": False, "error": "moduleを指定してください"}
+    if not group_by:
+        return {"success": False, "error": "group_byを指定してください（例: 'customer_status'）"}
 
     try:
         zoho = _get_zoho_client()
-        record = zoho.get_app_hc_record(record_id)
+        effective_limit = max(1, min(limit, 2000))
+
+        query = f"SELECT {aggregate}, {group_by} FROM {module}"
+        if where:
+            query += f" WHERE {where}"
+        else:
+            query += " WHERE id is not null"
+        query += f" GROUP BY {group_by}"
+        if order_by:
+            query += f" ORDER BY {order_by}"
+        query += f" LIMIT {effective_limit}"
+
+        result = zoho.generic_coql_query(query, limit=effective_limit)
+        data = result.get("data") or []
+
+        return {
+            "success": True,
+            "module": module,
+            "total_groups": len(data),
+            "data": data,
+            "query": query,
+        }
+    except ZohoAuthError:
+        return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
+    except ValueError as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error(f"[ADK Zoho] aggregate_crm_data error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@_retry_transient(max_retries=2)
+def get_record_detail(
+    module: str,
+    record_id: str,
+    tool_context: ToolContext = None,
+) -> Dict[str, Any]:
+    """任意モジュールの1レコードを全フィールド取得。
+
+    レコードIDはquery_crm_recordsで取得したidを使用。
+    全フィールドが返るため、特定フィールドだけ必要ならquery_crm_recordsでfieldsを絞ること。
+
+    Args:
+        module: モジュールAPI名（例: "jobSeeker", "JOB"）
+        record_id: ZohoのレコードID
+
+    Returns:
+        success: True/False
+        module: モジュール名
+        record_id: レコードID
+        record: 全フィールドデータ（ルックアップはname展開済み）
+        field_count: 返却フィールド数
+    """
+    logger.info(f"[ADK Zoho] get_record_detail: module={module}, id={record_id}")
+
+    if not module:
+        return {"success": False, "error": "moduleを指定してください"}
+    if not record_id:
+        return {"success": False, "error": "record_idを指定してください"}
+
+    try:
+        zoho = _get_zoho_client()
+        record = zoho.get_record(module, record_id)
 
         if not record:
-            return {"success": False, "error": f"レコードが見つかりません: {record_id}"}
+            return {"success": False, "error": f"レコードが見つかりません: {module}/{record_id}"}
 
-        # Track viewed candidates in user state
+        cleaned = _clean_lookup_fields(record)
+
+        # State tracking
         if tool_context:
             try:
-                viewed = tool_context.state.get("user:viewed_candidates", [])
-                name = record.get("Name", record_id)
-                entry = {"record_id": record_id, "name": name}
-                # Avoid duplicates by record_id
+                viewed = tool_context.state.get("user:viewed_records", [])
+                entry = {"module": module, "record_id": record_id, "name": record.get("Name", record_id)}
                 existing_ids = {v.get("record_id") for v in viewed if isinstance(v, dict)}
                 if record_id not in existing_ids:
                     viewed = viewed + [entry]
                     if len(viewed) > 30:
                         viewed = viewed[-30:]
-                    tool_context.state["user:viewed_candidates"] = viewed
+                    tool_context.state["user:viewed_records"] = viewed
             except Exception:
                 pass
 
         return {
             "success": True,
+            "module": module,
             "record_id": record_id,
-            "record": _format_job_seeker_detail(record),
+            "record": cleaned,
+            "field_count": len(cleaned),
         }
-    except ZohoAuthError as e:
-        return {"success": False, "error": "認証エラー"}
+    except ZohoAuthError:
+        return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
     except Exception as e:
+        logger.error(f"[ADK Zoho] get_record_detail error: {e}")
         return {"success": False, "error": str(e)}
 
 
-def get_job_seekers_batch(record_ids: List[str]) -> Dict[str, Any]:
-    """複数求職者の詳細を一括取得（COQLでIN句使用、最大50件）。
-
-    Args:
-        record_ids: 取得するrecord_idのリスト（最大50件）
-
-    Returns:
-        Dict[str, Any]: 一括取得結果。
-            success: True/False
-            total: 取得件数
-            records: 求職者レコードリスト（整形済み）
-    """
-    logger.info(f"[ADK Zoho] get_job_seekers_batch: {len(record_ids)} records")
-
-    if not record_ids:
-        return {"success": False, "error": "record_idsが空です"}
-
-    if len(record_ids) > 50:
-        return {"success": False, "error": "最大50件まで指定可能です"}
-
-    try:
-        zoho = _get_zoho_client()
-        records = zoho.get_app_hc_records_batch(record_ids)
-
-        formatted = [_format_job_seeker_detail(r) for r in records]
-        return {
-            "success": True,
-            "total": len(formatted),
-            "records": formatted,
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def _format_job_seeker_detail(record: Dict[str, Any]) -> Dict[str, Any]:
-    """Zohoレコードを読みやすい形式に整形"""
-    owner = record.get("Owner")
-    pic_name = owner.get("name") if isinstance(owner, dict) else str(owner) if owner else "未割当"
-
-    return {
-        "record_id": record.get("id"),
-        "求職者名": record.get("Name"),
-        "流入経路": record.get("field14"),
-        "顧客ステータス": record.get("field19"),
-        "PIC": pic_name,
-        "登録日": record.get("field18"),
-        "更新日": record.get("Modified_Time"),
-        "年齢": record.get("field15"),
-        "性別": record.get("field16"),
-        "現年収": record.get("field17"),
-        "希望年収": record.get("field20"),
-        "経験業種": record.get("field21"),
-        "経験職種": record.get("field22"),
-        "希望業種": record.get("field23"),
-        "希望職種": record.get("field24"),
-        "転職希望時期": record.get("field66"),
-        "現職状況": record.get("field67"),
-        "職歴": record.get("field85"),
-    }
-
-
-def aggregate_by_channel(
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+@_retry_transient(max_retries=2)
+def get_related_records(
+    module: str,
+    record_id: str,
+    related_list: str,
+    limit: int = 200,
+    tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
-    """流入経路別の求職者数を集計。広告効果分析に使用。
+    """レコードの関連リスト（サブフォーム・子レコード）を取得。
+
+    関連リスト名はZohoのUI上のタブ名、またはAPIドキュメントで確認。
+    例: jobSeekerの選考サブフォーム（relatedlist2）、推薦企業（CLT_hc10）等。
 
     Args:
-        date_from: 開始日(YYYY-MM-DD)
-        date_to: 終了日(YYYY-MM-DD)
+        module: 親モジュールAPI名（例: "jobSeeker"）
+        record_id: 親レコードのID
+        related_list: 関連リストAPI名（例: "relatedlist2", "CLT_hc10", "Notes"）
+        limit: 最大取得件数（デフォルト200）
 
     Returns:
-        Dict[str, Any]: チャネル別集計。
-            success: True/False
-            period: 集計期間
-            by_category: カテゴリ別集計（スカウト系・有料広告系等）
-            category_totals: カテゴリ別合計
-            total: 総数
+        success: True/False
+        module: 親モジュール名
+        record_id: 親レコードID
+        related_list: 関連リスト名
+        total: 取得件数
+        records: 関連レコードリスト
     """
-    logger.info(f"[ADK Zoho] aggregate_by_channel: {date_from} to {date_to}")
+    logger.info(f"[ADK Zoho] get_related_records: {module}/{record_id}/{related_list}")
+
+    if not module or not record_id or not related_list:
+        return {"success": False, "error": "module, record_id, related_listをすべて指定してください"}
 
     try:
         zoho = _get_zoho_client()
-        results = zoho.count_by_channel(date_from=date_from, date_to=date_to)
-
-        # Categorize by channel type
-        enriched: Dict[str, Any] = {
-            "スカウト系": {},
-            "有料広告系": {},
-            "自然流入系": {},
-            "その他": {},
-        }
-
-        for channel, count in results.items():
-            item = {"count": count, "description": CHANNEL_DEFINITIONS.get(channel, "不明")}
-            if channel.startswith("sco_"):
-                enriched["スカウト系"][channel] = item
-            elif channel.startswith("paid_"):
-                enriched["有料広告系"][channel] = item
-            elif channel.startswith("org_"):
-                enriched["自然流入系"][channel] = item
-            else:
-                enriched["その他"][channel] = item
-
-        category_totals = {
-            category: sum(item["count"] for item in items.values())
-            for category, items in enriched.items()
-        }
+        records = zoho.get_related_records(module, record_id, related_list, limit=min(limit, 200))
 
         return {
             "success": True,
-            "period": {"from": date_from or "全期間", "to": date_to or "現在"},
-            "by_category": enriched,
-            "category_totals": category_totals,
-            "total": sum(results.values()),
+            "module": module,
+            "record_id": record_id,
+            "related_list": related_list,
+            "total": len(records),
+            "records": records,
         }
+    except ZohoAuthError:
+        return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
     except Exception as e:
+        logger.error(f"[ADK Zoho] get_related_records error: {e}")
         return {"success": False, "error": str(e)}
 
 
-def count_job_seekers_by_status(
-    channel: Optional[str] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-) -> Dict[str, Any]:
-    """ステータス別集計(ファネル分析用)。channelで絞込可。
-
-    全チャネル横断のステータス分布。特定チャネルの深堀りはanalyze_funnel_by_channelを使用。
-
-    Args:
-        channel: 流入経路でフィルタ
-        date_from: 開始日(YYYY-MM-DD)
-        date_to: 終了日(YYYY-MM-DD)
-
-    Returns:
-        Dict[str, Any]: ステータス別集計。
-            success: True/False
-            channel_filter: 適用したチャネル
-            by_status: ステータス別カウント
-            total: 総数
-            funnel_analysis: ファネル分析（面談率・入社率等）
-    """
-    logger.info(f"[ADK Zoho] count_by_status: channel={channel}")
-
-    try:
-        zoho = _get_zoho_client()
-        results = zoho.count_by_status(
-            channel=channel, date_from=date_from, date_to=date_to
-        )
-
-        enriched = {
-            status: {"count": count, "description": STATUS_DEFINITIONS.get(status, "不明")}
-            for status, count in results.items()
-        }
-
-        total = sum(results.values())
-        funnel_analysis = None
-
-        if total > 0:
-            lead_count = results.get("1. リード", 0)
-            interview_count = results.get("4. 面談済み", 0)
-            hired_count = results.get("14. 入社", 0)
-
-            funnel_analysis = {
-                "面談率": f"{(interview_count / total * 100):.1f}%" if total > 0 else "N/A",
-                "入社率": f"{(hired_count / total * 100):.1f}%" if total > 0 else "N/A",
-                "リード→面談転換率": f"{(interview_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
-                "面談→入社転換率": f"{(hired_count / interview_count * 100):.1f}%" if interview_count > 0 else "N/A",
-            }
-
-        return {
-            "success": True,
-            "channel_filter": channel or "全体",
-            "channel_description": CHANNEL_DEFINITIONS.get(channel) if channel else None,
-            "period": {"from": date_from or "全期間", "to": date_to or "現在"},
-            "by_status": enriched,
-            "total": total,
-            "funnel_analysis": funnel_analysis,
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
+# ============================================================
+# Tier 3: jobSeeker専門分析ツール
+# ============================================================
 
 def analyze_funnel_by_channel(
     channel: str,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """特定channelのファネル分析。転換率とボトルネックを特定。
+    """特定チャネルのファネル分析。各ステージの転換率とボトルネックを自動特定。
 
-    特定チャネルの詳細ファネル分析。全体俯瞰はcount_job_seekers_by_statusを使用。
+    チャネルコードはget_module_schemaでjobSeekerのfield14ピックリスト値を確認。
+    全チャネル横断で見たい場合はaggregate_crm_dataでGROUP BYを使用。
 
     Args:
-        channel: 流入経路(必須)
+        channel: 流入経路コード（必須。例: "sco_bizreach", "paid_meta", "org_hitocareer"）
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
 
     Returns:
-        Dict[str, Any]: ファネル分析結果。
-            success: True/False
-            channel: 分析対象チャネル
-            funnel_data: ステージ別データ（転換率・離脱率）
-            bottlenecks: ボトルネック箇所リスト
-            kpis: KPI指標
+        success: True/False
+        channel: 分析対象チャネル
+        category: チャネルカテゴリ（スカウト/有料広告等）
+        funnel_data: ステージ別データ（count, conversion_rate, drop_rate）
+        bottlenecks: ボトルネック箇所リスト（転換率50%未満）
+        kpis: KPI指標（リード数、面談率、入社率等）
     """
     logger.info(f"[ADK Zoho] analyze_funnel_by_channel: channel={channel}")
 
     if not channel:
-        return {"success": False, "error": "流入経路（channel）を指定してください"}
+        return {"success": False, "error": "チャネルコードを指定してください（例: sco_bizreach）"}
 
     try:
         zoho = _get_zoho_client()
@@ -483,28 +636,11 @@ def analyze_funnel_by_channel(
             channel=channel, date_from=date_from, date_to=date_to
         )
 
-        funnel_stages = [
-            ("1. リード", "初期獲得"),
-            ("2. コンタクト", "連絡済み"),
-            ("3. 面談待ち", "面談予約"),
-            ("4. 面談済み", "面談完了"),
-            ("5. 提案中", "求人提案"),
-            ("6. 応募意思獲得", "応募意思"),
-            ("7. 打診済み", "企業打診"),
-            ("8. 一次面接待ち", "一次面接待ち"),
-            ("9. 一次面接済み", "一次面接完了"),
-            ("10. 最終面接待ち", "最終面接待ち"),
-            ("11. 最終面接済み", "最終面接完了"),
-            ("12. 内定", "内定"),
-            ("13. 内定承諾", "内定承諾"),
-            ("14. 入社", "入社決定"),
-        ]
-
         funnel_data = []
         prev_count = None
         bottlenecks = []
 
-        for status, label in funnel_stages:
+        for status, label in _FUNNEL_STAGES:
             count = status_counts.get(status, 0)
             conversion_rate = None
             drop_rate = None
@@ -548,7 +684,7 @@ def analyze_funnel_by_channel(
         return {
             "success": True,
             "channel": channel,
-            "channel_description": CHANNEL_DEFINITIONS.get(channel, "不明"),
+            "category": _categorize_channel(channel),
             "period": {"from": date_from or "全期間", "to": date_to or "現在"},
             "funnel_data": funnel_data,
             "bottlenecks": bottlenecks,
@@ -568,18 +704,16 @@ def trend_analysis_by_period(
     Args:
         period_type: "monthly" または "weekly" または "quarterly"。それ以外はエラー。
         months_back: 何ヶ月/週遡るか（max 12）
-        channel: 流入経路でフィルタ
+        channel: 流入経路でフィルタ（省略時は全チャネル）
 
     Returns:
-        Dict[str, Any]: トレンド分析結果。
-            success: True/False
-            period_type: 分析期間タイプ
-            trend_data: 期間別データ（前期比・増減率）
-            summary: 集計サマリ
+        success: True/False
+        period_type: 分析期間タイプ
+        trend_data: 期間別データ（count, change, change_pct, trend）
+        summary: 集計サマリ（total_count, avg_count）
     """
     logger.info(f"[ADK Zoho] trend_analysis_by_period: {period_type}, {months_back}ヶ月")
 
-    # Validate period_type
     valid_periods = {"weekly", "monthly", "quarterly"}
     if period_type not in valid_periods:
         return {"success": False, "error": f"period_typeは {valid_periods} のいずれかを指定してください"}
@@ -658,11 +792,11 @@ def trend_analysis_by_period(
 
                 if change_pct is not None:
                     if change_pct > 10:
-                        data["trend"] = "上昇↑"
+                        data["trend"] = "上昇"
                     elif change_pct < -10:
-                        data["trend"] = "下降↓"
+                        data["trend"] = "下降"
                     else:
-                        data["trend"] = "横ばい→"
+                        data["trend"] = "横ばい"
                 else:
                     data["trend"] = "N/A"
 
@@ -673,7 +807,7 @@ def trend_analysis_by_period(
             "success": True,
             "period_type": period_type,
             "channel_filter": channel or "全体",
-            "channel_description": CHANNEL_DEFINITIONS.get(channel) if channel else None,
+            "category": _categorize_channel(channel) if channel else None,
             "trend_data": trend_data,
             "summary": {
                 "total_periods": len(trend_data),
@@ -698,12 +832,10 @@ def compare_channels(
         date_to: 終了日(YYYY-MM-DD)
 
     Returns:
-        Dict[str, Any]: チャネル比較結果。
-            success: True/False
-            period: 比較期間
-            comparison: チャネル別データ（ランキング付き）
-            best_by_hire_rate: 入社率トップチャネル
-            best_by_volume: 獲得数トップチャネル
+        success: True/False
+        comparison: チャネル別データ（ランキング付き）
+        best_by_hire_rate: 入社率トップチャネル
+        best_by_volume: 獲得数トップチャネル
     """
     logger.info(f"[ADK Zoho] compare_channels: {channels}")
 
@@ -731,15 +863,15 @@ def compare_channels(
                 channel_stats[ch][status] = channel_stats[ch].get(status, 0) + 1
 
         comparison_data = []
-        for channel in channels:
-            status_counts = channel_stats.get(channel, {})
+        for ch in channels:
+            status_counts = channel_stats.get(ch, {})
             total = sum(status_counts.values())
             hired = status_counts.get("14. 入社", 0)
             interview_done = status_counts.get("4. 面談済み", 0)
 
             comparison_data.append({
-                "channel": channel,
-                "description": CHANNEL_DEFINITIONS.get(channel, "不明"),
+                "channel": ch,
+                "category": _categorize_channel(ch),
                 "total": total,
                 "hired": hired,
                 "interview_done": interview_done,
@@ -783,12 +915,10 @@ def get_pic_performance(
         channel: 流入経路でフィルタ
 
     Returns:
-        Dict[str, Any]: PIC別パフォーマンス。
-            success: True/False
-            period: 分析期間
-            pic_count: PIC数
-            performance_data: PIC別データ（ランキング付き）
-            top_performer: トップPIC
+        success: True/False
+        pic_count: PIC数
+        performance_data: PIC別データ（ランキング付き）
+        top_performer: トップPIC
     """
     logger.info(f"[ADK Zoho] get_pic_performance: channel={channel}")
 
@@ -862,12 +992,12 @@ def get_conversion_metrics(
         date_to: 終了日(YYYY-MM-DD)
 
     Returns:
-        Dict[str, Any]: 全チャネルKPI。
-            success: True/False
-            period: 分析期間
-            metrics: チャネル別KPI（獲得数、面談率、内定率、入社率、CPA推計）
-            ranking: 入社率ランキング
-            recommendations: 改善推奨
+        success: True/False
+        overall: 全体KPI
+        category_summary: カテゴリ別サマリ
+        metrics: チャネル別KPI
+        ranking: 入社率ランキング
+        recommendations: 改善推奨
     """
     logger.info(f"[ADK Zoho] get_conversion_metrics: {date_from} to {date_to}")
 
@@ -898,13 +1028,7 @@ def get_conversion_metrics(
             if total == 0:
                 continue
 
-            interview_done = status_counts.get("4. 面談済み", 0)
-            offer = status_counts.get("12. 内定", 0) + status_counts.get("13. 内定承諾", 0)
-            hired = status_counts.get("14. 入社", 0)
-
-            # Calculate cumulative counts (candidates who reached at least this stage)
-            # For funnel: someone with "14. 入社" also passed through "4. 面談済み"
-            # But since Zoho stores current status, we need cumulative counts
+            # Cumulative counts (candidates who reached at least this stage)
             interview_plus = sum(
                 cnt for st, cnt in status_counts.items()
                 if st >= "4. 面談済み" and st < "16. クローズ"
@@ -919,29 +1043,20 @@ def get_conversion_metrics(
             offer_rate = round((offer_plus / total) * 100, 1) if total > 0 else 0
             hire_rate = round((hired_count / total) * 100, 1) if total > 0 else 0
 
-            # Category
-            if ch.startswith("sco_"):
-                category = "スカウト"
-            elif ch.startswith("paid_"):
-                category = "有料広告"
-            elif ch.startswith("org_"):
-                category = "自然流入"
-            else:
-                category = "その他"
+            category = _categorize_channel(ch)
 
             metrics.append({
                 "channel": ch,
-                "description": CHANNEL_DEFINITIONS.get(ch, "不明"),
                 "category": category,
                 "total": total,
                 "interview_rate": f"{interview_rate}%",
                 "offer_rate": f"{offer_rate}%",
                 "hire_rate": f"{hire_rate}%",
                 "hired_count": hired_count,
-                "_hire_rate_num": hire_rate,  # for sorting
+                "_hire_rate_num": hire_rate,
             })
 
-        # Sort by hire rate descending for ranking
+        # Sort by hire rate
         metrics.sort(key=lambda x: x["_hire_rate_num"], reverse=True)
 
         ranking = []
@@ -949,7 +1064,7 @@ def get_conversion_metrics(
             ranking.append({
                 "rank": i + 1,
                 "channel": m["channel"],
-                "description": m["description"],
+                "category": m["category"],
                 "hire_rate": m["hire_rate"],
                 "hired_count": m["hired_count"],
                 "total": m["total"],
@@ -959,28 +1074,26 @@ def get_conversion_metrics(
         for m in metrics:
             del m["_hire_rate_num"]
 
-        # Generate recommendations
+        # Recommendations
         recommendations = []
-
         if ranking:
             top = ranking[0]
             recommendations.append(
-                f"入社率トップは{top['description']}（{top['hire_rate']}）。"
-                f"このチャネルの成功パターンを他チャネルに横展開を推奨。"
+                f"入社率トップは{top['channel']}（{top['category']}、{top['hire_rate']}）。"
+                f"このチャネルの成功パターンを横展開推奨。"
             )
 
-        # Find channels with high volume but low conversion
         high_vol_low_conv = [
             m for m in metrics
             if m["total"] >= 10 and float(m["hire_rate"].replace("%", "")) < 3.0
         ]
         if high_vol_low_conv:
-            names = ", ".join(m["description"] for m in high_vol_low_conv[:3])
+            names = ", ".join(m["channel"] for m in high_vol_low_conv[:3])
             recommendations.append(
                 f"獲得数は多いが入社率が低いチャネル: {names}。ファネル改善を優先。"
             )
 
-        # Category-level summary
+        # Category summary
         category_summary: Dict[str, Dict[str, Any]] = {}
         for m in metrics:
             cat = m["category"]
@@ -990,7 +1103,7 @@ def get_conversion_metrics(
             category_summary[cat]["hired"] += m["hired_count"]
             category_summary[cat]["channels"] += 1
 
-        for cat, data in category_summary.items():
+        for data in category_summary.values():
             data["hire_rate"] = (
                 f"{round((data['hired'] / data['total']) * 100, 1)}%"
                 if data["total"] > 0 else "N/A"
@@ -1018,17 +1131,21 @@ def get_conversion_metrics(
         return {"success": False, "error": str(e)}
 
 
-# List of ADK-compatible tools - ALL tools from OpenAI SDK version
+# ============================================================
+# ツールリスト
+# ============================================================
+
 ADK_ZOHO_CRM_TOOLS = [
-    # Basic search and retrieval
-    get_channel_definitions,
-    search_job_seekers,
-    get_job_seeker_detail,
-    get_job_seekers_batch,
-    # Aggregation and analysis (COQL optimized)
-    aggregate_by_channel,
-    count_job_seekers_by_status,
-    # Advanced analysis tools
+    # Tier 1: メタデータ発見
+    list_crm_modules,
+    get_module_schema,
+    get_module_layout,
+    # Tier 2: 汎用クエリ
+    query_crm_records,
+    aggregate_crm_data,
+    get_record_detail,
+    get_related_records,
+    # Tier 3: jobSeeker専門分析
     analyze_funnel_by_channel,
     trend_analysis_by_period,
     compare_channels,
