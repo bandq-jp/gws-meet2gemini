@@ -129,6 +129,36 @@ class Settings:
     wordpress_achieve_mcp_server_url: str = os.getenv("WORDPRESS_ACHIEVE_MCP_SERVER_URL", "")
     wordpress_achieve_mcp_authorization: str = os.getenv("WORDPRESS_ACHIEVE_MCP_AUTHORIZATION", "")
 
+    # Sub-agent model settings (for OpenAI Agents SDK multi-agent)
+    sub_agent_model: str = os.getenv("SUB_AGENT_MODEL", "gpt-5-mini")
+    sub_agent_enable_web_search: bool = os.getenv("SUB_AGENT_ENABLE_WEB_SEARCH", "true").lower() == "true"
+    sub_agent_enable_code_interpreter: bool = os.getenv("SUB_AGENT_ENABLE_CODE_INTERPRETER", "false").lower() == "true"
+
+    # Reasoning translation (for displaying in Japanese)
+    reasoning_translate_model: str = os.getenv("REASONING_TRANSLATE_MODEL", "gpt-5-nano")
+
+    # Google ADK settings (V2 marketing AI)
+    use_adk: bool = os.getenv("USE_ADK", "false").lower() == "true"
+    adk_orchestrator_model: str = os.getenv("ADK_ORCHESTRATOR_MODEL", "gemini-3-flash-preview")
+    adk_sub_agent_model: str = os.getenv("ADK_SUB_AGENT_MODEL", "gemini-3-flash-preview")
+    # Max LLM calls per run (0 or negative = unlimited, default 500)
+    # Set higher for complex multi-agent workflows, set to 0 for unlimited deep investigation
+    adk_max_llm_calls: int = int(os.getenv("ADK_MAX_LLM_CALLS", "0"))
+    # Max output tokens per response (Gemini 3 Flash max: 65536)
+    adk_max_output_tokens: int = int(os.getenv("ADK_MAX_OUTPUT_TOKENS", "65536"))
+
+    # ADK Memory Service settings
+    memory_service_type: str = os.getenv("MEMORY_SERVICE_TYPE", "supabase")
+    memory_auto_save: bool = os.getenv("MEMORY_AUTO_SAVE", "true").lower() == "true"
+    memory_preload_enabled: bool = os.getenv("MEMORY_PRELOAD_ENABLED", "true").lower() == "true"
+    memory_max_results: int = int(os.getenv("MEMORY_MAX_RESULTS", "5"))
+    memory_embedding_model: str = os.getenv("MEMORY_EMBEDDING_MODEL", "gemini-embedding-001")
+    memory_embedding_dimensions: int = int(os.getenv("MEMORY_EMBEDDING_DIMENSIONS", "768"))
+
+    # Company Database (Google Sheets)
+    company_db_spreadsheet_id: str = os.getenv("COMPANY_DB_SPREADSHEET_ID", "")
+    company_db_cache_ttl: int = int(os.getenv("COMPANY_DB_CACHE_TTL", "300"))
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

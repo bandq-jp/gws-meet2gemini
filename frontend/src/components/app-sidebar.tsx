@@ -191,6 +191,14 @@ export function AppSidebar() {
             description: "Ahrefs/GSC/GA4を束ねたマーケティング分析チャット",
           },
           {
+            title: "b&q エージェント",
+            icon: MessageSquare,
+            href: "/marketing-v2",
+            id: "marketing-chat-v2",
+            enabled: true,
+            description: "マーケティング・採用・候補者支援を統合したAIアシスタント",
+          },
+          {
             title: "画像生成",
             icon: ImageIcon,
             href: "/marketing/image-gen",
@@ -251,6 +259,20 @@ export function AppSidebar() {
   };
 
   const menuItems = getTeamMenuItems(activeTeam.id);
+
+  // U-14: Find the most specific matching menu item for active state
+  const activeItemHref = useMemo(() => {
+    if (!pathname) return null;
+    let bestMatch: string | null = null;
+    for (const item of menuItems) {
+      if (pathname === item.href || pathname.startsWith(item.href + '/')) {
+        if (!bestMatch || item.href.length > bestMatch.length) {
+          bestMatch = item.href;
+        }
+      }
+    }
+    return bestMatch;
+  }, [pathname, menuItems]);
 
   const handleMenuClick = (item: typeof menuItems[0]) => {
     if (item.enabled) {
@@ -328,7 +350,7 @@ export function AppSidebar() {
                 <SidebarMenuItem key={`${activeTeam.id}-${item.id}`}>
                   <SidebarMenuButton
                     onClick={() => handleMenuClick(item)}
-                    isActive={pathname === item.href}
+                    isActive={item.href === activeItemHref}
                     disabled={!item.enabled}
                     className={`
                       group w-full transition-all duration-200
