@@ -53,6 +53,7 @@ class SubAgentStreamingPlugin(BasePlugin):
         "CASupportAgent",
         "GoogleSearchAgent",
         "CodeExecutionAgent",
+        "GoogleWorkspaceAgent",
     }
 
     def __init__(

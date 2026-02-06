@@ -256,6 +256,32 @@
   - **全ツール共通パターン**: `tool_context: ToolContext = None`パラメータ追加、state書き込みはreturn前、リスト上限付き(20-30件)、try/exceptで安全にラップ
   - **ADK仕様準拠**: パラメータ名`tool_context`は必須（ADKが`inspect.signature`で自動検出・注入）、ネストされた更新は親オブジェクトを再代入
 
+- **GoogleWorkspaceAgent実装（Gmail + Calendar 読み取り）**
+  - **目的**: ユーザーのGmailとGoogleカレンダーにサービスアカウントのドメイン全体委任でアクセス
+  - **認証**: 既存の `SERVICE_ACCOUNT_JSON` + `subject=user_email` パターン（drive_docs_collector.py流用）
+  - **スコープ**: `gmail.readonly`, `calendar.readonly`（Admin Consoleで委任設定済み）
+  - 新規ファイル:
+    - `backend/app/infrastructure/google/workspace_service.py` - Per-user Gmail/Calendar APIサービス（TTL 50分キャッシュ、スレッドセーフシングルトン）
+    - `backend/app/infrastructure/adk/tools/workspace_tools.py` - 8ツール（Gmail 4 + Calendar 4）
+    - `backend/app/infrastructure/adk/agents/workspace_agent.py` - SubAgentFactory実装
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - サブエージェント登録、キーワードマトリクス追加
+    - `backend/app/infrastructure/adk/agents/__init__.py` - エクスポート追加
+    - `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py` - SUB_AGENT_NAMES追加
+    - `backend/app/presentation/api/v1/marketing_v2.py` - `app:user_email` をinitial_stateに注入
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - Workspace UI設定（Mail/Calendarアイコン、赤/オレンジ）
+  - ツール一覧:
+    - `search_gmail`: Gmail検索構文サポート
+    - `get_email_detail`: メール本文取得（3000文字上限）
+    - `get_email_thread`: スレッド全体取得（1000文字/msg）
+    - `get_recent_emails`: 直近N時間のメール一覧
+    - `get_today_events`: 今日の予定（JST）
+    - `list_calendar_events`: 期間指定イベント一覧
+    - `search_calendar_events`: キーワードでイベント検索
+    - `get_event_detail`: イベント詳細（参加者・Meet URL等）
+  - **State注入**: `marketing_v2.py` で `initial_state["app:user_email"] = context.user_email` を追加
+  - **設計判断**: Per-userサービスインスタンス（SheetsServiceと異なり、subject がユーザーごとに異なるため）
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

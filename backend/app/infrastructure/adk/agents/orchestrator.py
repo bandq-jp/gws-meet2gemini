@@ -26,6 +26,7 @@ from .company_db_agent import CompanyDatabaseAgentFactory
 from .ca_support_agent import CASupportAgentFactory
 from .google_search_agent import GoogleSearchAgentFactory
 from .code_execution_agent import CodeExecutionAgentFactory
+from .workspace_agent import GoogleWorkspaceAgentFactory
 from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
 from app.infrastructure.adk.mcp_manager import ADKMCPToolsets
 
@@ -73,6 +74,10 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | 市場動向、業界情報、法改正、制度変更 | GoogleSearchAgent |
 | 計算、Python、コード実行、データ変換 | CodeExecutionAgent |
 | 集計、統計、シミュレーション、アルゴリズム | CodeExecutionAgent |
+| メール、Gmail、受信トレイ、送信済み、未読 | GoogleWorkspaceAgent |
+| 予定、カレンダー、スケジュール、会議予定 | GoogleWorkspaceAgent |
+| 今日の予定、来週の予定、空き時間 | GoogleWorkspaceAgent |
+| メールスレッド、やり取り、返信、添付 | GoogleWorkspaceAgent |
 | 上記に該当しない質問 | 最も関連性の高いエージェントを推測して即実行 |
 
 ---
@@ -153,6 +158,14 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 日付計算・文字列処理
 - **他エージェントの出力データを加工・分析する際に活用**
 
+### GoogleWorkspaceAgent (Gmail + Calendar)
+- ユーザーのGmail検索・メール閲覧（読み取り専用）
+- メール本文取得・スレッド会話追跡
+- カレンダーイベント一覧・検索・詳細取得
+- 今日の予定、期間指定の予定確認
+- Gmail検索構文サポート（from:, subject:, after:, is:unread等）
+- **プライバシー保護**: メール全文は出力せず、要約・引用形式
+
 ### CASupportAgent (CA統合支援) ★推奨
 **25ツール統合**：Zoho CRM + 候補者インサイト + 企業DB + 議事録
 - 候補者の完全プロファイル取得（Zoho + 議事録構造化データ）
@@ -223,6 +236,14 @@ ORCHESTRATOR_INSTRUCTIONS = """
 「過去6ヶ月の月次データから成長率と予測を計算して」
 → AnalyticsAgent + CodeExecutionAgent
 
+**メール+予定の横断確認**
+「今日の会議と関連メールをまとめて」
+→ GoogleWorkspaceAgent（カレンダー取得 + メール検索を順次実行）
+
+**面談準備（CA向け）+メール確認**
+「山田さんの面談準備と最近のメール確認」
+→ CASupportAgent + GoogleWorkspaceAgent
+
 ---
 
 ## 中間報告ルール（重要）
@@ -286,6 +307,7 @@ class OrchestratorAgentFactory:
             "ca_support": CASupportAgentFactory(settings),
             "google_search": GoogleSearchAgentFactory(settings),
             "code_execution": CodeExecutionAgentFactory(settings),
+            "google_workspace": GoogleWorkspaceAgentFactory(settings),
         }
 
     @property
@@ -330,6 +352,7 @@ class OrchestratorAgentFactory:
             "ca_support": [],  # Unified agent with all function tools, no MCP
             "google_search": [],  # Uses built-in google_search, no MCP
             "code_execution": [],  # Uses BuiltInCodeExecutor, no MCP
+            "google_workspace": [],  # Uses function tools (Gmail/Calendar API), no MCP
         }
 
         # Populate MCP mapping if toolsets are provided

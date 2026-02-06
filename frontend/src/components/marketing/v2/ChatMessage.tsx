@@ -34,6 +34,8 @@ import {
   Copy,
   Check,
   Image as ImageIcon,
+  Mail,
+  Calendar,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -254,6 +256,24 @@ const SUB_AGENT_CONFIG: Record<string, AgentUIConfig> = {
     borderColor: "border-violet-200",
     accentColor: "#8b5cf6",
   },
+  googleworkspaceagent: {
+    label: "Workspace",
+    icon: Mail,
+    gradient: "from-red-500 to-orange-500",
+    bgLight: "bg-red-50",
+    textColor: "text-red-700",
+    borderColor: "border-red-200",
+    accentColor: "#ef4444",
+  },
+  google_workspace: {
+    label: "Workspace",
+    icon: Mail,
+    gradient: "from-red-500 to-orange-500",
+    bgLight: "bg-red-50",
+    textColor: "text-red-700",
+    borderColor: "border-red-200",
+    accentColor: "#ef4444",
+  },
   default: {
     label: "Agent",
     icon: Bot,
@@ -311,6 +331,15 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   get_meeting_text: FileText,
   get_structured_data: Database,
   get_integrated_profile: Users,
+  // Google Workspace (Gmail + Calendar)
+  search_gmail: Mail,
+  get_email_detail: Mail,
+  get_email_thread: Mail,
+  get_recent_emails: Mail,
+  get_today_events: Calendar,
+  list_calendar_events: Calendar,
+  search_calendar_events: Calendar,
+  get_event_detail: Calendar,
   // General
   code_interpreter: Code2,
   web_search: Globe,
@@ -353,6 +382,15 @@ const TOOL_LABELS: Record<string, string> = {
   get_meeting_text: "議事録本文",
   get_structured_data: "構造化データ",
   get_integrated_profile: "統合プロファイル",
+  // Google Workspace (Gmail + Calendar)
+  search_gmail: "メール検索",
+  get_email_detail: "メール詳細",
+  get_email_thread: "メールスレッド",
+  get_recent_emails: "最近のメール",
+  get_today_events: "今日の予定",
+  list_calendar_events: "予定一覧",
+  search_calendar_events: "予定検索",
+  get_event_detail: "予定詳細",
   // General
   code_interpreter: "コード実行",
   web_search: "Web検索",
@@ -377,6 +415,15 @@ function extractToolContext(toolName: string, argsJson?: string): string | null 
     if (args.name) return args.name;
     // Meeting search
     if (args.keyword) return args.keyword;
+    // Gmail/Calendar IDs
+    if (args.message_id) return `ID: ${String(args.message_id).slice(0, 12)}...`;
+    if (args.thread_id) return `Thread: ${String(args.thread_id).slice(0, 12)}...`;
+    if (args.event_id) return `Event: ${String(args.event_id).slice(0, 12)}...`;
+    // Calendar date range
+    if (args.date_from) return `${args.date_from}~`;
+    // Gmail label/hours
+    if (args.label) return args.label;
+    if (args.hours) return `直近${args.hours}h`;
     return null;
   } catch {
     return null;

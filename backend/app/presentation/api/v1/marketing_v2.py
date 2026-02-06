@@ -269,6 +269,9 @@ async def chat_stream(
         except Exception as e:
             logger.warning(f"[State] Failed to load user_state: {e}")
 
+        # Inject user email into state for per-user Google Workspace delegation
+        initial_state["app:user_email"] = context.user_email
+
         # --- Streaming with activity items accumulation ---
         activity_items: list[dict] = []
         full_text_content = ""
