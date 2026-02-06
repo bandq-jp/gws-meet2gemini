@@ -718,16 +718,14 @@ class ADKAgentService:
                     elif hasattr(part, "text") and part.text:
                         # For partial=True or partial=None, send text immediately
                         # (partial=False is handled separately above with concatenation)
-                        # Normalize text: strip trailing single newlines to prevent
-                        # mid-sentence line breaks in markdown rendering.
-                        # Double newlines (paragraph breaks) are preserved.
-                        text_content = part.text
-                        # Only strip a single trailing newline (not double = paragraph break)
-                        if text_content.endswith("\n") and not text_content.endswith("\n\n"):
-                            text_content = text_content.rstrip("\n")
+                        # NOTE: Do NOT strip trailing newlines here.
+                        # Markdown tables, lists, and code blocks require structural
+                        # newlines. Stripping them breaks table rendering because
+                        # streaming chunks may end with "\n" between table rows.
+                        # Let the frontend ReactMarkdown handle display formatting.
                         results.append({
                             "type": "text_delta",
-                            "content": text_content,
+                            "content": part.text,
                         })
 
         # Return results if any, otherwise None
