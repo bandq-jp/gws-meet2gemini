@@ -11,6 +11,8 @@ import { useCallback, forwardRef, useImperativeHandle, useState } from "react";
 import { useMarketingChat } from "@/hooks/use-marketing-chat-v2";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
+import { SuggestionCarousel } from "./SuggestionCarousel";
+import type { Suggestion } from "./SuggestionCarousel";
 import {
   Share2,
   Download,
@@ -25,7 +27,12 @@ import {
   Building2,
   AlertTriangle,
   Layers,
-  ArrowRight,
+  Mail,
+  Calendar,
+  Globe,
+  Code2,
+  Megaphone,
+  FileText,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,36 +83,163 @@ export interface MarketingChatRef {
 }
 
 // Empty state suggestions - comprehensive queries covering all agents
-const SUGGESTIONS = [
+const ALL_SUGGESTIONS: Suggestion[] = [
+  // --- GA4 / Analytics ---
   {
     icon: TrendingUp,
     tag: "GA4",
     text: "今週のGA4流入から求職者の応募・入社までのファネル全体を分析して、改善ポイントを教えて",
   },
   {
-    icon: Building2,
-    tag: "企業DB",
-    text: "35歳、年収希望600万、成長志向の候補者に合う企業TOP5と、それぞれの訴求ポイントを提案して",
+    icon: TrendingUp,
+    tag: "GA4",
+    text: "hitocareerとachievehrの直近1ヶ月のセッション・PV・直帰率を比較して、トレンドをチャートで見せて",
   },
+  {
+    icon: TrendingUp,
+    tag: "GSC",
+    text: "hitocareer.comの検索パフォーマンス（クリック数・表示回数・CTR・平均順位）を過去3ヶ月で分析して",
+  },
+  // --- SEO ---
   {
     icon: Search,
     tag: "SEO",
     text: "hitocareer.comと競合3社のSEO状況（DR、被リンク、オーガニックKW）を比較分析して",
   },
   {
-    icon: AlertTriangle,
-    tag: "CA支援",
-    text: "今週面談予定の候補者で、競合エージェントリスクが高い人を洗い出して面談準備資料を作って",
+    icon: Search,
+    tag: "SEO",
+    text: "hitocareer.comで順位が下がっているキーワードを特定して、改善優先度をつけて",
   },
+  // --- 広告 ---
+  {
+    icon: Megaphone,
+    tag: "Meta広告",
+    text: "現在配信中のMeta広告キャンペーンのCTR・CPA・ROASを一覧にして、改善すべきものを特定して",
+  },
+  {
+    icon: Megaphone,
+    tag: "Meta広告",
+    text: "「人材紹介 転職」関連のインタレストターゲティングで、推定オーディエンスサイズを調べて",
+  },
+  // --- CRM ---
   {
     icon: BarChart3,
     tag: "CRM",
     text: "過去3ヶ月のチャネル別（Indeed, doda, 自然流入）の獲得単価と入社率を比較して",
   },
   {
+    icon: BarChart3,
+    tag: "CRM",
+    text: "今月の担当者別パフォーマンス（面談数・内定率・入社率）をランキング形式で見せて",
+  },
+  {
+    icon: BarChart3,
+    tag: "CRM",
+    text: "直近3ヶ月のステータス別ファネル（応募→面談→内定→入社）をチャネルごとに比較して",
+  },
+  // --- 企業DB ---
+  {
+    icon: Building2,
+    tag: "企業DB",
+    text: "35歳、年収希望600万、成長志向の候補者に合う企業TOP5と、それぞれの訴求ポイントを提案して",
+  },
+  {
+    icon: Building2,
+    tag: "企業DB",
+    text: "リモートワーク可能でワークライフバランスが良い企業を検索して、年収レンジ付きで一覧にして",
+  },
+  {
+    icon: Building2,
+    tag: "企業DB",
+    text: "株式会社MyVisionと他2社を比較して、年収・採用要件・訴求ポイントの違いを表にまとめて",
+  },
+  // --- CA支援 ---
+  {
+    icon: AlertTriangle,
+    tag: "CA支援",
+    text: "今週面談予定の候補者で、競合エージェントリスクが高い人を洗い出して面談準備資料を作って",
+  },
+  {
+    icon: AlertTriangle,
+    tag: "CA支援",
+    text: "山田さん（Zoho ID）の面談準備をして。候補者情報・議事録・おすすめ企業を一括でまとめて",
+  },
+  {
+    icon: AlertTriangle,
+    tag: "CA支援",
+    text: "緊急度が高い候補者を洗い出して、それぞれに対抗提案できる企業を3社ずつ提案して",
+  },
+  // --- Gmail ---
+  {
+    icon: Mail,
+    tag: "Gmail",
+    text: "今日届いた未読メールを一覧で見せて。重要なものがあればハイライトして",
+  },
+  {
+    icon: Mail,
+    tag: "Gmail",
+    text: "田中さんからの直近1週間のメールを検索して、やり取りの流れをまとめて",
+  },
+  {
+    icon: Mail,
+    tag: "Gmail",
+    text: "「面談」に関するメールスレッドを検索して、直近のやり取りを要約して",
+  },
+  // --- Calendar ---
+  {
+    icon: Calendar,
+    tag: "カレンダー",
+    text: "今日と明日の予定を一覧で教えて。Google Meetリンクがあれば一緒に表示して",
+  },
+  {
+    icon: Calendar,
+    tag: "カレンダー",
+    text: "来週のスケジュールを曜日ごとに整理して、面談系の予定をピックアップして",
+  },
+  // --- Google検索 ---
+  {
+    icon: Globe,
+    tag: "Web検索",
+    text: "人材紹介業界の最新トレンドと法改正を調べて、自社への影響をまとめて",
+  },
+  {
+    icon: Globe,
+    tag: "Web検索",
+    text: "競合の人材紹介会社の最新ニュースや動向を調べて教えて",
+  },
+  // --- コード実行 ---
+  {
+    icon: Code2,
+    tag: "計算",
+    text: "過去6ヶ月の月次データから成長率を計算して、来月の予測値をシミュレーションして",
+  },
+  // --- WordPress ---
+  {
+    icon: FileText,
+    tag: "WordPress",
+    text: "hitocareerブログの最新記事一覧を取得して、SEO要件を満たしているかチェックして",
+  },
+  // --- 統合分析 ---
+  {
     icon: Users,
     tag: "統合分析",
     text: "今月の流入→応募→面談→内定→入社の全体ファネルと、離脱が多いステップの改善案を提示して",
+  },
+  {
+    icon: Users,
+    tag: "統合分析",
+    text: "Indeed経由の候補者の特徴を分析して、マッチしやすい企業の傾向と効果的な訴求ポイントを教えて",
+  },
+  {
+    icon: Users,
+    tag: "統合分析",
+    text: "今日の予定と未読メールを確認しつつ、対応が必要な候補者をCRMから洗い出して",
+  },
+  {
+    icon: Users,
+    tag: "統合分析",
+    text: "SEOトラフィックとCRMの応募データを突合して、コンテンツ→応募の転換率が高いページを特定して",
   },
 ];
 
@@ -126,34 +260,17 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
           b&q エージェント
         </h2>
         <p className="text-[13px] text-muted-foreground/80 max-w-sm leading-relaxed">
-          マーケティング・採用・候補者支援を横断分析
+          GA4・CRM・企業DB・Gmail・カレンダーを横断して分析・提案
         </p>
       </div>
 
-      {/* Suggestion cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-2xl w-full">
-        {SUGGESTIONS.map((s, i) => {
-          const Icon = s.icon;
-          return (
-            <button
-              key={i}
-              onClick={() => onSend(s.text)}
-              className="group text-left pl-3.5 pr-3 py-3 bg-background border border-[#e8eaed] rounded-lg text-[13px] text-[#374151] hover:border-[#1e8aa0]/25 hover:bg-[#f8fbfc] transition-all duration-150 cursor-pointer leading-relaxed flex items-start gap-3"
-            >
-              <div className="shrink-0 mt-0.5">
-                <Icon className="w-3.5 h-3.5 text-[#9ca3af] group-hover:text-[#1e8aa0] transition-colors" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 mb-0.5">
-                  <span className="text-[10px] font-medium tracking-wide text-[#1e8aa0]/60 uppercase">{s.tag}</span>
-                </div>
-                <span className="line-clamp-2">{s.text}</span>
-              </div>
-              <ArrowRight className="w-3.5 h-3.5 text-[#d1d5db] group-hover:text-[#1e8aa0]/50 transition-colors shrink-0 mt-0.5 opacity-0 group-hover:opacity-100" />
-            </button>
-          );
-        })}
-      </div>
+      {/* Suggestion carousel */}
+      <SuggestionCarousel
+        suggestions={ALL_SUGGESTIONS}
+        onSend={onSend}
+        perPage={6}
+        interval={6000}
+      />
     </div>
   );
 }

@@ -291,6 +291,14 @@
     - ツール選択マトリクスにGmail系4ツール追加
     - ワークフロー例に「DB情報+メール生情報の統合」パターン追加
 
+- **サンプルクエリ大幅拡充（6個→29個プール、日替わり6個表示）**
+  - `MarketingChat.tsx` の `SUGGESTIONS` を `ALL_SUGGESTIONS` (29個) + `pickSuggestions()` に変更
+  - カバー範囲: GA4, GSC, SEO, Meta広告, CRM, 企業DB, CA支援, Gmail, カレンダー, Web検索, コード実行, WordPress, 統合分析
+  - **日替わりシャッフル**: 日付ベースのシードで毎日異なる6個を表示（セッション内は安定）
+  - **タグ多様性保証**: まず異なるタグの候補を優先選出し、同じ分野に偏らないようにする
+  - 説明文更新: 「GA4・CRM・企業DB・Gmail・カレンダーを横断して分析・提案」
+  - Lucideアイコン追加import: Mail, Calendar, Globe, Code2, Megaphone, FileText
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
