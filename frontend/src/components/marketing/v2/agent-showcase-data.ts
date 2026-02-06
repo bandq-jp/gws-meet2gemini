@@ -43,11 +43,6 @@ export type AgentInfo = {
   tagline: string;
   description: string;
   icon: LucideIcon;
-  gradient: string;
-  accentHex: string;
-  bgLight: string;
-  textColor: string;
-  borderColor: string;
   category: AgentCategory;
   services: string[];
   toolCount: number;
@@ -87,11 +82,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "Google Analytics 4とSearch Consoleのデータを横断分析。トラフィック推移、検索クエリ、ページパフォーマンス、URLインデックス状況まで包括的にカバー。",
     icon: BarChart3,
-    gradient: "from-blue-500 to-cyan-500",
-    accentHex: "#3b82f6",
-    bgLight: "bg-blue-50",
-    textColor: "text-blue-700",
-    borderColor: "border-blue-200",
     category: "marketing",
     services: ["Google Analytics 4", "Search Console"],
     toolCount: 12,
@@ -135,11 +125,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "Ahrefsのデータを活用したSEO分析。ドメインレーティング、被リンク、オーガニックキーワード、競合サイト比較、コンテンツギャップの発見まで対応。",
     icon: TrendingUp,
-    gradient: "from-emerald-500 to-teal-500",
-    accentHex: "#10b981",
-    bgLight: "bg-emerald-50",
-    textColor: "text-emerald-700",
-    borderColor: "border-emerald-200",
     category: "marketing",
     services: ["Ahrefs"],
     toolCount: 20,
@@ -181,11 +166,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "Meta広告（Facebook・Instagram）のキャンペーン分析。CTR・CPM・CPA・ROASの分析、インタレストターゲティング調査、オーディエンスサイズ推定が可能。",
     icon: Megaphone,
-    gradient: "from-purple-500 to-pink-500",
-    accentHex: "#8b5cf6",
-    bgLight: "bg-purple-50",
-    textColor: "text-purple-700",
-    borderColor: "border-purple-200",
     category: "marketing",
     services: ["Meta Ads"],
     toolCount: 20,
@@ -226,11 +206,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "WordPressサイトの記事管理・分析。記事一覧の取得、ブロック構造分析、SEO要件チェック、記事のドラフト作成・編集・公開まで対応。2サイト同時管理。",
     icon: FileText,
-    gradient: "from-cyan-500 to-sky-500",
-    accentHex: "#06b6d4",
-    bgLight: "bg-cyan-50",
-    textColor: "text-cyan-700",
-    borderColor: "border-cyan-200",
     category: "marketing",
     services: ["hitocareer.com", "achievehr.jp"],
     toolCount: 25,
@@ -279,11 +254,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "Zoho CRM全モジュールに動的アクセス。スキーマ探索からCOQLクエリ、チャネル別ファネル分析、担当者パフォーマンス比較まで、3層アーキテクチャで柔軟に対応。",
     icon: Users,
-    gradient: "from-orange-500 to-amber-500",
-    accentHex: "#f97316",
-    bgLight: "bg-orange-50",
-    textColor: "text-orange-700",
-    borderColor: "border-orange-200",
     category: "crm",
     services: ["Zoho CRM"],
     toolCount: 12,
@@ -331,11 +301,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "候補者の競合リスク分析、緊急度スコアリング、転職パターン可視化。Zoho CRMと議事録構造化データを統合した高度なインサイト生成。",
     icon: Brain,
-    gradient: "from-amber-500 to-yellow-500",
-    accentHex: "#f59e0b",
-    bgLight: "bg-amber-50",
-    textColor: "text-amber-700",
-    borderColor: "border-amber-200",
     category: "crm",
     services: ["Zoho CRM", "構造化データ"],
     toolCount: 5,
@@ -362,11 +327,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "企業情報のベクトル検索・厳密検索・マッチング。候補者の転職理由から最適企業を自動推薦。訴求ポイント生成やメールからの非公開情報補完にも対応。",
     icon: Database,
-    gradient: "from-indigo-500 to-blue-500",
-    accentHex: "#6366f1",
-    bgLight: "bg-indigo-50",
-    textColor: "text-indigo-700",
-    borderColor: "border-indigo-200",
     category: "support",
     services: ["企業マスタDB", "pgvector", "Gmail"],
     toolCount: 14,
@@ -420,11 +380,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "CRM・議事録・企業DB・Gmail・セマンティック検索を統合した、キャリアアドバイザー業務の包括支援エージェント。面談準備から企業提案まで一気通貫。",
     icon: Users,
-    gradient: "from-rose-500 to-pink-500",
-    accentHex: "#f43f5e",
-    bgLight: "bg-rose-50",
-    textColor: "text-rose-700",
-    borderColor: "border-rose-200",
     category: "support",
     services: ["Zoho CRM", "議事録", "企業DB", "Gmail", "pgvector"],
     toolCount: 35,
@@ -459,11 +414,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "Google検索でリアルタイムのWeb情報を取得。最新ニュース、業界動向、競合情報、事実確認に活用。他エージェントの分析結果を補完する調査ツール。",
     icon: Globe,
-    gradient: "from-sky-500 to-blue-500",
-    accentHex: "#0ea5e9",
-    bgLight: "bg-sky-50",
-    textColor: "text-sky-700",
-    borderColor: "border-sky-200",
     category: "utility",
     services: ["Google Search"],
     toolCount: 1,
@@ -482,11 +432,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "Pythonコードを安全なサンドボックス環境で実行。統計計算、データ変換、CSV加工、数式処理など、他エージェントの分析結果をさらに深掘り。",
     icon: Code2,
-    gradient: "from-violet-500 to-purple-500",
-    accentHex: "#8b5cf6",
-    bgLight: "bg-violet-50",
-    textColor: "text-violet-700",
-    borderColor: "border-violet-200",
     category: "utility",
     services: ["Python Sandbox"],
     toolCount: 1,
@@ -506,11 +451,6 @@ export const AGENTS: AgentInfo[] = [
     description:
       "ユーザーのGmailとGoogleカレンダーに読み取りアクセス。メール検索・閲覧、今日の予定確認、期間指定のイベント一覧、会議リンクの取得などに対応。",
     icon: Mail,
-    gradient: "from-red-500 to-orange-500",
-    accentHex: "#ef4444",
-    bgLight: "bg-red-50",
-    textColor: "text-red-700",
-    borderColor: "border-red-200",
     category: "utility",
     services: ["Gmail", "Google Calendar"],
     toolCount: 8,

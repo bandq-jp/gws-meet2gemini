@@ -5,6 +5,9 @@
  *
  * Shows all 11 agents, their tools, connected services, and sample queries.
  * Pure CSS transitions — no animation library dependency.
+ *
+ * Design: Monochromatic brand teal (#1e8aa0) + neutral grays.
+ * No per-agent color coding — clean, editorial, professional.
  */
 
 import { useState, useMemo } from "react";
@@ -35,7 +38,7 @@ function ToolList({ agent }: { agent: AgentInfo }) {
   return (
     <div className="px-4 pb-4 pt-1">
       <div className="border-t border-dashed border-[#e5e7eb] pt-3 mb-2">
-        <span className="text-[10px] font-semibold tracking-widest uppercase text-[#b0b5c0]">
+        <span className="text-[10px] font-semibold tracking-widest uppercase text-[#9ca3af]">
           ツール一覧
         </span>
         <span className="text-[10px] text-[#c5c8ce] ml-1.5">
@@ -46,10 +49,7 @@ function ToolList({ agent }: { agent: AgentInfo }) {
         {sections.map((section) => (
           <div key={section.name || "flat"}>
             {section.name && (
-              <div
-                className="text-[9px] font-bold uppercase tracking-[0.08em] mb-1.5 pl-0.5"
-                style={{ color: agent.accentHex, opacity: 0.65 }}
-              >
+              <div className="text-[9px] font-bold uppercase tracking-[0.08em] mb-1.5 pl-0.5 text-[#1e8aa0]/50">
                 {section.name}
               </div>
             )}
@@ -59,7 +59,7 @@ function ToolList({ agent }: { agent: AgentInfo }) {
                   key={tool.name}
                   className="flex items-center gap-2 py-[5px] px-2 rounded-md hover:bg-[#f8f9fb] transition-colors"
                 >
-                  <Wrench className="w-3 h-3 shrink-0 text-[#c5c8ce]" />
+                  <Wrench className="w-3 h-3 shrink-0 text-[#d0d3d9]" />
                   <span className="text-[11px] text-[#4b5563] leading-tight">
                     {tool.label}
                   </span>
@@ -94,28 +94,22 @@ function AgentCard({
   return (
     <div
       className={cn(
-        "relative rounded-xl border bg-background overflow-hidden",
+        "relative rounded-xl border border-[#e8eaef] bg-background overflow-hidden",
         "transition-all duration-200",
         "hover:shadow-lg hover:shadow-black/[0.04] hover:-translate-y-0.5",
-        agent.borderColor,
+        "hover:border-[#1e8aa0]/20",
       )}
     >
-      {/* Gradient accent bar */}
-      <div className={cn("h-[3px] bg-gradient-to-r", agent.gradient)} />
+      {/* Thin accent line — uniform brand teal */}
+      <div className="h-[2px] bg-[#1e8aa0]/15" />
 
       <div className="p-4">
         {/* Header row */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2.5">
-            <div
-              className={cn(
-                "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-                agent.bgLight,
-              )}
-            >
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-[#1e8aa0]/[0.06]">
               <Icon
-                className="w-[18px] h-[18px]"
-                style={{ color: agent.accentHex }}
+                className="w-[18px] h-[18px] text-[#1e8aa0]"
                 strokeWidth={1.75}
               />
             </div>
@@ -128,13 +122,7 @@ function AgentCard({
               </p>
             </div>
           </div>
-          <span
-            className={cn(
-              "text-[10px] font-semibold px-2 py-[3px] rounded-full shrink-0",
-              agent.bgLight,
-              agent.textColor,
-            )}
-          >
+          <span className="text-[10px] font-semibold px-2 py-[3px] rounded-full shrink-0 bg-[#f0f1f5] text-[#6b7280]">
             {agent.isMcp ? "~" : ""}
             {agent.toolCount} tools
           </span>
@@ -161,10 +149,7 @@ function AgentCard({
         <div className="space-y-1.5 mb-3">
           {agent.highlights.map((h, i) => (
             <div key={i} className="flex items-start gap-2">
-              <span
-                className="w-[5px] h-[5px] rounded-full mt-[5px] shrink-0"
-                style={{ backgroundColor: agent.accentHex, opacity: 0.45 }}
-              />
+              <span className="w-[5px] h-[5px] rounded-full mt-[5px] shrink-0 bg-[#1e8aa0]/30" />
               <span className="text-[11px] text-[#6b7280] leading-relaxed">
                 {h}
               </span>
@@ -220,9 +205,9 @@ function AgentCard({
 
 function StatPill({ value, label }: { value: string; label: string }) {
   return (
-    <div className="flex items-center gap-1.5 text-[11px] bg-[#f0f1f5] rounded-full px-2.5 py-1">
-      <span className="font-bold text-foreground">{value}</span>
-      <span className="text-[#9ca3af]">{label}</span>
+    <div className="flex items-center gap-1.5 text-[11px] bg-[#1e8aa0]/[0.06] rounded-full px-2.5 py-1">
+      <span className="font-bold text-[#1e8aa0]">{value}</span>
+      <span className="text-[#6b7280]">{label}</span>
     </div>
   );
 }
