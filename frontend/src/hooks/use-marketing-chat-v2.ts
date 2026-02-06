@@ -40,6 +40,7 @@ export type UseMarketingChatReturn = {
   error: string | null;
   conversationId: string | null;
   sendMessage: (content: string) => Promise<void>;
+  cancelStream: () => void;
   clearMessages: () => void;
   setConversationId: (id: string | null) => void;
   loadConversation: (id: string) => Promise<void>;
@@ -618,6 +619,15 @@ export function useMarketingChat(
     [isStreaming, conversationId, ensureToken, processEvent]
   );
 
+  // Cancel ongoing stream
+  const cancelStream = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsStreaming(false);
+  }, []);
+
   // Clear messages and reset state
   const clearMessages = useCallback(() => {
     setMessages([]);
@@ -742,6 +752,7 @@ export function useMarketingChat(
     error,
     conversationId,
     sendMessage,
+    cancelStream,
     clearMessages,
     setConversationId: handleSetConversationId,
     loadConversation,

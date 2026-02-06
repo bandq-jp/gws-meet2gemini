@@ -94,12 +94,20 @@ CA_SUPPORT_INSTRUCTIONS = """
 
 ---
 
+## 検索フォールバック手順
+1. **まずセマンティック検索**: `find_companies_for_candidate` or `semantic_search_companies`
+2. **結果が少ない場合**: 条件を緩和して再検索（limitを増やす、フィルタを外す）
+3. **それでも不足**: `search_companies`（厳密検索）にフォールバック
+4. **特定企業の詳細**: `get_company_detail` で補足
+
+---
+
 ## ワークフロー例
 
-### 1. 候補者への企業提案
+### 1. 候補者への企業提案（推奨パターン）
 ```
 1. get_candidate_full_profile(record_id) → 候補者の全体像把握
-2. match_candidate_to_companies(record_id) → マッチング企業取得
+2. find_companies_for_candidate(transfer_reasons, age, desired_salary) → セマンティックマッチング
 3. get_appeal_by_need(company, need_type) → 訴求ポイント取得
 ```
 
@@ -193,8 +201,9 @@ class CASupportAgentFactory(SubAgentFactory):
     @property
     def tool_description(self) -> str:
         return (
-            "CA（キャリアアドバイザー）支援エージェント。"
-            "候補者情報・面談内容・企業DBを統合して、企業提案・面談準備・リスク分析を実行。"
+            "特定候補者のクロスドメイン分析（CRM+議事録+企業DB統合）。"
+            "面談準備・企業提案・リスク分析を一括実行。"
+            "集団分析や単一ドメインの質問には専門エージェントを使用。"
         )
 
     def _get_domain_tools(
@@ -252,5 +261,8 @@ class CASupportAgentFactory(SubAgentFactory):
                 thinking_config=types.ThinkingConfig(
                     thinking_level="high",
                 ),
+            ),
+            generate_content_config=types.GenerateContentConfig(
+                max_output_tokens=self._settings.adk_max_output_tokens,
             ),
         )

@@ -11,7 +11,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import type { Components } from "react-markdown";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, memo, useMemo, useRef } from "react";
 import {
   Wrench,
   Loader2,
@@ -31,6 +31,8 @@ import {
   Code2,
   CheckCircle2,
   Sparkles,
+  Copy,
+  Check,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -341,6 +343,52 @@ function extractToolContext(toolName: string, argsJson?: string): string | null 
 }
 
 // ---------------------------------------------------------------------------
+// CodeBlock with copy button (U-4)
+// ---------------------------------------------------------------------------
+
+function CodeBlock({ language, children }: { language: string; children: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    const text = typeof children === "string" ? children : String(children ?? "");
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [children]);
+
+  return (
+    <div className="my-2.5 sm:my-3 rounded-lg bg-[#1a1a2e] overflow-hidden group relative">
+      <div className="flex items-center justify-between px-3 sm:px-4 py-1.5 bg-[#2a2a4e]">
+        <span className="text-[10px] text-[#9ca3af] uppercase tracking-wider font-medium">
+          {language}
+        </span>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 text-[10px] text-[#9ca3af] hover:text-white transition-colors"
+          aria-label="コピー"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3 h-3" />
+              <span>コピー済み</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3 h-3" />
+              <span>コピー</span>
+            </>
+          )}
+        </button>
+      </div>
+      <pre className="px-3 sm:px-4 py-2.5 sm:py-3 overflow-x-auto text-[11px] sm:text-xs leading-relaxed">
+        <code className="text-[#e5e7eb]">{children}</code>
+      </pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Markdown components
 // ---------------------------------------------------------------------------
 
@@ -413,14 +461,9 @@ const markdownComponents: Components = {
     const isBlock = className?.includes("language-");
     if (isBlock) {
       return (
-        <div className="my-2.5 sm:my-3 rounded-lg bg-[#1a1a2e] overflow-hidden">
-          <div className="px-3 sm:px-4 py-1.5 bg-[#2a2a4e] text-[10px] text-[#9ca3af] uppercase tracking-wider font-medium">
-            {className?.replace("language-", "") || "code"}
-          </div>
-          <pre className="px-3 sm:px-4 py-2.5 sm:py-3 overflow-x-auto text-[11px] sm:text-xs leading-relaxed">
-            <code className="text-[#e5e7eb]">{children}</code>
-          </pre>
-        </div>
+        <CodeBlock language={className?.replace("language-", "") || "code"}>
+          {children}
+        </CodeBlock>
       );
     }
     return (
@@ -806,8 +849,11 @@ function ActivityTimeline({
 }) {
   if (!items || items.length === 0) return null;
 
-  // Sort by sequence and render in arrival order (interleaved timeline)
-  const sortedItems = [...items].sort((a, b) => a.sequence - b.sequence);
+  // Sort by sequence and render in arrival order (interleaved timeline) (U-12: memoized)
+  const sortedItems = useMemo(
+    () => [...items].sort((a, b) => a.sequence - b.sequence),
+    [items]
+  );
 
   // Group consecutive items by kind for compact rendering
   const groups: { kind: string; items: ActivityItem[] }[] = [];
@@ -961,9 +1007,9 @@ export interface ChatMessageProps {
   message: Message;
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
   if (message.role === "user") {
     return <UserMessage message={message} />;
   }
   return <AssistantMessage message={message} />;
-}
+});

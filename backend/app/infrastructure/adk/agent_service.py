@@ -17,7 +17,6 @@ import asyncio
 import json
 import logging
 import re
-import time
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict, List, Optional
@@ -32,6 +31,7 @@ from google.genai import types
 from .agents import OrchestratorAgentFactory
 from .mcp_manager import ADKMCPManager
 from .plugins import SubAgentStreamingPlugin
+from .utils import normalize_agent_name, sanitize_error
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -114,37 +114,6 @@ class ADKAgentService:
                 logger.info(f"[ADK SimpleQuery] Detected: {message[:30]}...")
                 return True
         return False
-
-    def _normalize_agent_name(self, tool_name: str) -> str:
-        """
-        Normalize agent tool name to snake_case.
-
-        Examples:
-        - "ZohoCRMAgent" -> "zoho_crm"
-        - "AnalyticsAgent" -> "analytics"
-        - "AdPlatformAgent" -> "ad_platform"
-        - "SEOAgent" -> "seo"
-        - "WordPressAgent" -> "wordpress"
-        - "CandidateInsightAgent" -> "candidate_insight"
-        """
-        # Remove "Agent" suffix
-        name = tool_name.replace("Agent", "")
-
-        # Special cases for compound words (keep together)
-        name = name.replace("WordPress", "Wordpress")  # WordPress -> wordpress (no underscore)
-
-        # Special cases for acronyms
-        name = name.replace("CRM", "Crm")
-        name = name.replace("SEO", "Seo")
-
-        # Convert CamelCase to snake_case
-        result = []
-        for i, char in enumerate(name):
-            if char.isupper() and i > 0:
-                result.append("_")
-            result.append(char.lower())
-
-        return "".join(result)
 
     async def _save_session_to_memory(self, session: Any, user_email: str) -> None:
         """
@@ -230,8 +199,8 @@ class ADKAgentService:
                         yield {"type": "text_delta", "content": event.content}
 
         except Exception as e:
-            logger.error(f"[ADK SimpleQuery] Error: {e}")
-            yield {"type": "error", "message": str(e)}
+            logger.error(f"[ADK SimpleQuery] Error: {e}", exc_info=True)
+            yield {"type": "error", "message": sanitize_error(str(e))}
 
         yield {"type": "_context_items", "items": []}
         yield {"type": "done", "conversation_id": conversation_id}
@@ -267,7 +236,8 @@ class ADKAgentService:
             return
 
         # Queue for multiplexing SDK events and out-of-band events (chart, etc.)
-        queue: asyncio.Queue[dict | object] = asyncio.Queue()
+        # maxsize=1000 prevents unbounded memory growth if consumer is slow
+        queue: asyncio.Queue[dict | object] = asyncio.Queue(maxsize=1000)
 
         async def emit_event(event: dict) -> None:
             """Callback for tool functions to emit custom events (charts, etc.)."""
@@ -365,7 +335,7 @@ class ADKAgentService:
                                 await queue.put(sse_event)
                 except Exception as e:
                     logger.exception(f"[ADK] Error during streaming: {e}")
-                    await queue.put({"type": "error", "message": str(e)})
+                    await queue.put({"type": "error", "message": sanitize_error(str(e))})
                 finally:
                     await queue.put(_SENTINEL)
 
@@ -449,7 +419,7 @@ class ADKAgentService:
 
         except Exception as e:
             logger.exception(f"[ADK] Error in stream_chat: {e}")
-            yield {"type": "error", "message": str(e)}
+            yield {"type": "error", "message": sanitize_error(str(e))}
             yield {"type": "done", "conversation_id": session_id}
 
     def _process_non_text_part(
@@ -472,7 +442,7 @@ class ADKAgentService:
                     "spec": output["_chart_spec"],
                 })
             elif tool_name.endswith("Agent"):
-                agent_name = self._normalize_agent_name(tool_name)
+                agent_name = normalize_agent_name(tool_name)
                 if agent_name in sub_agent_states:
                     sub_agent_states[agent_name]["is_running"] = False
 
@@ -506,7 +476,7 @@ class ADKAgentService:
             tool_name = getattr(fc, "name", "unknown")
 
             if tool_name.endswith("Agent"):
-                agent_name = self._normalize_agent_name(tool_name)
+                agent_name = normalize_agent_name(tool_name)
                 sub_agent_states[agent_name] = {"is_running": True}
                 results.append({
                     "type": "sub_agent_event",
@@ -595,7 +565,7 @@ class ADKAgentService:
                             })
                         # Check if this is a sub-agent response
                         elif tool_name.endswith("Agent"):
-                            agent_name = self._normalize_agent_name(tool_name)
+                            agent_name = normalize_agent_name(tool_name)
                             if agent_name in sub_agent_states:
                                 sub_agent_states[agent_name]["is_running"] = False
 
@@ -631,7 +601,7 @@ class ADKAgentService:
                         # Check if this is a sub-agent call (AgentTool)
                         if tool_name.endswith("Agent"):
                             # Extract agent name (e.g., "ZohoCRMAgent" -> "zoho_crm")
-                            agent_name = self._normalize_agent_name(tool_name)
+                            agent_name = normalize_agent_name(tool_name)
                             sub_agent_states[agent_name] = {"is_running": True}
                             results.append({
                                 "type": "sub_agent_event",

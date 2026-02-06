@@ -146,4 +146,7 @@ class AnalyticsAgentFactory(SubAgentFactory):
                     thinking_level="high",
                 ),
             ),
+            generate_content_config=types.GenerateContentConfig(
+                max_output_tokens=self._settings.adk_max_output_tokens,
+            ),
         )

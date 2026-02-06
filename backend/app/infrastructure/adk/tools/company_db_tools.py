@@ -31,11 +31,17 @@ NEED_COLUMN_MAP = {
 }
 
 
+_sheets_service_instance = None
+
+
 def _get_sheets_service():
-    """Get SheetsService instance (lazy import to avoid circular deps)."""
-    from app.infrastructure.google.sheets_service import CompanyDatabaseSheetsService
-    from app.infrastructure.config.settings import get_settings
-    return CompanyDatabaseSheetsService(get_settings())
+    """Get SheetsService singleton (lazy import to avoid circular deps)."""
+    global _sheets_service_instance
+    if _sheets_service_instance is None:
+        from app.infrastructure.google.sheets_service import CompanyDatabaseSheetsService
+        from app.infrastructure.config.settings import get_settings
+        _sheets_service_instance = CompanyDatabaseSheetsService(get_settings())
+    return _sheets_service_instance
 
 
 def _safe_int(value: Any, default: int = 0) -> int:
@@ -200,7 +206,6 @@ def get_company_detail(company_name: str) -> Dict[str, Any]:
         requirements: 採用要件
         conditions: 条件
         appeal_points: ニーズ別訴求ポイント
-        full_data: 全カラムデータ
     """
     logger.info(f"[ADK CompanyDB] get_company_detail: company_name={company_name}")
 
@@ -254,7 +259,6 @@ def get_company_detail(company_name: str) -> Dict[str, Any]:
                 "有給取得率": company.get("有給取得率"),
             },
             "appeal_points": appeal,
-            "full_data": company,
         }
     except Exception as e:
         logger.error(f"[ADK CompanyDB] get_company_detail error: {e}")
@@ -265,13 +269,16 @@ def get_company_requirements(company_name: str) -> Dict[str, Any]:
     """
     企業の採用要件を取得。年齢・学歴・経験社数などの要件を返す。
 
+    get_company_detailとの違い：採用要件のみ高速取得。全情報不要な場合はこちらが効率的。
+
     Args:
         company_name: 企業名（部分一致検索）
 
     Returns:
-        success: True/False
-        company_name: 企業名
-        requirements: 採用要件詳細
+        Dict[str, Any]: 採用要件。
+            success: True/False
+            company_name: 企業名
+            requirements: 採用要件詳細
     """
     logger.info(f"[ADK CompanyDB] get_company_requirements: company_name={company_name}")
 
@@ -322,16 +329,24 @@ def get_appeal_by_need(
     """
     ニーズ別訴求ポイント取得。候補者の転職理由に合わせた訴求文言を返す。
 
+    転職理由→need_type変換ガイド:
+    - 給与が低い → salary
+    - スキルアップしたい → growth
+    - 残業多い → wlb
+    - 人間関係 → atmosphere
+    - 会社の将来が不安 → future
+
     Args:
         company_name: 企業名
         need_type: ニーズタイプ（salary/growth/wlb/atmosphere/future）
 
     Returns:
-        success: True/False
-        company_name: 企業名
-        need_type: ニーズタイプ
-        need_label: ニーズの日本語ラベル
-        appeal_point: 訴求文言
+        Dict[str, Any]: 訴求ポイント。
+            success: True/False
+            company_name: 企業名
+            need_type: ニーズタイプ
+            need_label: ニーズの日本語ラベル
+            appeal_point: 訴求文言
     """
     logger.info(f"[ADK CompanyDB] get_appeal_by_need: company={company_name}, need={need_type}")
 
@@ -392,6 +407,9 @@ def match_candidate_to_companies(
     """
     候補者に合う企業をマッチング。Zoho record_idまたは条件を指定してスコア付きで企業を推薦。
 
+    find_companies_for_candidateとの違い：こちらは採用要件（年齢・年収・学歴）の厳密マッチング。
+    自然言語の意味検索はfind_companies_for_candidateを使用。
+
     Args:
         record_id: Zoho候補者record_id（指定すると自動でZoho+Supabaseからデータ取得）
         age: 年齢
@@ -404,10 +422,11 @@ def match_candidate_to_companies(
         limit: 取得件数（max 20）
 
     Returns:
-        success: True/False
-        candidate_info: 使用した候補者情報
-        total_matched: マッチ件数
-        recommended_companies: スコア付き推奨企業リスト
+        Dict[str, Any]: マッチング結果。
+            success: True/False
+            candidate_info: 使用した候補者情報
+            total_matched: マッチ件数
+            recommended_companies: スコア付き推奨企業リスト
     """
     logger.info(f"[ADK CompanyDB] match_candidate_to_companies: record_id={record_id}")
 
@@ -593,6 +612,139 @@ def get_pic_recommended_companies(pic_name: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def compare_companies(
+    company_names: List[str],
+) -> Dict[str, Any]:
+    """複数企業の比較表を生成（2-5社）。年収・要件・訴求ポイントを並列比較。
+
+    Args:
+        company_names: 比較する企業名リスト（2-5社）
+
+    Returns:
+        Dict[str, Any]: 比較結果。
+            success: True/False
+            comparison_table: 企業比較テーブル
+            summary: 主要な違いのサマリー
+    """
+    logger.info(f"[ADK CompanyDB] compare_companies: {company_names}")
+
+    if not company_names or len(company_names) < 2:
+        return {"success": False, "error": "比較には2社以上を指定してください"}
+
+    if len(company_names) > 5:
+        return {"success": False, "error": "比較は最大5社までです"}
+
+    try:
+        service = _get_sheets_service()
+        all_companies = service.get_all_companies()
+        appeal_data = service.get_appeal_points()
+
+        # Build lookup by name (partial match)
+        comparison_table = []
+        not_found = []
+
+        for target_name in company_names:
+            matches = [c for c in all_companies if target_name in c.get("企業名", "")]
+
+            if not matches:
+                not_found.append(target_name)
+                continue
+
+            company = matches[0]
+            name = company.get("企業名", target_name)
+            appeal = appeal_data.get(name, {})
+
+            # Salary range
+            salary_min = company.get("想定年収下限", "?")
+            salary_max = company.get("想定年収上限", "?")
+
+            comparison_table.append({
+                "企業名": name,
+                "業種": company.get("業種"),
+                "勤務地": company.get("勤務地"),
+                "想定年収": f"{salary_min}〜{salary_max}万",
+                "想定年収下限": _safe_int(salary_min, 0),
+                "想定年収上限": _safe_int(salary_max, 0),
+                "年齢上限": company.get("年齢上限"),
+                "学歴要件": company.get("学歴要件"),
+                "経験社数上限": company.get("経験社数上限"),
+                "必須経験": company.get("必須経験"),
+                "リモートワーク": company.get("リモートワーク"),
+                "平均残業時間": company.get("平均残業時間"),
+                "有給取得率": company.get("有給取得率"),
+                "設立年": company.get("設立年"),
+                "従業員数": company.get("従業員数"),
+                "上場区分": company.get("上場区分"),
+                "訴求ポイント": {
+                    "給与訴求": appeal.get("給与訴求", ""),
+                    "成長訴求": appeal.get("成長訴求", ""),
+                    "WLB訴求": appeal.get("WLB訴求", ""),
+                    "雰囲気訴求": appeal.get("雰囲気訴求", ""),
+                    "将来性訴求": appeal.get("将来性訴求", ""),
+                },
+            })
+
+        if not comparison_table:
+            return {
+                "success": False,
+                "error": "指定された企業がいずれも見つかりません",
+                "not_found": not_found,
+            }
+
+        # Generate summary of key differences
+        summary_points = []
+
+        # Salary comparison
+        salary_items = [
+            (c["企業名"], c["想定年収上限"])
+            for c in comparison_table if c["想定年収上限"] > 0
+        ]
+        if salary_items:
+            best_salary = max(salary_items, key=lambda x: x[1])
+            summary_points.append(f"年収上限が最も高いのは{best_salary[0]}（{best_salary[1]}万円）")
+
+        # Remote comparison
+        remote_companies = [
+            c["企業名"] for c in comparison_table
+            if c.get("リモートワーク") and (
+                "可" in str(c["リモートワーク"]) or
+                "フル" in str(c["リモートワーク"])
+            )
+        ]
+        if remote_companies:
+            summary_points.append(f"リモート可能: {', '.join(remote_companies)}")
+
+        # Age limit comparison
+        age_items = [
+            (c["企業名"], _safe_int(c.get("年齢上限"), 0))
+            for c in comparison_table if _safe_int(c.get("年齢上限"), 0) > 0
+        ]
+        if age_items:
+            most_flexible = max(age_items, key=lambda x: x[1])
+            summary_points.append(f"年齢上限が最も高いのは{most_flexible[0]}（{most_flexible[1]}歳）")
+
+        # Remove internal-only fields from output
+        for entry in comparison_table:
+            del entry["想定年収下限"]
+            del entry["想定年収上限"]
+
+        result: Dict[str, Any] = {
+            "success": True,
+            "compared_count": len(comparison_table),
+            "comparison_table": comparison_table,
+            "summary": summary_points,
+        }
+
+        if not_found:
+            result["not_found"] = not_found
+
+        return result
+
+    except Exception as e:
+        logger.error(f"[ADK CompanyDB] compare_companies error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 # List of ADK-compatible tools
 ADK_COMPANY_DB_TOOLS = [
     get_company_definitions,
@@ -602,4 +754,5 @@ ADK_COMPANY_DB_TOOLS = [
     get_appeal_by_need,
     match_candidate_to_companies,
     get_pic_recommended_companies,
+    compare_companies,
 ]

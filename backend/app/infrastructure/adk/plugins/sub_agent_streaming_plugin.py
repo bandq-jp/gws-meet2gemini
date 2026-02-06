@@ -22,6 +22,8 @@ from google.adk.agents.callback_context import CallbackContext
 from google.adk.models.llm_request import LlmRequest
 from google.adk.models.llm_response import LlmResponse
 
+from ..utils import normalize_agent_name
+
 if TYPE_CHECKING:
     from google.adk.agents.base_agent import BaseAgent
     from google.adk.tools.base_tool import BaseTool
@@ -71,18 +73,6 @@ class SubAgentStreamingPlugin(BasePlugin):
         # Key: (agent_name, tool_name) -> call_id
         self._pending_tool_calls: Dict[tuple, str] = {}
 
-    def _normalize_agent_name(self, name: str) -> str:
-        """Convert agent name to frontend format (e.g., 'AnalyticsAgent' -> 'analytics')."""
-        if name.endswith("Agent"):
-            name = name[:-5]  # Remove 'Agent' suffix
-        # Convert CamelCase to snake_case
-        result = []
-        for i, char in enumerate(name):
-            if char.isupper() and i > 0:
-                result.append("_")
-            result.append(char.lower())
-        return "".join(result)
-
     def _is_sub_agent_context(self) -> bool:
         """Check if we're currently inside a sub-agent (not orchestrator)."""
         if not self._current_agent_stack:
@@ -94,7 +84,7 @@ class SubAgentStreamingPlugin(BasePlugin):
         """Get the current agent name (normalized for frontend)."""
         if not self._current_agent_stack:
             return None
-        return self._normalize_agent_name(self._current_agent_stack[-1])
+        return normalize_agent_name(self._current_agent_stack[-1])
 
     async def _emit(self, event: Dict[str, Any]) -> None:
         """Emit an event to the SSE queue."""
@@ -224,13 +214,70 @@ class SubAgentStreamingPlugin(BasePlugin):
         callback_context: CallbackContext,
         llm_response: LlmResponse,
     ) -> Optional[LlmResponse]:
-        """Emit reasoning/thinking events from sub-agent LLM responses."""
+        """Emit reasoning/thinking events and detect errors from sub-agent LLM responses."""
         if not self._is_sub_agent_context():
             return None
 
         agent_name = self._get_current_agent()
 
-        # Check for thinking/reasoning in the response
+        # --- Error detection ---
+        # Check for error indicators in the LLM response
+        # 1. Response with no content at all may indicate an error
+        if llm_response is None:
+            logger.warning(f"[Plugin] Sub-agent {agent_name} received null LLM response")
+            await self._emit({
+                "type": "sub_agent_event",
+                "agent": agent_name,
+                "event_type": "model_error",
+                "is_running": True,
+                "data": {
+                    "error": "LLMからの応答がありませんでした",
+                    "error_type": "null_response",
+                },
+            })
+            return None
+
+        # 2. Check for blocked/filtered responses (e.g., safety filters)
+        # Gemini models set finish_reason on candidates
+        if hasattr(llm_response, "candidates") and llm_response.candidates:
+            for candidate in llm_response.candidates:
+                finish_reason = getattr(candidate, "finish_reason", None)
+                if finish_reason and str(finish_reason) not in ("STOP", "1", "MAX_TOKENS", "2"):
+                    reason_str = str(finish_reason)
+                    logger.warning(
+                        f"[Plugin] Sub-agent {agent_name} LLM blocked: "
+                        f"finish_reason={reason_str}"
+                    )
+                    await self._emit({
+                        "type": "sub_agent_event",
+                        "agent": agent_name,
+                        "event_type": "model_error",
+                        "is_running": True,
+                        "data": {
+                            "error": f"モデル応答がブロックされました (理由: {reason_str})",
+                            "error_type": "blocked",
+                            "finish_reason": reason_str,
+                        },
+                    })
+
+        # 3. Check for error_message attribute (some ADK versions)
+        error_message = getattr(llm_response, "error_message", None)
+        if error_message:
+            logger.warning(
+                f"[Plugin] Sub-agent {agent_name} LLM error: {error_message}"
+            )
+            await self._emit({
+                "type": "sub_agent_event",
+                "agent": agent_name,
+                "event_type": "model_error",
+                "is_running": True,
+                "data": {
+                    "error": "LLMでエラーが発生しました",
+                    "error_type": "llm_error",
+                },
+            })
+
+        # --- Reasoning/thinking detection ---
         if hasattr(llm_response, "content") and llm_response.content:
             parts = getattr(llm_response.content, "parts", [])
             for part in parts:

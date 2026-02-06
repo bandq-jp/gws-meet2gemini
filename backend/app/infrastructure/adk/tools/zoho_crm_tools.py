@@ -9,13 +9,69 @@ All tools from OpenAI Agents SDK version have been ported here.
 
 from __future__ import annotations
 
+import functools
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from app.infrastructure.zoho.client import ZohoClient, ZohoAuthError
 
 logger = logging.getLogger(__name__)
+
+# ZohoClient singleton
+_zoho_client_instance = None
+
+
+def _get_zoho_client():
+    """ZohoClient シングルトン取得。"""
+    global _zoho_client_instance
+    if _zoho_client_instance is None:
+        _zoho_client_instance = ZohoClient()
+    return _zoho_client_instance
+
+
+# TTL cache for all records
+_all_records_cache = None
+_all_records_cache_time = 0
+_ALL_RECORDS_CACHE_TTL = 300  # 5分
+
+
+def _get_cached_all_records():
+    """全レコードのTTLキャッシュ。5分間有効。"""
+    global _all_records_cache, _all_records_cache_time
+    now = time.time()
+    if _all_records_cache is not None and (now - _all_records_cache_time) < _ALL_RECORDS_CACHE_TTL:
+        return _all_records_cache
+    zoho = _get_zoho_client()
+    _all_records_cache = zoho._fetch_all_records()
+    _all_records_cache_time = now
+    return _all_records_cache
+
+
+def _retry_transient(max_retries: int = 2, delay: float = 1.0):
+    """一時的エラーの自動リトライデコレータ（指数バックオフ）。"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    last_error = e
+                    error_str = str(e).lower()
+                    # 認証エラーやバリデーションエラーはリトライしない
+                    if any(kw in error_str for kw in ["auth", "invalid", "not found", "permission"]):
+                        raise
+                    if attempt < max_retries:
+                        import time as _time
+                        _time.sleep(delay * (2 ** attempt))
+                        logger.warning(f"[zoho_crm_tools] Retry {attempt+1}/{max_retries} for {func.__name__}: {e}")
+            raise last_error
+        return wrapper
+    return decorator
+
 
 # Channel definitions
 CHANNEL_DEFINITIONS = {
@@ -67,7 +123,14 @@ STATUS_DEFINITIONS = {
 
 
 def get_channel_definitions() -> Dict[str, Any]:
-    """流入経路(channel)とステータス(status)の定義一覧を取得。"""
+    """流入経路(channel)とステータス(status)の定義一覧を取得。
+
+    Returns:
+        Dict[str, Any]: チャネル・ステータス定義。
+            success: True/False
+            channels: チャネル定義辞書
+            statuses: ステータス定義辞書
+    """
     return {
         "success": True,
         "channels": CHANNEL_DEFINITIONS,
@@ -93,11 +156,18 @@ def search_job_seekers(
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
         limit: 件数(max100)
+
+    Returns:
+        Dict[str, Any]: 検索結果。
+            success: True/False
+            total: ヒット件数
+            records: 求職者レコードリスト
+            filters_applied: 適用したフィルタ
     """
     logger.info(f"[ADK Zoho] search_job_seekers: channel={channel}, status={status}")
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         results = zoho.search_by_criteria(
             channel=channel,
             status=status,
@@ -127,10 +197,15 @@ def search_job_seekers(
 
 
 def get_job_seeker_detail(record_id: str) -> Dict[str, Any]:
-    """特定求職者1名の詳細取得。複数取得にはget_job_seekers_batchを使用。
+    """特定求職者1名の詳細取得。日本語ラベル付き整形済みデータを返す。
 
     Args:
         record_id: Zoho CRMのレコードID
+
+    Returns:
+        success: True/False
+        record_id: レコードID
+        record: 整形済み求職者データ（日本語ラベル）
     """
     logger.info(f"[ADK Zoho] get_job_seeker_detail: record_id={record_id}")
 
@@ -138,7 +213,7 @@ def get_job_seeker_detail(record_id: str) -> Dict[str, Any]:
         return {"success": False, "error": "record_idが指定されていません"}
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         record = zoho.get_app_hc_record(record_id)
 
         if not record:
@@ -147,7 +222,7 @@ def get_job_seeker_detail(record_id: str) -> Dict[str, Any]:
         return {
             "success": True,
             "record_id": record_id,
-            "record": record,
+            "record": _format_job_seeker_detail(record),
         }
     except ZohoAuthError as e:
         return {"success": False, "error": "認証エラー"}
@@ -160,6 +235,12 @@ def get_job_seekers_batch(record_ids: List[str]) -> Dict[str, Any]:
 
     Args:
         record_ids: 取得するrecord_idのリスト（最大50件）
+
+    Returns:
+        Dict[str, Any]: 一括取得結果。
+            success: True/False
+            total: 取得件数
+            records: 求職者レコードリスト（整形済み）
     """
     logger.info(f"[ADK Zoho] get_job_seekers_batch: {len(record_ids)} records")
 
@@ -170,7 +251,7 @@ def get_job_seekers_batch(record_ids: List[str]) -> Dict[str, Any]:
         return {"success": False, "error": "最大50件まで指定可能です"}
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         records = zoho.get_app_hc_records_batch(record_ids)
 
         formatted = [_format_job_seeker_detail(r) for r in records]
@@ -219,11 +300,19 @@ def aggregate_by_channel(
     Args:
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
+
+    Returns:
+        Dict[str, Any]: チャネル別集計。
+            success: True/False
+            period: 集計期間
+            by_category: カテゴリ別集計（スカウト系・有料広告系等）
+            category_totals: カテゴリ別合計
+            total: 総数
     """
     logger.info(f"[ADK Zoho] aggregate_by_channel: {date_from} to {date_to}")
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         results = zoho.count_by_channel(date_from=date_from, date_to=date_to)
 
         # Categorize by channel type
@@ -268,15 +357,25 @@ def count_job_seekers_by_status(
 ) -> Dict[str, Any]:
     """ステータス別集計(ファネル分析用)。channelで絞込可。
 
+    全チャネル横断のステータス分布。特定チャネルの深堀りはanalyze_funnel_by_channelを使用。
+
     Args:
         channel: 流入経路でフィルタ
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
+
+    Returns:
+        Dict[str, Any]: ステータス別集計。
+            success: True/False
+            channel_filter: 適用したチャネル
+            by_status: ステータス別カウント
+            total: 総数
+            funnel_analysis: ファネル分析（面談率・入社率等）
     """
     logger.info(f"[ADK Zoho] count_by_status: channel={channel}")
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         results = zoho.count_by_status(
             channel=channel, date_from=date_from, date_to=date_to
         )
@@ -321,10 +420,20 @@ def analyze_funnel_by_channel(
 ) -> Dict[str, Any]:
     """特定channelのファネル分析。転換率とボトルネックを特定。
 
+    特定チャネルの詳細ファネル分析。全体俯瞰はcount_job_seekers_by_statusを使用。
+
     Args:
         channel: 流入経路(必須)
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
+
+    Returns:
+        Dict[str, Any]: ファネル分析結果。
+            success: True/False
+            channel: 分析対象チャネル
+            funnel_data: ステージ別データ（転換率・離脱率）
+            bottlenecks: ボトルネック箇所リスト
+            kpis: KPI指標
     """
     logger.info(f"[ADK Zoho] analyze_funnel_by_channel: channel={channel}")
 
@@ -332,7 +441,7 @@ def analyze_funnel_by_channel(
         return {"success": False, "error": "流入経路（channel）を指定してください"}
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         status_counts = zoho.count_by_status(
             channel=channel, date_from=date_from, date_to=date_to
         )
@@ -420,19 +529,31 @@ def trend_analysis_by_period(
     """期間別トレンド分析。月次/週次の推移と前期比を確認。
 
     Args:
-        period_type: "monthly" または "weekly"
+        period_type: "monthly" または "weekly" または "quarterly"。それ以外はエラー。
         months_back: 何ヶ月/週遡るか（max 12）
         channel: 流入経路でフィルタ
+
+    Returns:
+        Dict[str, Any]: トレンド分析結果。
+            success: True/False
+            period_type: 分析期間タイプ
+            trend_data: 期間別データ（前期比・増減率）
+            summary: 集計サマリ
     """
     logger.info(f"[ADK Zoho] trend_analysis_by_period: {period_type}, {months_back}ヶ月")
+
+    # Validate period_type
+    valid_periods = {"weekly", "monthly", "quarterly"}
+    if period_type not in valid_periods:
+        return {"success": False, "error": f"period_typeは {valid_periods} のいずれかを指定してください"}
 
     months_back = min(months_back, 12)
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         today = datetime.now()
 
-        all_records = zoho._fetch_all_records(max_pages=15)
+        all_records = _get_cached_all_records()
 
         if channel:
             all_records = [r for r in all_records if r.get(zoho.CHANNEL_FIELD_API) == channel]
@@ -538,6 +659,14 @@ def compare_channels(
         channels: 比較するチャネルのリスト（2-5個）
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
+
+    Returns:
+        Dict[str, Any]: チャネル比較結果。
+            success: True/False
+            period: 比較期間
+            comparison: チャネル別データ（ランキング付き）
+            best_by_hire_rate: 入社率トップチャネル
+            best_by_volume: 獲得数トップチャネル
     """
     logger.info(f"[ADK Zoho] compare_channels: {channels}")
 
@@ -548,9 +677,9 @@ def compare_channels(
         return {"success": False, "error": "比較は最大5チャネルまでです"}
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
 
-        all_records = zoho._fetch_all_records(max_pages=15)
+        all_records = _get_cached_all_records()
         filtered = zoho._filter_by_date(all_records, date_from, date_to)
 
         channel_stats: Dict[str, Dict[str, int]] = {ch: {} for ch in channels}
@@ -615,13 +744,21 @@ def get_pic_performance(
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
         channel: 流入経路でフィルタ
+
+    Returns:
+        Dict[str, Any]: PIC別パフォーマンス。
+            success: True/False
+            period: 分析期間
+            pic_count: PIC数
+            performance_data: PIC別データ（ランキング付き）
+            top_performer: トップPIC
     """
     logger.info(f"[ADK Zoho] get_pic_performance: channel={channel}")
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
 
-        all_records = zoho._fetch_all_records(max_pages=15)
+        all_records = _get_cached_all_records()
         filtered = zoho._filter_by_date(all_records, date_from, date_to)
 
         if channel:
@@ -674,6 +811,176 @@ def get_pic_performance(
         return {"success": False, "error": str(e)}
 
 
+def get_conversion_metrics(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> Dict[str, Any]:
+    """全チャネル横断のコンバージョン指標を一括取得。チャネル別の獲得数・面談率・内定率・入社率を比較。
+
+    compare_channelsとの違い：こちらは全チャネルのKPIを自動計算。
+    compare_channelsは特定チャネル同士の詳細比較。
+
+    Args:
+        date_from: 開始日(YYYY-MM-DD)
+        date_to: 終了日(YYYY-MM-DD)
+
+    Returns:
+        Dict[str, Any]: 全チャネルKPI。
+            success: True/False
+            period: 分析期間
+            metrics: チャネル別KPI（獲得数、面談率、内定率、入社率、CPA推計）
+            ranking: 入社率ランキング
+            recommendations: 改善推奨
+    """
+    logger.info(f"[ADK Zoho] get_conversion_metrics: {date_from} to {date_to}")
+
+    try:
+        zoho = _get_zoho_client()
+        all_records = _get_cached_all_records()
+        filtered = zoho._filter_by_date(all_records, date_from, date_to)
+
+        # Aggregate status counts per channel
+        channel_stats: Dict[str, Dict[str, int]] = {}
+
+        for record in filtered:
+            ch = record.get(zoho.CHANNEL_FIELD_API)
+            if not ch:
+                continue
+
+            if ch not in channel_stats:
+                channel_stats[ch] = {}
+
+            status = record.get(zoho.STATUS_FIELD_API)
+            if status:
+                channel_stats[ch][status] = channel_stats[ch].get(status, 0) + 1
+
+        # Build metrics per channel
+        metrics = []
+        for ch, status_counts in channel_stats.items():
+            total = sum(status_counts.values())
+            if total == 0:
+                continue
+
+            interview_done = status_counts.get("4. 面談済み", 0)
+            offer = status_counts.get("12. 内定", 0) + status_counts.get("13. 内定承諾", 0)
+            hired = status_counts.get("14. 入社", 0)
+
+            # Calculate cumulative counts (candidates who reached at least this stage)
+            # For funnel: someone with "14. 入社" also passed through "4. 面談済み"
+            # But since Zoho stores current status, we need cumulative counts
+            interview_plus = sum(
+                cnt for st, cnt in status_counts.items()
+                if st >= "4. 面談済み" and st < "16. クローズ"
+            )
+            offer_plus = sum(
+                cnt for st, cnt in status_counts.items()
+                if st >= "12. 内定" and st <= "14. 入社"
+            )
+            hired_count = status_counts.get("14. 入社", 0)
+
+            interview_rate = round((interview_plus / total) * 100, 1) if total > 0 else 0
+            offer_rate = round((offer_plus / total) * 100, 1) if total > 0 else 0
+            hire_rate = round((hired_count / total) * 100, 1) if total > 0 else 0
+
+            # Category
+            if ch.startswith("sco_"):
+                category = "スカウト"
+            elif ch.startswith("paid_"):
+                category = "有料広告"
+            elif ch.startswith("org_"):
+                category = "自然流入"
+            else:
+                category = "その他"
+
+            metrics.append({
+                "channel": ch,
+                "description": CHANNEL_DEFINITIONS.get(ch, "不明"),
+                "category": category,
+                "total": total,
+                "interview_rate": f"{interview_rate}%",
+                "offer_rate": f"{offer_rate}%",
+                "hire_rate": f"{hire_rate}%",
+                "hired_count": hired_count,
+                "_hire_rate_num": hire_rate,  # for sorting
+            })
+
+        # Sort by hire rate descending for ranking
+        metrics.sort(key=lambda x: x["_hire_rate_num"], reverse=True)
+
+        ranking = []
+        for i, m in enumerate(metrics):
+            ranking.append({
+                "rank": i + 1,
+                "channel": m["channel"],
+                "description": m["description"],
+                "hire_rate": m["hire_rate"],
+                "hired_count": m["hired_count"],
+                "total": m["total"],
+            })
+
+        # Remove internal sort key
+        for m in metrics:
+            del m["_hire_rate_num"]
+
+        # Generate recommendations
+        recommendations = []
+
+        if ranking:
+            top = ranking[0]
+            recommendations.append(
+                f"入社率トップは{top['description']}（{top['hire_rate']}）。"
+                f"このチャネルの成功パターンを他チャネルに横展開を推奨。"
+            )
+
+        # Find channels with high volume but low conversion
+        high_vol_low_conv = [
+            m for m in metrics
+            if m["total"] >= 10 and float(m["hire_rate"].replace("%", "")) < 3.0
+        ]
+        if high_vol_low_conv:
+            names = ", ".join(m["description"] for m in high_vol_low_conv[:3])
+            recommendations.append(
+                f"獲得数は多いが入社率が低いチャネル: {names}。ファネル改善を優先。"
+            )
+
+        # Category-level summary
+        category_summary: Dict[str, Dict[str, Any]] = {}
+        for m in metrics:
+            cat = m["category"]
+            if cat not in category_summary:
+                category_summary[cat] = {"total": 0, "hired": 0, "channels": 0}
+            category_summary[cat]["total"] += m["total"]
+            category_summary[cat]["hired"] += m["hired_count"]
+            category_summary[cat]["channels"] += 1
+
+        for cat, data in category_summary.items():
+            data["hire_rate"] = (
+                f"{round((data['hired'] / data['total']) * 100, 1)}%"
+                if data["total"] > 0 else "N/A"
+            )
+
+        overall_total = sum(m["total"] for m in metrics)
+        overall_hired = sum(m["hired_count"] for m in metrics)
+
+        return {
+            "success": True,
+            "period": {"from": date_from or "全期間", "to": date_to or "現在"},
+            "overall": {
+                "total": overall_total,
+                "hired": overall_hired,
+                "hire_rate": f"{round((overall_hired / overall_total) * 100, 1)}%" if overall_total > 0 else "N/A",
+            },
+            "category_summary": category_summary,
+            "metrics": metrics,
+            "ranking": ranking[:10],
+            "recommendations": recommendations,
+        }
+
+    except Exception as e:
+        logger.error(f"[ADK Zoho] get_conversion_metrics error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 # List of ADK-compatible tools - ALL tools from OpenAI SDK version
 ADK_ZOHO_CRM_TOOLS = [
     # Basic search and retrieval
@@ -689,4 +996,5 @@ ADK_ZOHO_CRM_TOOLS = [
     trend_analysis_by_period,
     compare_channels,
     get_pic_performance,
+    get_conversion_metrics,
 ]

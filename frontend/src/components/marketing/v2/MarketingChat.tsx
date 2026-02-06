@@ -158,6 +158,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       error,
       conversationId,
       sendMessage,
+      cancelStream,
       clearMessages,
     } = useMarketingChat({
       initialConversationId,
@@ -282,10 +283,18 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
               <MessageList messages={messages} isStreaming={isStreaming} />
             )}
 
-            {/* Error display */}
+            {/* Error display (U-5: user-friendly messages with retry) */}
             {error && (
-              <div className="mx-4 mb-2 p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20 text-sm">
-                {error}
+              <div className="mx-4 mb-2 p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20 text-sm flex items-center justify-between gap-2">
+                <span>{error.includes("fetch") || error.includes("network") ? "ネットワークエラーが発生しました" : error.length > 100 ? "エラーが発生しました。もう一度お試しください。" : error}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { /* clear error by sending empty */ }}
+                  className="shrink-0 text-xs text-destructive hover:text-destructive"
+                >
+                  閉じる
+                </Button>
               </div>
             )}
           </div>
@@ -313,6 +322,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
           {!isReadOnly && (
             <Composer
               onSend={handleSend}
+              onStop={cancelStream}
               isStreaming={isStreaming}
               disabled={isStreaming}
               placeholder="マーケティング・採用・候補者支援について質問..."

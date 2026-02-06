@@ -116,6 +116,22 @@
   - 新機能を追加する際、別エージェントを作るか既存エージェントに統合するかはユーザーに確認すべき
   - 同じドメイン（企業検索）の機能は同じエージェントにまとめるのが原則
 
+- **エージェント指示文の大幅改善（2026-02-06）**
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - ORCHESTRATOR_INSTRUCTIONS強化
+    - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - CA_SUPPORT_INSTRUCTIONS強化
+    - `backend/app/infrastructure/adk/agents/candidate_insight_agent.py` - _build_instructions強化
+  - 主要改善:
+    - **CASupportAgent vs 専門エージェントの境界明確化**: 特定候補者→CA / 集団分析→専門
+    - **キーワードマトリクス拡充**: CVR, ROI, Indeed等のギャップを埋める
+    - **思考プロセス指示**: 質問分解→ツール選択→結果検証→統合出力
+    - **エラーハンドリング指示**: success:false時の再試行・フォールバック手順
+    - **チャート描画ガイダンス**: 時系列→line, 比較→bar, 構成比→pie等
+    - **セマンティック検索優先**: find_companies_for_candidate優先、厳密検索はフォールバック
+    - **CandidateInsightAgent詳細化**: 全4ツールのパラメータ・戻り値を明記、ワークフロー例追加
+    - **出力量管理**: 大量データは上位10件+サマリー、期間未指定→直近3ヶ月
+  - 目的: AIエージェントの自律性向上、適切なエージェント選択、エラー耐性強化
+
 - **サブエージェントUX改善（バグ修正+機能強化）**
   - **致命バグ修正**: `SubAgentStreamingPlugin.SUB_AGENT_NAMES`に`CompanyDatabaseAgent`と`CASupportAgent`が未登録
     - この2エージェントの全ツール実行イベントがフロントエンドに届いていなかった
@@ -136,6 +152,51 @@
     - 新しいエージェントを追加したら、Plugin/UI設定も必ず同時に更新すべき
     - MCP初期化は<1msであり、想定値(1.2-1.7s)は完全に誤りだった。**実測値を確認せずに推測で実装するな**
     - 表面的なUI変更（ラベルテキスト変更）ではなく、データフロー全体を追跡して根本原因を修正すべき
+
+- **新ツール3個追加（compare_companies, get_candidate_summary, get_conversion_metrics）**
+  - `company_db_tools.py` に `compare_companies` 追加: 2-5社の並列比較表生成（年収・要件・訴求ポイント）
+  - `candidate_insight_tools.py` に `get_candidate_summary` 追加: Zoho+構造化データ+リスク評価をワンショット取得
+  - `zoho_crm_tools.py` に `get_conversion_metrics` 追加: 全チャネル横断KPI一括取得（面談率・内定率・入社率・ランキング）
+  - 各ツールリスト（ADK_COMPANY_DB_TOOLS, ADK_CANDIDATE_INSIGHT_TOOLS, ADK_ZOHO_CRM_TOOLS）に登録済み
+  - エージェント側は既存のツールリストを参照しているため変更不要
+
+- **ADKインフラ改善（I-5, I-6, I-7, I-9）**
+  - **I-5 エラーメッセージサニタイズ**: `agent_service.py`の全exceptブロックで`sanitize_error()`を適用
+    - 内部パス・APIキー・スタックトレース・接続文字列等をユーザーに露出しない
+    - loggerにはフルエラーを出力、ユーザーには汎用メッセージを返却
+  - **I-7 `_normalize_agent_name`重複削除**: `backend/app/infrastructure/adk/utils.py`に共通化
+    - `agent_service.py`と`sub_agent_streaming_plugin.py`の両方からインポート
+    - plugin版（CA頭字語対応あり）を採用
+  - **I-9 asyncio.Queueサイズ制限**: `asyncio.Queue()` → `asyncio.Queue(maxsize=1000)`
+    - メモリリーク防止、コンシューマが遅い場合のメモリ無制限増加を防ぐ
+  - **I-6 モデルエラー検知**: `after_model_callback`にLLMエラー検知を追加
+    - null応答、safety filterブロック、error_message属性を検知
+    - `model_error`イベントとしてフロントエンドに通知
+  - 新規ファイル: `backend/app/infrastructure/adk/utils.py`
+  - 変更ファイル: `backend/app/infrastructure/adk/agent_service.py`, `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py`
+
+- **ADK V2 改善計画 全7フェーズ実施完了（docs/adk-v2-improvement-plan.md）**
+  - 25ファイル変更、+1179行/-185行
+  - **Phase 1 (Critical)**: T-1(バッチ取得メソッド), T-2(Sheetsシングルトン), T-3(Embedding task_type), U-1(CSS), U-2(Stopボタン), U-3(normalize統一)
+  - **Phase 2 (ツール精度)**: T-4(docstring日本語化), T-5(Zoho整形), T-6/T-7(ツール差別化), T-8(chart dict化), T-9(full_data削除), T-10(status統一), T-15~T-22(全ツールReturns+docstring改善), O-12(全エージェントgenerate_content_config)
+  - **Phase 3 (指示文)**: O-1~O-11(CASupportAgent境界, キーワードマトリクス, 思考プロセス, エラー対応, チャート描画, セマンティック検索優先), O-13~O-18(出力量管理, MCP注意)
+  - **Phase 4 (パフォーマンス)**: T-11(ZohoClientシングルトン), T-12(Embedding LRUキャッシュ), T-13(Zoho TTLキャッシュ), T-14(リトライデコレータ)
+  - **Phase 5 (UX)**: U-4(コードコピーボタン), U-5(エラー表示改善), U-8(React.memo), U-12(useMemo), U-13(モバイルヒント), U-14(サイドバーアクティブ状態修正), T-21(類似度閾値パラメータ化)
+  - **Phase 6 (新ツール)**: N-1(compare_companies), N-2(get_candidate_summary), N-5(get_conversion_metrics)
+  - **Phase 7 (インフラ)**: I-5(エラーサニタイズ), I-6(モデルエラー検知), I-7(normalize共通化→utils.py), I-9(Queue制限)
+  - 新規ファイル: `backend/app/infrastructure/adk/utils.py`
+
+- **ADK V2 大規模調査実施（5並列Opus調査 + コード実査）**
+  - 調査範囲: 全30+ツール、全9エージェント指示、フロントエンドUX、ADKインフラ、データレイヤー
+  - **改善計画**: `docs/adk-v2-improvement-plan.md` に全項目をまとめ（7フェーズ、70+項目）
+  - 主要発見（実査確認済み）:
+    - `get_job_seekers_batch` → `get_app_hc_records_batch()` メソッド未定義（AttributeError）
+    - `_get_sheets_service()` → 毎回新インスタンス → TTLキャッシュ無効
+    - Embedding `task_type` 未指定 → セマンティック検索精度低下
+    - CandidateInsight 4ツールのdocstringが英語（他は日本語）
+    - Plugin `_normalize_agent_name` がCRM/SEO/CA頭字語未対応
+    - ThinkingIndicator CSS未定義、Stopボタン未接続
+  - オーケストレーターツール名修正: `call_xxx_agent` → 実際のAgentTool名（`XxxAgent`）に統一
 
 ---
 

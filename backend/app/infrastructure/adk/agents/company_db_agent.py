@@ -234,4 +234,7 @@ search_companies(location="東京都", max_age=35, min_salary=500)
                     thinking_level="high",
                 ),
             ),
+            generate_content_config=types.GenerateContentConfig(
+                max_output_tokens=self._settings.adk_max_output_tokens,
+            ),
         )

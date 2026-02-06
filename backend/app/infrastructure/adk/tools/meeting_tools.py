@@ -25,6 +25,8 @@ def search_meetings(
 ) -> Dict[str, Any]:
     """議事録を検索。候補者名・タイトル・日付で絞り込み。
 
+    candidate_nameとtitleは独立検索（AND条件ではない）。候補者名での検索を優先。
+
     Args:
         title_keyword: タイトルに含むキーワード（部分一致）
         candidate_name: 候補者名（タイトルまたはZoho連携から検索）
@@ -32,6 +34,13 @@ def search_meetings(
         date_from: 開始日(YYYY-MM-DD)
         date_to: 終了日(YYYY-MM-DD)
         limit: 件数(max50)
+
+    Returns:
+        Dict[str, Any]: 検索結果。
+            success: True/False
+            total: ヒット件数
+            meetings: 議事録リスト
+            filters: 適用したフィルタ
     """
     logger.info(f"[ADK Meeting] search_meetings: title={title_keyword}, candidate={candidate_name}")
 
@@ -110,8 +119,17 @@ def search_meetings(
 def get_meeting_transcript(meeting_id: str) -> Dict[str, Any]:
     """議事録の本文（トランスクリプト）を取得。
 
+    10000文字を超える場合は切り詰めて返す。
+
     Args:
         meeting_id: 議事録ID（meeting_documentsのid）
+
+    Returns:
+        Dict[str, Any]: 議事録本文。
+            success: True/False
+            meeting_id: 議事録ID
+            title: タイトル
+            transcript: 本文（10000文字まで）
     """
     logger.info(f"[ADK Meeting] get_meeting_transcript: {meeting_id}")
 
@@ -156,6 +174,14 @@ def get_structured_data_for_candidate(
     Args:
         zoho_record_id: ZohoレコードID（優先）
         candidate_name: 候補者名（部分一致）
+
+    Returns:
+        Dict[str, Any]: 構造化データ。
+            success: True/False
+            meeting_id: 議事録ID
+            candidate_name: 候補者名
+            extracted_data: 抽出済みキーフィールド
+            full_data: 全抽出データ
     """
     logger.info(f"[ADK Meeting] get_structured_data: record_id={zoho_record_id}, name={candidate_name}")
 
@@ -224,8 +250,17 @@ def get_structured_data_for_candidate(
 def get_candidate_full_profile(zoho_record_id: str) -> Dict[str, Any]:
     """候補者の完全プロファイル取得（Zoho + 議事録構造化データ統合）。
 
+    generate_candidate_briefingとの違い：こちらはZoho+議事録の全情報統合プロファイル。
+    面談準備には generate_candidate_briefing を推奨。
+
     Args:
         zoho_record_id: ZohoレコードID
+
+    Returns:
+        Dict[str, Any]: 完全プロファイル。
+            success: True/False
+            record_id: ZohoレコードID
+            profile: 統合プロファイル（basic/from_zoho/from_meeting/meeting_info）
     """
     logger.info(f"[ADK Meeting] get_candidate_full_profile: {zoho_record_id}")
 
@@ -268,7 +303,7 @@ def get_candidate_full_profile(zoho_record_id: str) -> Dict[str, Any]:
                 "name": zoho_record.get("Name"),
                 "record_id": zoho_record_id,
                 "channel": zoho_record.get("field14"),
-                "status": zoho_record.get("field19"),
+                "status": zoho_record.get("customer_status"),
                 "pic": pic_name,
                 "registration_date": zoho_record.get("field18"),
             },

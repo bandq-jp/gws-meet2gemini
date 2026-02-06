@@ -91,7 +91,7 @@ export function Composer({
             </button>
           )}
         </div>
-        <p className="hidden sm:block text-center text-[11px] text-[#9ca3af] mt-2">
+        <p className="text-center text-[10px] sm:text-[11px] text-[#9ca3af] mt-2">
           Shift+Enter で改行 / Enter で送信
         </p>
       </div>

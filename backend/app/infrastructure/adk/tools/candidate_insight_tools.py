@@ -16,6 +16,17 @@ from app.infrastructure.supabase.client import get_supabase
 
 logger = logging.getLogger(__name__)
 
+# ZohoClient singleton
+_zoho_client_instance = None
+
+
+def _get_zoho_client():
+    """ZohoClient シングルトン取得。"""
+    global _zoho_client_instance
+    if _zoho_client_instance is None:
+        _zoho_client_instance = ZohoClient()
+    return _zoho_client_instance
+
 
 # --- Helper functions ---
 
@@ -78,21 +89,23 @@ def analyze_competitor_risk(
     limit: int = 50,
 ) -> Dict[str, Any]:
     """
-    Analyze competitor risk - identify high-risk candidates with other agent offers.
+    競合エージェントリスク分析。他社オファー・選考中企業を持つ高リスク候補者を特定。
 
     Args:
-        channel: Filter by channel (paid_meta, sco_bizreach, etc.)
-        date_from: Start date (YYYY-MM-DD)
-        date_to: End date (YYYY-MM-DD)
-        limit: Max candidates to analyze
+        channel: チャネル指定 (paid_meta, sco_bizreach等)
+        date_from: 開始日 (YYYY-MM-DD)
+        date_to: 終了日 (YYYY-MM-DD)
+        limit: 分析対象最大件数
 
     Returns:
-        Analysis with high_risk_candidates, competitor_agents, recommendations
+        Dict[str, Any]: 分析結果。high_risk_candidates（高リスク候補者リスト）、
+                       competitor_agents（競合エージェント出現頻度）、
+                       popular_companies（選考中企業出現頻度）を含む
     """
     logger.info(f"[ADK] analyze_competitor_risk: channel={channel}")
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         records = zoho.search_by_criteria(
             channel=channel,
             date_from=date_from,
@@ -173,22 +186,23 @@ def assess_candidate_urgency(
     limit: int = 50,
 ) -> Dict[str, Any]:
     """
-    Assess candidate urgency based on timing, job status, and activity.
+    候補者の緊急度を評価。転職希望時期・離職状況・他社オファーから優先順位を算出。
 
     Args:
-        channel: Filter by channel
-        status: Filter by status
-        date_from: Start date (YYYY-MM-DD)
-        date_to: End date (YYYY-MM-DD)
-        limit: Max candidates to analyze
+        channel: チャネル指定
+        status: ステータス指定
+        date_from: 開始日 (YYYY-MM-DD)
+        date_to: 終了日 (YYYY-MM-DD)
+        limit: 分析対象最大件数
 
     Returns:
-        Urgency assessment with priority queue
+        Dict[str, Any]: 緊急度評価結果。urgency_distribution（緊急度分布）、
+                       priority_queue（スコア順優先候補者リスト）を含む
     """
     logger.info(f"[ADK] assess_candidate_urgency: channel={channel}")
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         records = zoho.search_by_criteria(
             channel=channel,
             status=status,
@@ -272,14 +286,15 @@ def analyze_transfer_patterns(
     group_by: str = "reason",
 ) -> Dict[str, Any]:
     """
-    Analyze transfer patterns grouped by reason, timing, or vision.
+    転職パターン分析。転職理由・希望時期・キャリアビジョンの傾向を可視化。
 
     Args:
-        channel: Filter by channel
-        group_by: Group by "reason", "timing", or "vision"
+        channel: チャネル指定
+        group_by: 集計軸 ("reason": 転職理由, "timing": 希望時期, "vision": キャリアビジョン)
 
     Returns:
-        Pattern distribution and insights
+        Dict[str, Any]: パターン分析結果。group_by（集計軸）、total_analyzed（分析件数）、
+                       distribution（パターン分布）を含む
     """
     logger.info(f"[ADK] analyze_transfer_patterns: group_by={group_by}")
 
@@ -287,7 +302,7 @@ def analyze_transfer_patterns(
         all_structured = _get_all_structured_data_with_sync(limit=500)
 
         if channel:
-            zoho = ZohoClient()
+            zoho = _get_zoho_client()
             zoho_records = zoho.search_by_criteria(channel=channel, limit=200)
             valid_record_ids = {r.get("record_id") for r in zoho_records}
             all_structured = [
@@ -328,13 +343,14 @@ def analyze_transfer_patterns(
 
 def generate_candidate_briefing(record_id: str) -> Dict[str, Any]:
     """
-    Generate candidate briefing for interview preparation.
+    面談ブリーフィング生成。Zoho基本情報+議事録構造化データを統合した準備資料。get_candidate_full_profileとの違い：こちらはリスク分析付きの面談準備に特化。
 
     Args:
-        record_id: Zoho record ID
+        record_id: ZohoレコードID
 
     Returns:
-        Comprehensive briefing with Zoho + structured data
+        Dict[str, Any]: 面談準備資料。basic_info（基本情報）、transfer_profile（転職プロフィール）、
+                       conditions（条件）、competition_status（競合状況）を含む
     """
     logger.info(f"[ADK] generate_candidate_briefing: record_id={record_id}")
 
@@ -342,7 +358,7 @@ def generate_candidate_briefing(record_id: str) -> Dict[str, Any]:
         return {"success": False, "error": "record_idを指定してください"}
 
     try:
-        zoho = ZohoClient()
+        zoho = _get_zoho_client()
         zoho_record = zoho.get_app_hc_record(record_id)
         if not zoho_record:
             return {"success": False, "error": f"レコードが見つかりません"}
@@ -383,10 +399,161 @@ def generate_candidate_briefing(record_id: str) -> Dict[str, Any]:
         return {"success": False, "error": str(e)}
 
 
+def get_candidate_summary(
+    record_id: str,
+) -> Dict[str, Any]:
+    """候補者サマリーをワンショット取得。Zoho基本情報+構造化データ+リスク評価を統合。
+
+    generate_candidate_briefingとget_candidate_full_profileの簡易版。
+    1回の呼び出しで候補者の全体像を高速取得。
+
+    Args:
+        record_id: ZohoレコードID
+
+    Returns:
+        Dict[str, Any]: 統合サマリー。
+            success: True/False
+            basic_info: 基本情報（名前、年齢、チャネル、ステータス）
+            transfer_profile: 転職プロファイル（理由、希望条件）
+            risk_level: リスクレベル（high/medium/low）
+            recommended_actions: 推奨アクション
+    """
+    logger.info(f"[ADK] get_candidate_summary: record_id={record_id}")
+
+    if not record_id:
+        return {"success": False, "error": "record_idを指定してください"}
+
+    try:
+        # 1. Zoho基本情報取得
+        zoho = _get_zoho_client()
+        zoho_record = zoho.get_app_hc_record(record_id)
+        if not zoho_record:
+            return {"success": False, "error": f"レコードが見つかりません: {record_id}"}
+
+        owner = zoho_record.get("Owner")
+        pic_name = owner.get("name") if isinstance(owner, dict) else str(owner) if owner else "未割当"
+
+        basic_info = {
+            "name": zoho_record.get("Name", "不明"),
+            "age": zoho_record.get("field15"),
+            "gender": zoho_record.get("field16"),
+            "channel": zoho_record.get("field14"),
+            "status": zoho_record.get("customer_status"),
+            "pic": pic_name,
+            "registered_at": zoho_record.get("field18"),
+            "current_salary": zoho_record.get("field17"),
+            "desired_salary": zoho_record.get("field20"),
+        }
+
+        # 2. 構造化データ取得
+        structured = _get_structured_data_by_zoho_record(record_id)
+        data = structured.get("data", {}) if structured else {}
+
+        transfer_profile = {
+            "activity_status": _extract_field(data, "transfer_activity_status"),
+            "desired_timing": _extract_field(data, "desired_timing"),
+            "transfer_reasons": _extract_field(data, "transfer_reasons"),
+            "career_vision": _extract_field(data, "career_vision"),
+            "current_job_status": _extract_field(data, "current_job_status"),
+            "desired_first_year_salary": _extract_field(data, "desired_first_year_salary"),
+            "desired_industries": _extract_field(data, "desired_industries"),
+            "desired_positions": _extract_field(data, "desired_positions"),
+        }
+
+        # 3. リスク評価
+        risk_score = 0
+        risk_factors = []
+
+        # 他社オファーの有無
+        other_offer = _extract_field(data, "other_offer_salary")
+        if other_offer:
+            risk_score += 40
+            risk_factors.append(f"他社オファーあり: {other_offer}")
+
+        # 競合エージェント
+        current_agents = _extract_field(data, "current_agents")
+        if current_agents:
+            agents_str = str(current_agents)
+            agent_count = len([a.strip() for a in agents_str.replace("、", ",").split(",") if a.strip()])
+            if agent_count >= 3:
+                risk_score += 30
+                risk_factors.append(f"競合エージェント{agent_count}社")
+            elif agent_count >= 1:
+                risk_score += 15
+                risk_factors.append(f"競合エージェント{agent_count}社")
+
+        # 転職活動状況
+        activity_status = _extract_field(data, "transfer_activity_status")
+        if activity_status in ["最終面接待ち ~ 内定済み"]:
+            risk_score += 30
+            risk_factors.append(f"活動状況: {activity_status}")
+        elif activity_status in ["企業打診済み ~ 一次選考フェーズ"]:
+            risk_score += 15
+            risk_factors.append(f"活動状況: {activity_status}")
+
+        # 希望時期の緊急度
+        timing = _extract_field(data, "desired_timing")
+        if timing == "すぐにでも":
+            risk_score += 10
+            risk_factors.append("転職希望: すぐにでも")
+
+        # リスクレベル判定
+        if risk_score >= 50:
+            risk_level = "high"
+        elif risk_score >= 20:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+
+        # 4. 推奨アクション
+        recommended_actions = []
+
+        if risk_level == "high":
+            recommended_actions.append("早急に面談・企業提案を実施し、他社に先行する")
+            if other_offer:
+                recommended_actions.append("他社オファー条件をヒアリングし、上回る提案を準備")
+        elif risk_level == "medium":
+            recommended_actions.append("定期的なフォローアップで関係性を維持")
+            if current_agents:
+                recommended_actions.append("差別化ポイントを明確にした企業提案を実施")
+        else:
+            recommended_actions.append("ヒアリングを深め、転職軸を明確化")
+
+        job_status = _extract_field(data, "current_job_status")
+        if job_status == "離職中":
+            recommended_actions.append("離職中のため、早期入社可能な求人を優先提案")
+
+        if timing == "すぐにでも":
+            recommended_actions.append("即時対応可能な求人を優先的にマッチング")
+
+        return {
+            "success": True,
+            "record_id": record_id,
+            "basic_info": basic_info,
+            "transfer_profile": transfer_profile,
+            "risk_level": risk_level,
+            "risk_score": risk_score,
+            "risk_factors": risk_factors,
+            "recommended_actions": recommended_actions,
+            "competition_status": {
+                "current_agents": current_agents,
+                "other_offer_salary": other_offer,
+                "companies_in_selection": _extract_field(data, "companies_in_selection"),
+            },
+        }
+
+    except ZohoAuthError:
+        return {"success": False, "error": "Zoho認証エラー"}
+    except Exception as e:
+        logger.error(f"[ADK] get_candidate_summary error: {e}")
+        return {"success": False, "error": str(e)}
+
+
 # List of ADK-compatible tools
 ADK_CANDIDATE_INSIGHT_TOOLS = [
     analyze_competitor_risk,
     assess_candidate_urgency,
     analyze_transfer_patterns,
     generate_candidate_briefing,
+    get_candidate_summary,
 ]

@@ -9,18 +9,17 @@ Instead, charts are returned as structured data that the orchestrator can proces
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
 
-def render_chart(chart_spec: str) -> Dict[str, Any]:
+def render_chart(chart_spec: dict) -> Dict[str, Any]:
     """チャートを描画する。数値データは必ずこのツールで可視化せよ。JSONをテキスト出力するな。
 
     Args:
-        chart_spec: チャート仕様のJSON文字列。例:
+        chart_spec: チャート仕様の辞書。例:
             {
                 "type": "line|bar|area|pie|donut|scatter|radar|funnel|table",
                 "title": "チャートタイトル",
@@ -49,28 +48,20 @@ def render_chart(chart_spec: str) -> Dict[str, Any]:
     Returns:
         チャート描画結果（JSON形式で返し、フロントエンドでレンダリング）
     """
-    try:
-        spec = json.loads(chart_spec)
-    except json.JSONDecodeError:
-        return {
-            "success": False,
-            "error": "チャート仕様のJSON解析に失敗しました",
-        }
-
-    if not isinstance(spec, dict) or "type" not in spec or "data" not in spec:
+    if not isinstance(chart_spec, dict) or "type" not in chart_spec or "data" not in chart_spec:
         return {
             "success": False,
             "error": "チャート仕様に type と data が必要です",
         }
 
-    logger.info(f"[ADK Chart] Rendering chart: type={spec.get('type')}, title={spec.get('title')}")
+    logger.info(f"[ADK Chart] Rendering chart: type={chart_spec.get('type')}, title={chart_spec.get('title')}")
 
     # Return chart spec with success marker
     # The agent_service will detect this and emit a chart event
     return {
         "success": True,
-        "_chart_spec": spec,  # Special marker for chart rendering
-        "message": f"チャート「{spec.get('title', '')}」を描画しました。",
+        "_chart_spec": chart_spec,  # Special marker for chart rendering
+        "message": f"チャート「{chart_spec.get('title', '')}」を描画しました。",
     }
 
 

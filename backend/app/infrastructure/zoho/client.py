@@ -381,6 +381,46 @@ class ZohoClient:
         items = data.get("data") or []
         return items[0] if items else {}
 
+    def get_app_hc_records_batch(self, record_ids: List[str]) -> List[Dict[str, Any]]:
+        """Fetch multiple APP-hc records by Zoho record IDs using COQL IN clause.
+
+        Args:
+            record_ids: List of Zoho record IDs (max 50)
+
+        Returns:
+            List of full record dicts
+        """
+        if not record_ids:
+            return []
+
+        module_api = self.settings.zoho_app_hc_module
+
+        # Build COQL IN clause
+        ids_str = ",".join(f"'{rid}'" for rid in record_ids[:50])
+        query = f"SELECT id, Name, {self.CHANNEL_FIELD_API}, {self.STATUS_FIELD_API}, {self.DATE_FIELD_API}, Modified_Time, Owner, field15, field16, field17, field20, field21, field22, field23, field24, field66, field67, field85 FROM {module_api} WHERE id IN ({ids_str}) LIMIT {len(record_ids)}"
+
+        def _coql_batch() -> List[Dict[str, Any]]:
+            result = self._coql_query(query)
+            return result.get("data", []) or []
+
+        def _legacy_batch() -> List[Dict[str, Any]]:
+            """Fallback: fetch one-by-one."""
+            records = []
+            for rid in record_ids[:50]:
+                try:
+                    record = self.get_app_hc_record(rid)
+                    if record:
+                        records.append(record)
+                except Exception as e:
+                    logger.warning(f"[zoho] batch fallback: failed to get {rid}: {e}")
+            return records
+
+        try:
+            return self._with_coql_fallback(_coql_batch, _legacy_batch)
+        except Exception as e:
+            logger.warning(f"[zoho] get_app_hc_records_batch failed: {e}, using fallback")
+            return _legacy_batch()
+
     def search_app_hc_by_exact_name(self, name: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Search APP-hc by candidate name with strict equality (equals).
 

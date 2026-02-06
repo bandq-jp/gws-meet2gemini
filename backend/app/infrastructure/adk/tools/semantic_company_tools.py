@@ -8,6 +8,7 @@ Uses the same Gemini embedding model as agent memory for consistency.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from google import genai
@@ -22,22 +23,31 @@ EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIMENSIONS = 768
 
 
-def _get_query_embedding(query: str) -> List[float]:
-    """
-    Generate embedding for a search query.
-
-    Uses Matryoshka truncation to match agent memory dimensions (768).
-    """
+@lru_cache(maxsize=256)
+def _get_cached_embedding(query: str) -> tuple:
+    """Embedding結果をキャッシュ（LRU、最大256件）。tupleで返すのはlru_cacheがhashableな戻り値を必要とするため。"""
     settings = get_settings()
     client = genai.Client(api_key=settings.gemini_api_key)
 
     result = client.models.embed_content(
         model=f"models/{EMBEDDING_MODEL}",
         contents=query,
-        config={"output_dimensionality": EMBEDDING_DIMENSIONS},
+        config={
+            "output_dimensionality": EMBEDDING_DIMENSIONS,
+            "task_type": "RETRIEVAL_QUERY",
+        },
     )
 
-    return list(result.embeddings[0].values)
+    return tuple(result.embeddings[0].values)
+
+
+def _get_query_embedding(query: str) -> List[float]:
+    """
+    Generate embedding for a search query.
+
+    Uses Matryoshka truncation to match agent memory dimensions (768).
+    """
+    return list(_get_cached_embedding(query))
 
 
 def semantic_search_companies(
@@ -47,6 +57,7 @@ def semantic_search_companies(
     min_salary: Optional[int] = None,
     locations: Optional[List[str]] = None,
     limit: int = 10,
+    similarity_threshold: float = 0.3,
 ) -> Dict[str, Any]:
     """
     セマンティック検索で企業を探す。自然言語クエリで関連企業を検索。
@@ -64,12 +75,14 @@ def semantic_search_companies(
         min_salary: 希望年収（この年収以上を提示可能な企業のみ）
         locations: 希望勤務地リスト（いずれかに該当する企業）
         limit: 取得件数（max 20）
+        similarity_threshold: 類似度閾値（0.0-1.0、デフォルト0.3）。値を下げると結果が増え、上げると精度が上がる。
 
     Returns:
-        success: True/False
-        query: 検索クエリ
-        total_found: マッチ件数
-        results: 検索結果リスト（類似度スコア付き）
+        Dict[str, Any]: セマンティック検索結果。
+            success: True/False
+            query: 検索クエリ
+            total_found: マッチ件数
+            results: 検索結果リスト（類似度スコア付き）
     """
     logger.info(f"[ADK Semantic] semantic_search_companies: query={query[:50]}...")
 
@@ -84,7 +97,7 @@ def semantic_search_companies(
         params: Dict[str, Any] = {
             "query_embedding": query_embedding,
             "match_count": min(limit, 20),
-            "similarity_threshold": 0.3,
+            "similarity_threshold": max(0.0, min(1.0, similarity_threshold)),
         }
 
         if chunk_types:
@@ -179,6 +192,9 @@ def find_companies_for_candidate(
     """
     候補者の転職理由から最適な企業を検索（セマンティックマッチング）。
 
+    match_candidate_to_companiesとの違い：こちらは転職理由からベクトル類似度でマッチング。
+    厳密な条件チェックはmatch_candidate_to_companiesを使用。
+
     Args:
         transfer_reasons: 転職理由・希望（自然言語）。
             例: "給与を上げたい、リモートワークしたい、成長できる環境"
@@ -188,10 +204,11 @@ def find_companies_for_candidate(
         limit: 取得件数
 
     Returns:
-        success: True/False
-        candidate_profile: 使用した候補者条件
-        total_found: マッチ件数
-        recommended_companies: 推薦企業リスト（訴求ポイント付き）
+        Dict[str, Any]: セマンティック検索結果。
+            success: True/False
+            candidate_profile: 使用した候補者条件
+            total_found: マッチ件数
+            recommended_companies: 推薦企業リスト（訴求ポイント付き）
     """
     logger.info(f"[ADK Semantic] find_companies_for_candidate: reasons={transfer_reasons[:50]}...")
 
