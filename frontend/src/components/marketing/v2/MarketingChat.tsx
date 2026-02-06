@@ -13,6 +13,7 @@ import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { SuggestionCarousel } from "./SuggestionCarousel";
 import type { Suggestion } from "./SuggestionCarousel";
+import { AgentShowcase } from "./AgentShowcase";
 import {
   Share2,
   Download,
@@ -244,6 +245,8 @@ const ALL_SUGGESTIONS: Suggestion[] = [
 ];
 
 function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
+  const [showShowcase, setShowShowcase] = useState(false);
+
   return (
     <div className="flex flex-col items-center justify-center h-full px-4 sm:px-8">
       {/* Brand mark */}
@@ -262,6 +265,15 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
         <p className="text-[12.5px] text-muted-foreground/80 max-w-md leading-relaxed">
           11人のエージェントと150以上のツールを搭載した、GA4・GSC・Zoho CRM・企業DB・Meta広告・Ahrefs・Gmail・カレンダー・Google検索・コード実行を横断できるマルチエージェントシステム。
         </p>
+        <button
+          onClick={() => setShowShowcase(true)}
+          className="mt-2.5 inline-flex items-center gap-1 text-[11.5px] text-[#1e8aa0]/70 hover:text-[#1e8aa0] transition-colors cursor-pointer group"
+        >
+          <span className="underline underline-offset-2 decoration-[#1e8aa0]/25 group-hover:decoration-[#1e8aa0]/60">
+            エージェント一覧を見る
+          </span>
+          <span className="text-[10px] opacity-60 group-hover:opacity-100 transition-opacity">&rarr;</span>
+        </button>
       </div>
 
       {/* Suggestion carousel */}
@@ -270,6 +282,16 @@ function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
         onSend={onSend}
         perPage={6}
         interval={6000}
+      />
+
+      {/* Agent Showcase Dialog */}
+      <AgentShowcase
+        open={showShowcase}
+        onOpenChange={setShowShowcase}
+        onTryQuery={(query) => {
+          setShowShowcase(false);
+          onSend(query);
+        }}
       />
     </div>
   );
