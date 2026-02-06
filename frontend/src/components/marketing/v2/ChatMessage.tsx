@@ -30,7 +30,7 @@ import {
   ExternalLink,
   Code2,
   CheckCircle2,
-  Sparkles,
+  Target,
   Copy,
   Check,
 } from "lucide-react";
@@ -254,7 +254,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   get_company_detail: Database,
   search_companies: Search,
   get_company_definitions: Database,
-  get_appeal_points: Sparkles,
+  get_appeal_points: Target,
   match_companies_for_candidate: Users,
   get_pic_recommendations: Users,
   compare_companies: BarChart3,

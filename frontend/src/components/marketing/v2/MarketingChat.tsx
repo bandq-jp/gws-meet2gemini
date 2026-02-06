@@ -22,9 +22,10 @@ import {
   Users,
   History,
   MoreHorizontal,
-  Sparkles,
   Building2,
   AlertTriangle,
+  Layers,
+  ArrowRight,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -77,53 +78,77 @@ export interface MarketingChatRef {
 const SUGGESTIONS = [
   {
     icon: TrendingUp,
+    tag: "GA4",
     text: "今週のGA4流入から求職者の応募・入社までのファネル全体を分析して、改善ポイントを教えて",
   },
   {
     icon: Building2,
+    tag: "企業DB",
     text: "35歳、年収希望600万、成長志向の候補者に合う企業TOP5と、それぞれの訴求ポイントを提案して",
   },
   {
     icon: Search,
+    tag: "SEO",
     text: "hitocareer.comと競合3社のSEO状況（DR、被リンク、オーガニックKW）を比較分析して",
   },
   {
     icon: AlertTriangle,
+    tag: "CA支援",
     text: "今週面談予定の候補者で、競合エージェントリスクが高い人を洗い出して面談準備資料を作って",
   },
   {
     icon: BarChart3,
+    tag: "CRM",
     text: "過去3ヶ月のチャネル別（Indeed, doda, 自然流入）の獲得単価と入社率を比較して",
   },
   {
     icon: Users,
+    tag: "統合分析",
     text: "今月の流入→応募→面談→内定→入社の全体ファネルと、離脱が多いステップの改善案を提示して",
   },
 ];
 
 function EmptyState({ onSend }: { onSend: (msg: string) => void }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-center px-4 sm:px-8">
-      <div className="w-12 h-12 bg-primary/5 border border-primary/10 rounded-2xl flex items-center justify-center mb-5">
-        <Sparkles className="w-6 h-6 text-primary/70" />
+    <div className="flex flex-col items-center justify-center h-full px-4 sm:px-8">
+      {/* Brand mark */}
+      <div className="relative mb-6">
+        <div className="w-10 h-10 rounded-xl bg-[#1e8aa0]/[0.07] flex items-center justify-center">
+          <Layers className="w-5 h-5 text-[#1e8aa0]" strokeWidth={1.5} />
+        </div>
+        <div className="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-[#1e8aa0]/20 border-2 border-background" />
       </div>
-      <h2 className="text-lg font-semibold text-foreground mb-1.5 tracking-tight">
-        b&q エージェント
-      </h2>
-      <p className="text-sm text-muted-foreground mb-8 max-w-md leading-relaxed">
-        マーケティング・採用・候補者支援をAIで統合分析。GA4、SEO、CRM、企業DB、広告データを横断して最適解を導きます
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-2xl w-full">
+
+      {/* Title cluster */}
+      <div className="text-center mb-8">
+        <h2 className="text-[15px] font-semibold text-foreground tracking-tight mb-1">
+          b&q エージェント
+        </h2>
+        <p className="text-[13px] text-muted-foreground/80 max-w-sm leading-relaxed">
+          マーケティング・採用・候補者支援を横断分析
+        </p>
+      </div>
+
+      {/* Suggestion cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-2xl w-full">
         {SUGGESTIONS.map((s, i) => {
           const Icon = s.icon;
           return (
             <button
               key={i}
               onClick={() => onSend(s.text)}
-              className="group text-left px-4 py-3.5 bg-background border border-border rounded-xl text-sm text-foreground hover:border-primary/30 hover:bg-accent/50 transition-all duration-200 cursor-pointer leading-relaxed flex items-start gap-3"
+              className="group text-left pl-3.5 pr-3 py-3 bg-background border border-[#e8eaed] rounded-lg text-[13px] text-[#374151] hover:border-[#1e8aa0]/25 hover:bg-[#f8fbfc] transition-all duration-150 cursor-pointer leading-relaxed flex items-start gap-3"
             >
-              <Icon className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors mt-0.5 shrink-0" />
-              <span>{s.text}</span>
+              <div className="shrink-0 mt-0.5">
+                <Icon className="w-3.5 h-3.5 text-[#9ca3af] group-hover:text-[#1e8aa0] transition-colors" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className="text-[10px] font-medium tracking-wide text-[#1e8aa0]/60 uppercase">{s.tag}</span>
+                </div>
+                <span className="line-clamp-2">{s.text}</span>
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 text-[#d1d5db] group-hover:text-[#1e8aa0]/50 transition-colors shrink-0 mt-0.5 opacity-0 group-hover:opacity-100" />
             </button>
           );
         })}
@@ -198,7 +223,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
           <header className="shrink-0 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
             {/* Left side - Title */}
             <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-primary/70" />
+              <Layers className="w-4 h-4 text-[#1e8aa0]" strokeWidth={1.5} />
               <span className="text-sm font-medium text-foreground">b&q エージェント</span>
             </div>
 
