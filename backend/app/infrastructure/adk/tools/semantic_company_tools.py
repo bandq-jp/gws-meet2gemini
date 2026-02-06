@@ -12,6 +12,7 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from google import genai
+from google.adk.tools.tool_context import ToolContext
 
 from app.infrastructure.supabase.client import get_supabase
 from app.infrastructure.config.settings import get_settings
@@ -58,6 +59,7 @@ def semantic_search_companies(
     locations: Optional[List[str]] = None,
     limit: int = 10,
     similarity_threshold: float = 0.3,
+    tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
     """
     セマンティック検索で企業を探す。自然言語クエリで関連企業を検索。
@@ -164,6 +166,21 @@ def semantic_search_companies(
                 "remote": r["metadata"].get("remote"),
             })
 
+        # Track semantic search queries in user state
+        if tool_context and formatted_results:
+            try:
+                queries = tool_context.state.get("user:semantic_queries", [])
+                queries = queries + [{
+                    "query": query[:100],
+                    "result_count": len(formatted_results),
+                    "top_companies": [r["company_name"] for r in formatted_results[:3]],
+                }]
+                if len(queries) > 10:
+                    queries = queries[-10:]
+                tool_context.state["user:semantic_queries"] = queries
+            except Exception:
+                pass
+
         return {
             "success": True,
             "query": query,
@@ -188,6 +205,7 @@ def find_companies_for_candidate(
     desired_salary: Optional[int] = None,
     desired_locations: Optional[List[str]] = None,
     limit: int = 10,
+    tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
     """
     候補者の転職理由から最適な企業を検索（セマンティックマッチング）。
@@ -267,6 +285,20 @@ def find_companies_for_candidate(
                 "remote": company.get("remote"),
                 "appeal_points": appeal_points[:3],  # Top 3 appeal points
             })
+
+        # Track candidate-company matches in user state
+        if tool_context and recommended:
+            try:
+                matches = tool_context.state.get("user:candidate_company_matches", [])
+                matches = matches + [{
+                    "reasons": transfer_reasons[:80],
+                    "top_companies": [c["company_name"] for c in recommended[:3]],
+                }]
+                if len(matches) > 10:
+                    matches = matches[-10:]
+                tool_context.state["user:candidate_company_matches"] = matches
+            except Exception:
+                pass
 
         return {
             "success": True,

@@ -11,6 +11,8 @@ import logging
 from typing import Any, Dict, List, Optional
 from collections import Counter
 
+from google.adk.tools.tool_context import ToolContext
+
 from app.infrastructure.zoho.client import ZohoClient, ZohoAuthError
 from app.infrastructure.supabase.client import get_supabase
 
@@ -341,7 +343,7 @@ def analyze_transfer_patterns(
         return {"success": False, "error": str(e)}
 
 
-def generate_candidate_briefing(record_id: str) -> Dict[str, Any]:
+def generate_candidate_briefing(record_id: str, tool_context: ToolContext = None) -> Dict[str, Any]:
     """
     面談ブリーフィング生成。Zoho基本情報+議事録構造化データを統合した準備資料。get_candidate_full_profileとの違い：こちらはリスク分析付きの面談準備に特化。
 
@@ -387,6 +389,21 @@ def generate_candidate_briefing(record_id: str) -> Dict[str, Any]:
             },
         }
 
+        # Track briefed candidates in user state
+        if tool_context:
+            try:
+                briefed = tool_context.state.get("user:briefed_candidates", [])
+                name = briefing.get("basic_info", {}).get("name", "不明")
+                entry = {"record_id": record_id, "name": name}
+                existing_ids = {b.get("record_id") for b in briefed if isinstance(b, dict)}
+                if record_id not in existing_ids:
+                    briefed = briefed + [entry]
+                    if len(briefed) > 20:
+                        briefed = briefed[-20:]
+                    tool_context.state["user:briefed_candidates"] = briefed
+            except Exception:
+                pass
+
         return {
             "success": True,
             "record_id": record_id,
@@ -401,6 +418,7 @@ def generate_candidate_briefing(record_id: str) -> Dict[str, Any]:
 
 def get_candidate_summary(
     record_id: str,
+    tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
     """候補者サマリーをワンショット取得。Zoho基本情報+構造化データ+リスク評価を統合。
 
@@ -525,6 +543,24 @@ def get_candidate_summary(
 
         if timing == "すぐにでも":
             recommended_actions.append("即時対応可能な求人を優先的にマッチング")
+
+        # Track analyzed candidates in user state
+        if tool_context:
+            try:
+                analyzed = tool_context.state.get("user:analyzed_candidates", [])
+                entry = {
+                    "record_id": record_id,
+                    "name": basic_info.get("name", "不明"),
+                    "risk_level": risk_level,
+                }
+                existing_ids = {a.get("record_id") for a in analyzed if isinstance(a, dict)}
+                if record_id not in existing_ids:
+                    analyzed = analyzed + [entry]
+                    if len(analyzed) > 30:
+                        analyzed = analyzed[-30:]
+                    tool_context.state["user:analyzed_candidates"] = analyzed
+            except Exception:
+                pass
 
         return {
             "success": True,

@@ -139,6 +139,7 @@ class ADKAgentService:
         self,
         message: str,
         conversation_id: str,
+        user_id: str = "default",
     ) -> AsyncGenerator[dict, None]:
         """Fast path for simple queries using a lightweight ADK agent."""
         logger.info("[ADK SimpleQuery] Using fast path (no sub-agents)")
@@ -158,13 +159,13 @@ class ADKAgentService:
             session_id = f"simple_{conversation_id}"
             session = await self._session_service.get_session(
                 app_name="marketing_ai",
-                user_id="default",
+                user_id=user_id,
                 session_id=session_id,
             )
             if session is None:
                 session = await self._session_service.create_session(
                     app_name="marketing_ai",
-                    user_id="default",
+                    user_id=user_id,
                     session_id=session_id,
                 )
 
@@ -186,7 +187,7 @@ class ADKAgentService:
                 max_llm_calls=self._settings.adk_max_llm_calls,
             )
             async for event in runner.run_async(
-                user_id="default",
+                user_id=user_id,
                 session_id=session_id,
                 new_message=user_content,
                 run_config=run_config,
@@ -215,6 +216,7 @@ class ADKAgentService:
         context_items: Optional[List[Dict[str, Any]]] = None,
         model_asset: Optional[Dict[str, Any]] = None,
         attachments: Optional[List[Dict[str, Any]]] = None,
+        initial_state: Optional[Dict[str, Any]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream chat responses - interface compatible with OpenAI SDK service.
@@ -233,7 +235,7 @@ class ADKAgentService:
 
         # FAST PATH: Simple queries bypass orchestrator entirely
         if not context_items and self._is_simple_query(message):
-            async for event in self._stream_simple_response(message, session_id):
+            async for event in self._stream_simple_response(message, session_id, user_id=user_id):
                 yield event
             return
 
@@ -260,17 +262,18 @@ class ADKAgentService:
         mcp_toolsets = await self._mcp_manager.create_toolsets()
 
         try:
-            # Create or get session
+            # Create or get session (with restored user:/app: state)
             session = await self._session_service.get_session(
                 app_name="marketing_ai",
-                user_id="default",
+                user_id=user_id,
                 session_id=session_id,
             )
             if session is None:
                 session = await self._session_service.create_session(
                     app_name="marketing_ai",
-                    user_id="default",
+                    user_id=user_id,
                     session_id=session_id,
+                    state=initial_state or {},
                 )
 
             # Build orchestrator agent with domain-specific MCP toolsets
@@ -337,7 +340,7 @@ class ADKAgentService:
                         max_llm_calls=self._settings.adk_max_llm_calls,
                     )
                     async for event in runner.run_async(
-                        user_id="default",
+                        user_id=user_id,
                         session_id=session_id,
                         new_message=user_content,
                         run_config=run_config,
@@ -389,7 +392,7 @@ class ADKAgentService:
             try:
                 updated_session = await self._session_service.get_session(
                     app_name="marketing_ai",
-                    user_id="default",
+                    user_id=user_id,
                     session_id=session_id,
                 )
                 if updated_session and hasattr(updated_session, "events"):
@@ -424,6 +427,31 @@ class ADKAgentService:
             except Exception as ctx_err:
                 logger.warning(f"[ADK] Failed to build context items: {ctx_err}")
 
+            # Extract user:/app: state for persistence across conversations
+            user_state = {}
+            app_state = {}
+            if updated_session:
+                try:
+                    state_obj = updated_session.state
+                    if callable(getattr(state_obj, "to_dict", None)):
+                        final_state = state_obj.to_dict()
+                    elif hasattr(state_obj, "items"):
+                        final_state = dict(state_obj)
+                    else:
+                        final_state = {}
+                    for k, v in final_state.items():
+                        if k.startswith("user:"):
+                            user_state[k] = v
+                        elif k.startswith("app:"):
+                            app_state[k] = v
+                    if user_state or app_state:
+                        logger.info(
+                            f"[ADK State] Extracted user={len(user_state)} keys, "
+                            f"app={len(app_state)} keys"
+                        )
+                except Exception as st_err:
+                    logger.warning(f"[ADK State] Failed to extract state: {st_err}")
+
             # Save session to memory for semantic search (non-blocking)
             if self._settings.memory_auto_save and self._memory_service and updated_session:
                 try:
@@ -434,7 +462,12 @@ class ADKAgentService:
                 except Exception as mem_err:
                     logger.warning(f"[ADK] Failed to start memory save task: {mem_err}")
 
-            yield {"type": "_context_items", "items": context_items}
+            yield {
+                "type": "_context_items",
+                "items": context_items,
+                "user_state": user_state,
+                "app_state": app_state,
+            }
             yield {"type": "done", "conversation_id": session_id}
 
         except Exception as e:

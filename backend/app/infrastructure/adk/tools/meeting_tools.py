@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from google.adk.tools.tool_context import ToolContext
+
 from app.infrastructure.supabase.client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -247,7 +249,7 @@ def get_structured_data_for_candidate(
         return {"success": False, "error": str(e)}
 
 
-def get_candidate_full_profile(zoho_record_id: str) -> Dict[str, Any]:
+def get_candidate_full_profile(zoho_record_id: str, tool_context: ToolContext = None) -> Dict[str, Any]:
     """候補者の完全プロファイル取得（Zoho + 議事録構造化データ統合）。
 
     generate_candidate_briefingとの違い：こちらはZoho+議事録の全情報統合プロファイル。
@@ -326,6 +328,21 @@ def get_candidate_full_profile(zoho_record_id: str) -> Dict[str, Any]:
             },
             "meeting_info": meeting_info,
         }
+
+        # Track profiled candidates in user state
+        if tool_context:
+            try:
+                profiled = tool_context.state.get("user:profiled_candidates", [])
+                name = profile.get("basic", {}).get("name", "不明")
+                entry = {"record_id": zoho_record_id, "name": name}
+                existing_ids = {p.get("record_id") for p in profiled if isinstance(p, dict)}
+                if zoho_record_id not in existing_ids:
+                    profiled = profiled + [entry]
+                    if len(profiled) > 20:
+                        profiled = profiled[-20:]
+                    tool_context.state["user:profiled_candidates"] = profiled
+            except Exception:
+                pass
 
         return {
             "success": True,

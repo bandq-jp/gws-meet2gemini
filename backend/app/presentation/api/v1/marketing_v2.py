@@ -250,6 +250,25 @@ async def chat_stream(
             logger.exception(f"[DB] Failed to save user message: {e}")
             # Continue streaming even if DB save fails
 
+        # --- Load user: state from latest conversation for cross-session persistence ---
+        initial_state: dict = {}
+        try:
+            latest = sb.table("marketing_conversations") \
+                .select("metadata") \
+                .eq("owner_email", context.user_email) \
+                .neq("id", conversation_id) \
+                .order("last_message_at", desc=True) \
+                .limit(1) \
+                .execute()
+            if latest.data:
+                meta = latest.data[0].get("metadata") or {}
+                if meta.get("engine") == "adk":
+                    initial_state = meta.get("user_state", {})
+                    if initial_state:
+                        logger.info(f"[State] Loaded {len(initial_state)} user state keys")
+        except Exception as e:
+            logger.warning(f"[State] Failed to load user_state: {e}")
+
         # --- Streaming with activity items accumulation ---
         activity_items: list[dict] = []
         full_text_content = ""
@@ -265,6 +284,7 @@ async def chat_stream(
                 context_items=body.context_items,
                 model_asset=model_asset,
                 attachments=attachments_data,
+                initial_state=initial_state,
             ):
                 if await request.is_disconnected():
                     logger.info("Client disconnected during chat stream")
@@ -378,15 +398,23 @@ async def chat_stream(
                     seq += 1
 
                 elif event_type == "_context_items":
-                    # Save context_items to conversation metadata
+                    # Save context_items + user:/app: state to conversation metadata
                     try:
+                        metadata_update = {
+                            "engine": "adk",
+                            "context_items": event.get("items"),
+                        }
+                        # Persist user:/app: state for cross-conversation restoration
+                        us = event.get("user_state")
+                        if us:
+                            metadata_update["user_state"] = us
+                        aps = event.get("app_state")
+                        if aps:
+                            metadata_update["app_state"] = aps
                         sb.table("marketing_conversations").update({
-                            "metadata": {
-                                "engine": "adk",
-                                "context_items": event.get("items"),
-                            },
+                            "metadata": metadata_update,
                         }).eq("id", conversation_id).execute()
-                        logger.info(f"[DB] Saved context_items for: {conversation_id}")
+                        logger.info(f"[DB] Saved context_items + state for: {conversation_id}")
                     except Exception as e:
                         logger.warning(f"[DB] Failed to save context_items: {e}")
                     # Send to client for next turn context

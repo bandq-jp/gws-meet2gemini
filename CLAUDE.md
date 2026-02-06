@@ -231,6 +231,31 @@
   - `ChatMessage.tsx` - `get_appeal_points`ツールアイコンをTargetに変更
   - サジェストカードにタグラベル追加、ArrowRightホバーアフォーダンス追加
 
+- **ADK user:/app: State永続化（既存Supabaseテーブル拡張）**
+  - **目的**: エージェントがユーザー嗜好・学習結果を会話をまたいで保持
+  - **方式**: `marketing_conversations.metadata` JSONBに`user_state`/`app_state`を追加保存。新テーブル・asyncpg不要
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agent_service.py`:
+      - `stream_chat()`に`initial_state`パラメータ追加
+      - `create_session(state=initial_state)`でState復元
+      - ターン終了時に`session.state`から`user:`/`app:`プレフィックスを分離抽出
+      - `_context_items`イベントに`user_state`/`app_state`を含めてyield
+    - `backend/app/presentation/api/v1/marketing_v2.py`:
+      - 最新会話の`metadata.user_state`をロード→`initial_state`としてagent_serviceに渡す
+      - `_context_items`受信時に`user_state`/`app_state`もmetadataに保存
+  - **バグ修正**: `user_id="default"`ハードコード→実ユーザーID(`user_id`パラメータ)に統一（全6箇所）
+  - **データフロー**: 最新会話metadata→initial_state→InMemorySession→ツール内でstate読み書き→ターン終了時にmetadataへ保存
+  - **制限**: `app:` Stateは会話単位保存（グローバル共有には将来的に専用テーブルが必要）
+
+- **ToolContext.state 書き込み実装（全5ツールファイル・10関数）**
+  - `company_db_tools.py`: `search_companies`(user:recent_company_searches), `get_company_detail`(user:viewed_companies), `match_candidate_to_companies`(user:matched_candidates)
+  - `semantic_company_tools.py`: `semantic_search_companies`(user:semantic_queries), `find_companies_for_candidate`(user:candidate_company_matches)
+  - `zoho_crm_tools.py`: `search_job_seekers`(user:recent_candidate_searches), `get_job_seeker_detail`(user:viewed_candidates)
+  - `candidate_insight_tools.py`: `get_candidate_summary`(user:analyzed_candidates), `generate_candidate_briefing`(user:briefed_candidates)
+  - `meeting_tools.py`: `get_candidate_full_profile`(user:profiled_candidates)
+  - **全ツール共通パターン**: `tool_context: ToolContext = None`パラメータ追加、state書き込みはreturn前、リスト上限付き(20-30件)、try/exceptで安全にラップ
+  - **ADK仕様準拠**: パラメータ名`tool_context`は必須（ADKが`inspect.signature`で自動検出・注入）、ネストされた更新は親オブジェクトを再代入
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

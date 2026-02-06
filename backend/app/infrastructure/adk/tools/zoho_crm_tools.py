@@ -15,6 +15,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from google.adk.tools.tool_context import ToolContext
+
 from app.infrastructure.zoho.client import ZohoClient, ZohoAuthError
 
 logger = logging.getLogger(__name__)
@@ -146,6 +148,7 @@ def search_job_seekers(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
     limit: int = 20,
+    tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
     """求職者を検索。channel/statusの定義はget_channel_definitionsで取得。
 
@@ -176,6 +179,24 @@ def search_job_seekers(
             date_to=date_to,
             limit=min(limit, 100),
         )
+
+        # Track candidate search patterns in user state
+        if tool_context and results:
+            try:
+                searches = tool_context.state.get("user:recent_candidate_searches", [])
+                search_record = {
+                    "filters": {k: v for k, v in {
+                        "channel": channel, "status": status, "name": name,
+                    }.items() if v is not None},
+                    "result_count": len(results),
+                }
+                searches = searches + [search_record]
+                if len(searches) > 10:
+                    searches = searches[-10:]
+                tool_context.state["user:recent_candidate_searches"] = searches
+            except Exception:
+                pass
+
         return {
             "success": True,
             "total": len(results),
@@ -196,7 +217,7 @@ def search_job_seekers(
         return {"success": False, "error": str(e)}
 
 
-def get_job_seeker_detail(record_id: str) -> Dict[str, Any]:
+def get_job_seeker_detail(record_id: str, tool_context: ToolContext = None) -> Dict[str, Any]:
     """特定求職者1名の詳細取得。日本語ラベル付き整形済みデータを返す。
 
     Args:
@@ -218,6 +239,22 @@ def get_job_seeker_detail(record_id: str) -> Dict[str, Any]:
 
         if not record:
             return {"success": False, "error": f"レコードが見つかりません: {record_id}"}
+
+        # Track viewed candidates in user state
+        if tool_context:
+            try:
+                viewed = tool_context.state.get("user:viewed_candidates", [])
+                name = record.get("Name", record_id)
+                entry = {"record_id": record_id, "name": name}
+                # Avoid duplicates by record_id
+                existing_ids = {v.get("record_id") for v in viewed if isinstance(v, dict)}
+                if record_id not in existing_ids:
+                    viewed = viewed + [entry]
+                    if len(viewed) > 30:
+                        viewed = viewed[-30:]
+                    tool_context.state["user:viewed_candidates"] = viewed
+            except Exception:
+                pass
 
         return {
             "success": True,

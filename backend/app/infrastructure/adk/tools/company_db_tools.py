@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from google.adk.tools.tool_context import ToolContext
+
 logger = logging.getLogger(__name__)
 
 # Need type definitions
@@ -105,6 +107,7 @@ def search_companies(
     education: Optional[str] = None,
     remote_ok: Optional[bool] = None,
     limit: int = 20,
+    tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
     """
     企業検索。条件でフィルタリングして企業リストを返す。
@@ -174,6 +177,24 @@ def search_companies(
                 "リモート": company.get("リモートワーク"),
             })
 
+        # Track search patterns in user state
+        if tool_context and filtered:
+            try:
+                searches = tool_context.state.get("user:recent_company_searches", [])
+                search_record = {
+                    "filters": {k: v for k, v in {
+                        "industry": industry, "location": location,
+                        "min_salary": min_salary, "max_age": max_age,
+                    }.items() if v is not None},
+                    "result_count": len(filtered),
+                }
+                searches = searches + [search_record]
+                if len(searches) > 10:
+                    searches = searches[-10:]
+                tool_context.state["user:recent_company_searches"] = searches
+            except Exception:
+                pass
+
         return {
             "success": True,
             "filters_applied": {
@@ -192,7 +213,7 @@ def search_companies(
         return {"success": False, "error": str(e)}
 
 
-def get_company_detail(company_name: str) -> Dict[str, Any]:
+def get_company_detail(company_name: str, tool_context: ToolContext = None) -> Dict[str, Any]:
     """
     企業詳細取得。全データ+訴求ポイントを返す。
 
@@ -235,6 +256,19 @@ def get_company_detail(company_name: str) -> Dict[str, Any]:
         appeal_data = service.get_appeal_points()
         appeal = appeal_data.get(company.get("企業名"), {})
 
+        # Track viewed companies in user state
+        if tool_context:
+            try:
+                viewed = tool_context.state.get("user:viewed_companies", [])
+                name = company.get("企業名", company_name)
+                if name not in viewed:
+                    viewed = viewed + [name]
+                    if len(viewed) > 30:
+                        viewed = viewed[-30:]
+                    tool_context.state["user:viewed_companies"] = viewed
+            except Exception:
+                pass
+
         return {
             "success": True,
             "company_name": company.get("企業名"),
@@ -260,6 +294,7 @@ def get_company_detail(company_name: str) -> Dict[str, Any]:
             },
             "appeal_points": appeal,
         }
+
     except Exception as e:
         logger.error(f"[ADK CompanyDB] get_company_detail error: {e}")
         return {"success": False, "error": str(e)}
@@ -403,6 +438,7 @@ def match_candidate_to_companies(
     transfer_reasons: Optional[List[str]] = None,
     location: Optional[str] = None,
     limit: int = 10,
+    tool_context: ToolContext = None,
 ) -> Dict[str, Any]:
     """
     候補者に合う企業をマッチング。Zoho record_idまたは条件を指定してスコア付きで企業を推薦。
@@ -558,6 +594,21 @@ def match_candidate_to_companies(
 
         # Sort by score
         scored_companies.sort(key=lambda x: x["match_score"], reverse=True)
+
+        # Track matched candidates in user state
+        if tool_context and scored_companies:
+            try:
+                matched = tool_context.state.get("user:matched_candidates", [])
+                match_entry = {
+                    "record_id": record_id,
+                    "top_companies": [c["企業名"] for c in scored_companies[:3]],
+                }
+                matched = matched + [match_entry]
+                if len(matched) > 20:
+                    matched = matched[-20:]
+                tool_context.state["user:matched_candidates"] = matched
+            except Exception:
+                pass
 
         return {
             "success": True,
