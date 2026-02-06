@@ -198,6 +198,39 @@
     - ThinkingIndicator CSS未定義、Stopボタン未接続
   - オーケストレーターツール名修正: `call_xxx_agent` → 実際のAgentTool名（`XxxAgent`）に統一
 
+- **ADK マルチモーダル + Google検索 + コード実行 実装**
+  - **Phase 1: Google検索 & コード実行サブエージェント**
+    - 新規ファイル:
+      - `backend/app/infrastructure/adk/agents/google_search_agent.py` - Google検索専用サブエージェント（`google_search`ツール使用、他ツール同居不可）
+      - `backend/app/infrastructure/adk/agents/code_execution_agent.py` - コード実行専用サブエージェント（`BuiltInCodeExecutor`使用、他ツール同居不可、`build_agent()`オーバーライド）
+    - 変更ファイル:
+      - `backend/app/infrastructure/adk/agents/orchestrator.py` - サブファクトリー登録、キーワードマトリクス追加、サブエージェント説明追加
+      - `backend/app/infrastructure/adk/agents/__init__.py` - エクスポート追加
+      - `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py` - `SUB_AGENT_NAMES`追加
+  - **Phase 2: コード実行イベント処理**
+    - Backend:
+      - `agent_service.py` - `executable_code`/`code_execution_result`パート処理（partial=True/False両方）
+      - `marketing_v2.py` - `code_execution`/`code_result`イベント蓄積
+    - Frontend:
+      - `types.ts` - `CodeExecutionEvent`, `CodeResultEvent`, `CodeExecutionActivityItem`, `CodeResultActivityItem`追加
+      - `use-marketing-chat-v2.ts` - `processEvent`にケース追加
+      - `ChatMessage.tsx` - `CodeBlock`再利用のコード表示、実行結果表示（成功=緑、エラー=赤）、新エージェントUI設定追加
+  - **Phase 3: マルチモーダルファイルアップロード**
+    - Backend:
+      - `marketing_v2.py` - `FileAttachment`スキーマ、バリデーション（10MB/file, 20MB合計, 5ファイル, MIME制限）
+      - `agent_service.py` - `attachments`パラメータ追加、`types.Part.from_bytes()`でマルチモーダルContent構築
+    - Frontend:
+      - `types.ts` - `FileAttachment`型、`Message.attachments`フィールド追加
+      - `Composer.tsx` - Paperclipボタン、ファイルプレビューチップ、バリデーション
+      - `use-marketing-chat-v2.ts` - `fileToBase64()`ヘルパー、`sendMessage(content, files?)`シグネチャ変更
+      - `ChatMessage.tsx` - ユーザーメッセージに添付ファイルバッジ表示
+  - **ADK制約**: `google_search`と`BuiltInCodeExecutor`は他ツールと同居不可 → 専用サブエージェント必須
+
+- **UI改善: Sparklesアイコン → Layersアイコンに変更**
+  - `MarketingChat.tsx` - ブランドアイコンをLayers（マルチレイヤーデータ統合）に変更
+  - `ChatMessage.tsx` - `get_appeal_points`ツールアイコンをTargetに変更
+  - サジェストカードにタグラベル追加、ArrowRightホバーアフォーダンス追加
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

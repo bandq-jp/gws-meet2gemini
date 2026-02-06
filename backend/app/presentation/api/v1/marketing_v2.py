@@ -98,12 +98,33 @@ async def require_marketing_context(
 # Request/Response Models
 # ============================================================
 
+class FileAttachment(BaseModel):
+    """File attachment for multimodal chat."""
+    filename: str
+    mime_type: str
+    data: str  # base64-encoded file content
+    size_bytes: int
+
+
+# Allowed MIME types for file uploads
+_ALLOWED_MIME_PREFIXES = ("image/", "application/pdf", "text/csv", "text/plain", "text/markdown")
+_ALLOWED_MIME_EXACT = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # .xlsx
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",  # .pptx
+}
+_MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
+_MAX_TOTAL_SIZE = 20 * 1024 * 1024  # 20MB total
+_MAX_FILE_COUNT = 5
+
+
 class ChatStreamRequest(BaseModel):
     """Request body for the native SSE chat endpoint."""
     message: str
     conversation_id: str | None = None
     context_items: list[dict] | None = None
     model_asset_id: str | None = None
+    attachments: list[FileAttachment] | None = None
 
 
 # ============================================================
@@ -133,6 +154,47 @@ async def chat_stream(
     """
     agent_service = get_marketing_agent_service()
     sb = get_supabase()
+
+    # Validate attachments
+    attachments_data: list[dict] | None = None
+    if body.attachments:
+        if len(body.attachments) > _MAX_FILE_COUNT:
+            raise HTTPException(
+                status_code=400,
+                detail=f"ファイルは最大{_MAX_FILE_COUNT}個まで添付できます",
+            )
+
+        total_size = 0
+        attachments_data = []
+        for att in body.attachments:
+            # Validate MIME type
+            mime_ok = any(att.mime_type.startswith(p) for p in _ALLOWED_MIME_PREFIXES) or att.mime_type in _ALLOWED_MIME_EXACT
+            if not mime_ok:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"非対応のファイル形式です: {att.mime_type}",
+                )
+
+            # Validate file size
+            if att.size_bytes > _MAX_FILE_SIZE:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"ファイルサイズが上限(10MB)を超えています: {att.filename}",
+                )
+            total_size += att.size_bytes
+
+            attachments_data.append({
+                "filename": att.filename,
+                "mime_type": att.mime_type,
+                "data": att.data,
+                "size_bytes": att.size_bytes,
+            })
+
+        if total_size > _MAX_TOTAL_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="添付ファイルの合計サイズが上限(20MB)を超えています",
+            )
 
     # Load model asset if specified
     model_asset = None
@@ -202,6 +264,7 @@ async def chat_stream(
                 message=body.message,
                 context_items=body.context_items,
                 model_asset=model_asset,
+                attachments=attachments_data,
             ):
                 if await request.is_disconnected():
                     logger.info("Client disconnected during chat stream")
@@ -277,6 +340,29 @@ async def chat_stream(
                         "event_type": event.get("event_type"),
                         "is_running": event.get("is_running"),
                         "data": event.get("data"),
+                    })
+                    seq += 1
+
+                elif event_type == "code_execution":
+                    # Code execution from CodeExecutionAgent
+                    current_text_id = None
+                    activity_items.append({
+                        "kind": "code_execution",
+                        "sequence": seq,
+                        "id": str(uuid.uuid4()),
+                        "code": event.get("code", ""),
+                        "language": event.get("language", "PYTHON"),
+                    })
+                    seq += 1
+
+                elif event_type == "code_result":
+                    # Code execution result
+                    activity_items.append({
+                        "kind": "code_result",
+                        "sequence": seq,
+                        "id": str(uuid.uuid4()),
+                        "output": event.get("output", ""),
+                        "outcome": event.get("outcome", "UNKNOWN"),
                     })
                     seq += 1
 

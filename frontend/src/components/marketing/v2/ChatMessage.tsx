@@ -33,6 +33,7 @@ import {
   Target,
   Copy,
   Check,
+  Image as ImageIcon,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -43,6 +44,8 @@ import type {
   ReasoningActivityItem,
   SubAgentActivityItem,
   ChartActivityItem,
+  CodeExecutionActivityItem,
+  CodeResultActivityItem,
 } from "@/lib/marketing/types";
 import { ChartRenderer } from "./charts";
 
@@ -212,6 +215,44 @@ const SUB_AGENT_CONFIG: Record<string, AgentUIConfig> = {
     textColor: "text-rose-700",
     borderColor: "border-rose-200",
     accentColor: "#f43f5e",
+  },
+  // Google Search Agent
+  googlesearchagent: {
+    label: "Google検索",
+    icon: Globe,
+    gradient: "from-sky-500 to-blue-500",
+    bgLight: "bg-sky-50",
+    textColor: "text-sky-700",
+    borderColor: "border-sky-200",
+    accentColor: "#0ea5e9",
+  },
+  google_search: {
+    label: "Google検索",
+    icon: Globe,
+    gradient: "from-sky-500 to-blue-500",
+    bgLight: "bg-sky-50",
+    textColor: "text-sky-700",
+    borderColor: "border-sky-200",
+    accentColor: "#0ea5e9",
+  },
+  // Code Execution Agent
+  codeexecutionagent: {
+    label: "コード実行",
+    icon: Code2,
+    gradient: "from-violet-500 to-purple-500",
+    bgLight: "bg-violet-50",
+    textColor: "text-violet-700",
+    borderColor: "border-violet-200",
+    accentColor: "#8b5cf6",
+  },
+  code_execution: {
+    label: "コード実行",
+    icon: Code2,
+    gradient: "from-violet-500 to-purple-500",
+    bgLight: "bg-violet-50",
+    textColor: "text-violet-700",
+    borderColor: "border-violet-200",
+    accentColor: "#8b5cf6",
   },
   default: {
     label: "Agent",
@@ -505,6 +546,10 @@ const AGENT_PROGRESS_LABELS: Record<string, string[]> = {
   wordpress: ["WordPressに接続中", "記事を検索中", "コンテンツを取得中", "メタ情報を確認中"],
   company_database: ["企業DBを検索中", "企業情報を取得中", "マッチングを実行中", "結果を整理中"],
   ca_support: ["データを統合中", "候補者情報を収集中", "企業情報を確認中", "分析レポートを作成中"],
+  google_search: ["検索クエリを構築中", "Google検索を実行中", "結果を収集中", "情報を統合中"],
+  googlesearchagent: ["検索クエリを構築中", "Google検索を実行中", "結果を収集中", "情報を統合中"],
+  code_execution: ["コードを生成中", "Pythonを実行中", "結果を処理中", "出力を整理中"],
+  codeexecutionagent: ["コードを生成中", "Pythonを実行中", "結果を処理中", "出力を整理中"],
   default: ["準備中", "データを取得中", "処理中", "結果を整理中"],
 };
 
@@ -938,6 +983,69 @@ function ActivityTimeline({
               </div>
             );
 
+          case "code_execution":
+            return (
+              <div key={groupIdx} className="space-y-1">
+                {group.items.map((item) => {
+                  const codeItem = item as CodeExecutionActivityItem;
+                  return (
+                    <CodeBlock
+                      key={item.id}
+                      language={codeItem.language?.toLowerCase() || "python"}
+                    >
+                      {codeItem.code}
+                    </CodeBlock>
+                  );
+                })}
+              </div>
+            );
+
+          case "code_result":
+            return (
+              <div key={groupIdx} className="space-y-1">
+                {group.items.map((item) => {
+                  const resultItem = item as CodeResultActivityItem;
+                  const isError =
+                    resultItem.outcome === "OUTCOME_FAILED" ||
+                    resultItem.outcome === "OUTCOME_DEADLINE_EXCEEDED";
+                  return (
+                    <div
+                      key={item.id}
+                      className={`my-1.5 rounded-lg border overflow-hidden ${
+                        isError
+                          ? "border-red-200 bg-red-50"
+                          : "border-emerald-200 bg-emerald-50"
+                      }`}
+                    >
+                      <div
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-medium ${
+                          isError ? "text-red-700" : "text-emerald-700"
+                        }`}
+                      >
+                        {isError ? (
+                          <span>実行エラー</span>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>実行結果</span>
+                          </>
+                        )}
+                      </div>
+                      {resultItem.output && (
+                        <pre
+                          className={`px-3 py-2 text-[11px] sm:text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap ${
+                            isError ? "text-red-800" : "text-emerald-900"
+                          }`}
+                        >
+                          {resultItem.output}
+                        </pre>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+
           default:
             return null;
         }
@@ -951,9 +1059,31 @@ function ActivityTimeline({
 // ---------------------------------------------------------------------------
 
 function UserMessage({ message }: { message: Message }) {
+  const attachments = message.attachments;
   return (
     <div className="flex justify-end overflow-hidden">
       <div className="max-w-[85%] sm:max-w-[70%] min-w-0">
+        {/* Attachment badges */}
+        {attachments && attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-1.5 justify-end">
+            {attachments.map((att, idx) => {
+              const isImage = att.mime_type.startsWith("image/");
+              return (
+                <div
+                  key={`${att.filename}-${idx}`}
+                  className="inline-flex items-center gap-1.5 bg-[#e8eaed] rounded-lg px-2 py-1 text-[10px] text-[#374151]"
+                >
+                  {isImage ? (
+                    <ImageIcon className="w-3 h-3 text-[#9ca3af]" />
+                  ) : (
+                    <FileText className="w-3 h-3 text-[#9ca3af]" />
+                  )}
+                  <span className="truncate max-w-[120px]">{att.filename}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
         <div className="bg-[#f0f1f5] text-[#1a1a2e] rounded-2xl px-4 py-2.5 text-[14px] sm:text-sm leading-relaxed">
           <p className="whitespace-pre-wrap break-words overflow-hidden">
             {message.content}

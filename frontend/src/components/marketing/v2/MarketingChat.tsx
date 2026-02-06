@@ -196,9 +196,9 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
     }), [clearMessages]);
 
     const handleSend = useCallback(
-      async (content: string) => {
-        if (!content.trim() || isStreaming || isReadOnly) return;
-        await sendMessage(content);
+      async (content: string, files?: File[]) => {
+        if ((!content.trim() && (!files || files.length === 0)) || isStreaming || isReadOnly) return;
+        await sendMessage(content, files);
       },
       [sendMessage, isStreaming, isReadOnly]
     );

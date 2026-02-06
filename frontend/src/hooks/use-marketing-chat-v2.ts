@@ -16,8 +16,11 @@ import type {
   ReasoningActivityItem,
   SubAgentActivityItem,
   ChartActivityItem,
+  CodeExecutionActivityItem,
+  CodeResultActivityItem,
   StreamEvent,
   ChatStreamRequest,
+  FileAttachment,
   ModelAsset,
 } from "@/lib/marketing/types";
 
@@ -39,7 +42,7 @@ export type UseMarketingChatReturn = {
   isLoading: boolean;
   error: string | null;
   conversationId: string | null;
-  sendMessage: (content: string) => Promise<void>;
+  sendMessage: (content: string, files?: File[]) => Promise<void>;
   cancelStream: () => void;
   clearMessages: () => void;
   setConversationId: (id: string | null) => void;
@@ -272,6 +275,30 @@ export function useMarketingChat(
             break;
           }
 
+          case "code_execution": {
+            // Code from CodeExecutionAgent - reset text for new block
+            currentTextIdRef.current = null;
+            items.push({
+              id: generateId(),
+              kind: "code_execution",
+              sequence: seqRef.current++,
+              code: event.code,
+              language: event.language,
+            } as CodeExecutionActivityItem);
+            break;
+          }
+
+          case "code_result": {
+            items.push({
+              id: generateId(),
+              kind: "code_result",
+              sequence: seqRef.current++,
+              output: event.output,
+              outcome: event.outcome,
+            } as CodeResultActivityItem);
+            break;
+          }
+
           case "sub_agent_event": {
             // Find existing sub-agent card for this agent (running or not)
             const existingIdx = items.findIndex(
@@ -477,11 +504,28 @@ export function useMarketingChat(
     []
   );
 
+  // Helper: convert File to base64
+  const fileToBase64 = useCallback(
+    (file: File): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          // Strip data URL prefix: "data:mime;base64,"
+          const base64 = result.split(",")[1] || "";
+          resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      }),
+    []
+  );
+
   // Send message and start streaming
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, files?: File[]) => {
       if (isStreaming) return;
-      if (!content.trim()) return;
+      if (!content.trim() && (!files || files.length === 0)) return;
 
       setError(null);
       setIsStreaming(true);
@@ -489,6 +533,17 @@ export function useMarketingChat(
       // Reset sequence and text tracking for new message
       seqRef.current = 0;
       currentTextIdRef.current = null;
+
+      // Convert files to attachments for display
+      const displayAttachments: FileAttachment[] | undefined =
+        files && files.length > 0
+          ? files.map((f) => ({
+              filename: f.name,
+              mime_type: f.type,
+              data: "", // Not stored for display
+              size_bytes: f.size,
+            }))
+          : undefined;
 
       // Create user message
       const userMessage: Message = {
@@ -498,6 +553,7 @@ export function useMarketingChat(
         activityItems: [],
         isStreaming: false,
         createdAt: new Date(),
+        attachments: displayAttachments,
       };
 
       // Create assistant placeholder
@@ -518,11 +574,25 @@ export function useMarketingChat(
         // Create abort controller
         abortControllerRef.current = new AbortController();
 
+        // Convert files to base64 attachments
+        let attachments: FileAttachment[] | undefined;
+        if (files && files.length > 0) {
+          attachments = await Promise.all(
+            files.map(async (f) => ({
+              filename: f.name,
+              mime_type: f.type,
+              data: await fileToBase64(f),
+              size_bytes: f.size,
+            }))
+          );
+        }
+
         // Build request
         const requestBody: ChatStreamRequest = {
           message: content,
           conversation_id: conversationId,
           context_items: contextItemsRef.current,
+          attachments: attachments || null,
         };
 
         const response = await fetch("/api/marketing-v2/chat/stream", {
@@ -616,7 +686,7 @@ export function useMarketingChat(
         abortControllerRef.current = null;
       }
     },
-    [isStreaming, conversationId, ensureToken, processEvent]
+    [isStreaming, conversationId, ensureToken, processEvent, fileToBase64]
   );
 
   // Cancel ongoing stream

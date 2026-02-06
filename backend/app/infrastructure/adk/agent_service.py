@@ -14,6 +14,7 @@ Matches OpenAI Agents SDK functionality:
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import re
@@ -213,6 +214,7 @@ class ADKAgentService:
         message: str,
         context_items: Optional[List[Dict[str, Any]]] = None,
         model_asset: Optional[Dict[str, Any]] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream chat responses - interface compatible with OpenAI SDK service.
@@ -290,10 +292,28 @@ class ADKAgentService:
                 plugins=[sub_agent_plugin],
             )
 
-            # Create user content
+            # Create user content (multimodal: text + file attachments)
+            parts = [types.Part(text=message)]
+            if attachments:
+                for att in attachments:
+                    try:
+                        file_bytes = base64.b64decode(att["data"])
+                        parts.append(
+                            types.Part.from_bytes(
+                                data=file_bytes,
+                                mime_type=att["mime_type"],
+                            )
+                        )
+                        logger.info(
+                            f"[ADK] Attached file: {att.get('filename')} "
+                            f"({att['mime_type']}, {len(file_bytes)} bytes)"
+                        )
+                    except Exception as att_err:
+                        logger.warning(f"[ADK] Failed to attach file {att.get('filename')}: {att_err}")
+
             user_content = types.Content(
                 role="user",
-                parts=[types.Part(text=message)],
+                parts=parts,
             )
 
             # Progress: all setup done, LLM analysis starting
@@ -427,8 +447,30 @@ class ADKAgentService:
         part: Any,
         sub_agent_states: Dict[str, dict],
     ) -> Optional[List[Dict[str, Any]]]:
-        """Process non-text parts (function_call, function_response)."""
+        """Process non-text parts (function_call, function_response, executable_code, code_execution_result)."""
         results = []
+
+        # Executable code (from CodeExecutionAgent)
+        if hasattr(part, "executable_code") and part.executable_code:
+            code = getattr(part.executable_code, "code", "")
+            language = str(getattr(part.executable_code, "language", "PYTHON"))
+            results.append({
+                "type": "code_execution",
+                "code": code,
+                "language": language,
+            })
+            return results
+
+        # Code execution result
+        if hasattr(part, "code_execution_result") and part.code_execution_result:
+            output = getattr(part.code_execution_result, "output", "") or ""
+            outcome = str(getattr(part.code_execution_result, "outcome", "UNKNOWN"))
+            results.append({
+                "type": "code_result",
+                "output": output,
+                "outcome": outcome,
+            })
+            return results
 
         # Function response (tool result)
         if hasattr(part, "function_response") and part.function_response:
@@ -618,6 +660,26 @@ class ADKAgentService:
                                 "name": tool_name,
                                 "arguments": json.dumps(getattr(fc, "args", {}), ensure_ascii=False),
                             })
+
+                    # --- Executable code (from CodeExecutionAgent) ---
+                    elif hasattr(part, "executable_code") and part.executable_code:
+                        code = getattr(part.executable_code, "code", "")
+                        language = str(getattr(part.executable_code, "language", "PYTHON"))
+                        results.append({
+                            "type": "code_execution",
+                            "code": code,
+                            "language": language,
+                        })
+
+                    # --- Code execution result ---
+                    elif hasattr(part, "code_execution_result") and part.code_execution_result:
+                        output = getattr(part.code_execution_result, "output", "") or ""
+                        outcome = str(getattr(part.code_execution_result, "outcome", "UNKNOWN"))
+                        results.append({
+                            "type": "code_result",
+                            "output": output,
+                            "outcome": outcome,
+                        })
 
                     # --- Text content (lowest priority) ---
                     elif hasattr(part, "text") and part.text:

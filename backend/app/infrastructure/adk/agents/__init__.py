@@ -21,6 +21,8 @@ from .zoho_crm_agent import ZohoCRMAgentFactory
 from .candidate_insight_agent import CandidateInsightAgentFactory
 from .company_db_agent import CompanyDatabaseAgentFactory
 from .ca_support_agent import CASupportAgentFactory
+from .google_search_agent import GoogleSearchAgentFactory
+from .code_execution_agent import CodeExecutionAgentFactory
 
 __all__ = [
     "SubAgentFactory",
@@ -33,4 +35,6 @@ __all__ = [
     "CandidateInsightAgentFactory",
     "CompanyDatabaseAgentFactory",
     "CASupportAgentFactory",
+    "GoogleSearchAgentFactory",
+    "CodeExecutionAgentFactory",
 ]

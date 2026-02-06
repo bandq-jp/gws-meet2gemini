@@ -51,6 +51,8 @@ class SubAgentStreamingPlugin(BasePlugin):
         "CandidateInsightAgent",
         "CompanyDatabaseAgent",
         "CASupportAgent",
+        "GoogleSearchAgent",
+        "CodeExecutionAgent",
     }
 
     def __init__(

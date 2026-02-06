@@ -19,6 +19,8 @@ export type StreamEventType =
   | "agent_updated"
   | "ask_user"
   | "chart"
+  | "code_execution"
+  | "code_result"
   | "progress"
   | "done"
   | "error"
@@ -139,6 +141,18 @@ export interface ChartEvent extends BaseStreamEvent {
   spec: ChartSpec;
 }
 
+export interface CodeExecutionEvent extends BaseStreamEvent {
+  type: "code_execution";
+  code: string;
+  language: string;
+}
+
+export interface CodeResultEvent extends BaseStreamEvent {
+  type: "code_result";
+  output: string;
+  outcome: string;
+}
+
 export interface ProgressEvent extends BaseStreamEvent {
   type: "progress";
   text: string;
@@ -169,6 +183,8 @@ export type StreamEvent =
   | AgentUpdatedEvent
   | AskUserEvent
   | ChartEvent
+  | CodeExecutionEvent
+  | CodeResultEvent
   | ProgressEvent
   | DoneEvent
   | ErrorEvent
@@ -184,7 +200,9 @@ export type ActivityItemKind =
   | "reasoning"
   | "sub_agent"
   | "ask_user"
-  | "chart";
+  | "chart"
+  | "code_execution"
+  | "code_result";
 
 export interface BaseActivityItem {
   id: string;
@@ -241,13 +259,27 @@ export interface ChartActivityItem extends BaseActivityItem {
   spec: ChartSpec;
 }
 
+export interface CodeExecutionActivityItem extends BaseActivityItem {
+  kind: "code_execution";
+  code: string;
+  language: string;
+}
+
+export interface CodeResultActivityItem extends BaseActivityItem {
+  kind: "code_result";
+  output: string;
+  outcome: string;
+}
+
 export type ActivityItem =
   | TextActivityItem
   | ToolActivityItem
   | ReasoningActivityItem
   | SubAgentActivityItem
   | AskUserActivityItem
-  | ChartActivityItem;
+  | ChartActivityItem
+  | CodeExecutionActivityItem
+  | CodeResultActivityItem;
 
 // =============================================================================
 // Message Types
@@ -264,6 +296,8 @@ export interface Message {
   createdAt: Date;
   /** Transient: latest progress text from backend (not persisted) */
   progressText?: string;
+  /** File attachments for multimodal messages */
+  attachments?: FileAttachment[];
 }
 
 // =============================================================================
@@ -282,11 +316,19 @@ export interface ChatState {
 // API Request/Response Types
 // =============================================================================
 
+export interface FileAttachment {
+  filename: string;
+  mime_type: string;
+  data: string; // base64
+  size_bytes: number;
+}
+
 export interface ChatStreamRequest {
   message: string;
   conversation_id?: string | null;
   context_items?: Array<Record<string, unknown>> | null;
   model_asset_id?: string | null;
+  attachments?: FileAttachment[] | null;
 }
 
 export interface ModelAsset {

@@ -24,6 +24,8 @@ from .zoho_crm_agent import ZohoCRMAgentFactory
 from .candidate_insight_agent import CandidateInsightAgentFactory
 from .company_db_agent import CompanyDatabaseAgentFactory
 from .ca_support_agent import CASupportAgentFactory
+from .google_search_agent import GoogleSearchAgentFactory
+from .code_execution_agent import CodeExecutionAgentFactory
 from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
 from app.infrastructure.adk.mcp_manager import ADKMCPToolsets
 
@@ -67,6 +69,10 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | コンバージョン、CVR、応募率 | ZohoCRMAgent |
 | ROI、投資対効果、費用対効果 | AdPlatformAgent + ZohoCRMAgent |
 | Indeed、doda、ビズリーチ | ZohoCRMAgent |
+| 最新、ニュース、トレンド、Web検索、調べて | GoogleSearchAgent |
+| 市場動向、業界情報、法改正、制度変更 | GoogleSearchAgent |
+| 計算、Python、コード実行、データ変換 | CodeExecutionAgent |
+| 集計、統計、シミュレーション、アルゴリズム | CodeExecutionAgent |
 | 上記に該当しない質問 | 最も関連性の高いエージェントを推測して即実行 |
 
 ---
@@ -131,6 +137,22 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 候補者→企業マッチング（スコア付き推薦）
 - 担当者別推奨企業リスト
 
+### GoogleSearchAgent (Web検索)
+- Google検索でリアルタイムのWeb情報を取得
+- 最新ニュース・トレンド調査
+- 業界動向・市場調査
+- 競合情報の収集
+- 法規制・制度変更の確認
+- **出典URLを必ず含む回答**
+
+### CodeExecutionAgent (コード実行)
+- Pythonコードを安全なサンドボックスで実行
+- 数値計算・統計分析
+- データ変換・集計処理
+- シミュレーション・アルゴリズム実行
+- 日付計算・文字列処理
+- **他エージェントの出力データを加工・分析する際に活用**
+
 ### CASupportAgent (CA統合支援) ★推奨
 **25ツール統合**：Zoho CRM + 候補者インサイト + 企業DB + 議事録
 - 候補者の完全プロファイル取得（Zoho + 議事録構造化データ）
@@ -193,6 +215,14 @@ ORCHESTRATOR_INSTRUCTIONS = """
 「山田さんの面談準備をして」「候補者に合う企業を提案して」「リスク分析して」
 → CASupportAgent（統合エージェント1つで対応）
 
+**最新情報+データ分析**
+「人材紹介業界の最新トレンドと自社KPIを比較」
+→ GoogleSearchAgent + ZohoCRMAgent
+
+**データ加工・計算**
+「過去6ヶ月の月次データから成長率と予測を計算して」
+→ AnalyticsAgent + CodeExecutionAgent
+
 ---
 
 ## 中間報告ルール（重要）
@@ -254,6 +284,8 @@ class OrchestratorAgentFactory:
             "candidate_insight": CandidateInsightAgentFactory(settings),
             "company_db": CompanyDatabaseAgentFactory(settings),
             "ca_support": CASupportAgentFactory(settings),
+            "google_search": GoogleSearchAgentFactory(settings),
+            "code_execution": CodeExecutionAgentFactory(settings),
         }
 
     @property
@@ -296,6 +328,8 @@ class OrchestratorAgentFactory:
             "candidate_insight": [],  # Uses function tools, no MCP
             "company_db": [],  # Uses function tools (Google Sheets), no MCP
             "ca_support": [],  # Unified agent with all function tools, no MCP
+            "google_search": [],  # Uses built-in google_search, no MCP
+            "code_execution": [],  # Uses BuiltInCodeExecutor, no MCP
         }
 
         # Populate MCP mapping if toolsets are provided
