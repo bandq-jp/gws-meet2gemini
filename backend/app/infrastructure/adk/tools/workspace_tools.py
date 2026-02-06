@@ -782,13 +782,18 @@ def get_event_detail(
 # Tool Export List
 # ============================================================
 
-ADK_WORKSPACE_TOOLS = [
+ADK_GMAIL_TOOLS = [
     search_gmail,
     get_email_detail,
     get_email_thread,
     get_recent_emails,
+]
+
+ADK_CALENDAR_TOOLS = [
     get_today_events,
     list_calendar_events,
     search_calendar_events,
     get_event_detail,
 ]
+
+ADK_WORKSPACE_TOOLS = ADK_GMAIL_TOOLS + ADK_CALENDAR_TOOLS

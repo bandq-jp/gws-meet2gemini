@@ -19,6 +19,7 @@ from google.genai import types
 from .base import SubAgentFactory
 from app.infrastructure.adk.tools.company_db_tools import ADK_COMPANY_DB_TOOLS
 from app.infrastructure.adk.tools.semantic_company_tools import ADK_SEMANTIC_COMPANY_TOOLS
+from app.infrastructure.adk.tools.workspace_tools import ADK_GMAIL_TOOLS
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -36,8 +37,9 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
     - Candidate-company matching
     - Need-based appeal point retrieval
     - PIC (advisor) recommended companies
+    - Gmail search for company-related emails
 
-    Total: 9 tools (2 semantic + 7 strict)
+    Total: 13 tools (2 semantic + 7 strict + 4 Gmail)
     """
 
     @property
@@ -74,6 +76,10 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
         else:
             logger.warning("[CompanyDatabaseAgent] Strict search tools disabled (COMPANY_DB_SPREADSHEET_ID not set)")
 
+        # 3. Gmail tools - search company-related emails
+        tools.extend(ADK_GMAIL_TOOLS)
+        logger.info(f"[CompanyDatabaseAgent] Added {len(ADK_GMAIL_TOOLS)} Gmail tools")
+
         logger.info(f"[CompanyDatabaseAgent] Total tools: {len(tools)}")
         return tools
 
@@ -101,9 +107,17 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
 | 担当者推奨 | `get_pic_recommended_companies` |
 | 定義一覧 | `get_company_definitions` |
 
+### 優先度3: メール検索（DB外の生情報補完）
+| やりたいこと | 使うべきツール |
+|------------|--------------|
+| 企業関連のメール検索 | `search_gmail` |
+| メール本文確認 | `get_email_detail` |
+| やり取りの流れ追跡 | `get_email_thread` |
+| 最新メール確認 | `get_recent_emails` |
+
 ---
 
-## 利用可能なツール (9個)
+## 利用可能なツール (13個)
 
 ### 【セマンティック検索】★優先使用
 
@@ -168,6 +182,32 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
 
 ---
 
+### 【Gmail検索】企業関連メールの発掘
+
+メールには企業DBに載っていない生の情報（採用担当とのやり取り、選考フィードバック、条件交渉の経緯、非公開求人の案内等）が含まれる。
+DB検索だけでは得られない企業のリアルな情報をメールから補完できる。
+
+#### search_gmail
+Gmailを検索。企業名・担当者名・求人キーワードで絞り込み。
+- **query** (必須): Gmail検索クエリ（例: `subject:株式会社○○ newer_than:90d`）
+- **max_results** (任意): 取得件数（デフォルト10、max 20）
+
+#### get_email_detail
+メール本文を取得（最大3000文字）。企業からの連絡内容を確認。
+- **message_id** (必須): search_gmailの結果から取得
+
+#### get_email_thread
+スレッド全体を時系列で取得。企業とのやり取りの流れを追跡。
+- **thread_id** (必須): search_gmailまたはget_email_detailから取得
+
+#### get_recent_emails
+直近N時間のメール一覧。最新の企業連絡を確認。
+- **hours** (任意): 遡る時間数（デフォルト24h）
+- **label** (任意): ラベルフィルタ
+- **max_results** (任意): 取得件数（デフォルト15）
+
+---
+
 ## ワークフロー例
 
 ### 1. 候補者への企業提案（推奨パターン）
@@ -193,6 +233,20 @@ search_companies(location="東京都", max_age=35, min_salary=500)
 → 条件完全一致の企業リスト
 ```
 
+### 4. 企業情報をメールから補完
+```
+1. get_company_detail(company_name="株式会社○○") → DB上の公式情報を取得
+2. search_gmail(query="subject:株式会社○○ newer_than:90d") → 最近のメール確認
+3. get_email_detail(message_id) → 採用担当からの連絡、条件交渉の経緯、非公開情報を確認
+→ DBの情報 + メールの生情報を統合して提案
+```
+
+### 5. 企業からの最新連絡を一括確認
+```
+get_recent_emails(hours=72, max_results=20) → 直近3日のメール
+→ 企業名でフィルタしてDB情報と照合
+```
+
 ---
 
 ## ニーズタイプ定義
@@ -210,6 +264,7 @@ search_companies(location="東京都", max_age=35, min_salary=500)
 ## 回答方針
 - **まずセマンティック検索で候補を絞る**（高速・自然言語対応）
 - 詳細確認が必要な場合のみ厳密検索を併用
+- **DBにない情報はメールで補完**: 採用担当とのやり取り、条件交渉の経緯、非公開求人などはメール検索で取得
 - 企業名・年収レンジを明確に提示
 - マッチスコアと理由を説明
 - 訴求ポイントは候補者への説明に使える形で出力

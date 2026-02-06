@@ -25,6 +25,7 @@ from app.infrastructure.adk.tools.candidate_insight_tools import ADK_CANDIDATE_I
 from app.infrastructure.adk.tools.company_db_tools import ADK_COMPANY_DB_TOOLS
 from app.infrastructure.adk.tools.meeting_tools import ADK_MEETING_TOOLS
 from app.infrastructure.adk.tools.semantic_company_tools import ADK_SEMANTIC_COMPANY_TOOLS
+from app.infrastructure.adk.tools.workspace_tools import ADK_GMAIL_TOOLS
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -40,10 +41,11 @@ CA_SUPPORT_INSTRUCTIONS = """
 - 候補者情報（Zoho CRM）
 - 面談内容（議事録・構造化データ）
 - 企業情報（企業DB）
+- メール（候補者・企業との直接やり取り、選考フィードバック、非公開情報）
 
 ---
 
-## 利用可能なツール（27個）
+## 利用可能なツール（31個）
 
 ### Zoho CRM系（10個）
 | ツール | 用途 |
@@ -92,6 +94,17 @@ CA_SUPPORT_INSTRUCTIONS = """
 | `semantic_search_companies` | 自然言語で企業検索（ベクトル類似度） |
 | `find_companies_for_candidate` | 転職理由から最適企業を自動マッチング |
 
+### Gmail系（4個）— 候補者・企業のメール情報を補完
+メールには候補者との直接やり取り、企業の採用担当からの連絡、選考フィードバック、条件交渉の経緯など、
+CRMや企業DBだけでは得られないリアルな情報が含まれる。面談準備や企業提案の精度向上に活用。
+
+| ツール | 用途 |
+|--------|------|
+| `search_gmail` | メール検索（候補者名・企業名・キーワードで絞り込み） |
+| `get_email_detail` | メール本文取得（選考状況・条件交渉の詳細確認） |
+| `get_email_thread` | スレッド全体を時系列で追跡（やり取りの流れ把握） |
+| `get_recent_emails` | 直近N時間のメール一覧（最新の連絡確認） |
+
 ---
 
 ## 検索フォールバック手順
@@ -132,7 +145,22 @@ CA_SUPPORT_INSTRUCTIONS = """
 3. analyze_funnel_by_channel(channel) → 改善ポイント特定
 ```
 
-### 5. セマンティック検索（高速・推奨）
+### 5. 候補者関連メールの確認
+```
+1. search_gmail(query="from:候補者名 OR subject:候補者名 newer_than:30d") → 関連メール一覧
+2. get_email_thread(thread_id) → やり取りの流れを確認
+3. get_job_seeker_detail(record_id) → Zohoの最新情報と突合
+```
+
+### 5b. 企業の最新情報をメールから補完
+```
+1. get_company_detail(company_name) → DB上の公式情報
+2. search_gmail(query="subject:企業名 newer_than:90d") → 最近の企業関連メール
+3. get_email_detail(message_id) → 採用担当からの連絡、条件変更、非公開求人の詳細
+→ DB情報 + メールの生情報を統合して企業提案の精度を向上
+```
+
+### 6. セマンティック検索（高速・推奨）
 ```
 # 自然言語で企業検索
 semantic_search_companies("リモートワーク可能で成長できる環境")
@@ -162,10 +190,11 @@ find_companies_for_candidate(
 ## 回答方針
 
 1. **データは必ずツールで取得**: 推測・捏造は禁止
-2. **統合的な視点**: Zoho + 議事録 + 企業DBを組み合わせて提案
-3. **アクション可能な提案**: 「次に何をすべきか」を明確に
-4. **候補者の立場で考える**: 転職理由・希望条件を重視した企業提案
-5. **表形式で整理**: 比較検討しやすい形式で出力
+2. **統合的な視点**: Zoho + 議事録 + 企業DB + メールを組み合わせて提案
+3. **メールで情報補完**: 企業DBにない最新情報（条件変更、非公開求人、選考フィードバック）はメール検索で補う
+4. **アクション可能な提案**: 「次に何をすべきか」を明確に
+5. **候補者の立場で考える**: 転職理由・希望条件を重視した企業提案
+6. **表形式で整理**: 比較検討しやすい形式で出力
 
 ---
 
@@ -187,7 +216,8 @@ class CASupportAgentFactory(SubAgentFactory):
     - Company DB tools (7)
     - Meeting tools (4)
     - Semantic Search tools (2)
-    Total: 27 tools
+    - Gmail tools (4)
+    Total: 31 tools
     """
 
     @property
@@ -236,6 +266,10 @@ class CASupportAgentFactory(SubAgentFactory):
         # Add Semantic Search tools (always available if company_chunks table exists)
         tools.extend(ADK_SEMANTIC_COMPANY_TOOLS)
         logger.info(f"[CASupportAgent] Added {len(ADK_SEMANTIC_COMPANY_TOOLS)} Semantic Search tools")
+
+        # Add Gmail tools (per-user access via domain-wide delegation)
+        tools.extend(ADK_GMAIL_TOOLS)
+        logger.info(f"[CASupportAgent] Added {len(ADK_GMAIL_TOOLS)} Gmail tools")
 
         logger.info(f"[CASupportAgent] Total tools: {len(tools)}")
         return tools

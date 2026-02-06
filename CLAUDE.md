@@ -282,6 +282,15 @@
   - **State注入**: `marketing_v2.py` で `initial_state["app:user_email"] = context.user_email` を追加
   - **設計判断**: Per-userサービスインスタンス（SheetsServiceと異なり、subject がユーザーごとに異なるため）
 
+- **企業DB・CA支援エージェントにGmailツール4個を統合**
+  - `workspace_tools.py` に `ADK_GMAIL_TOOLS` / `ADK_CALENDAR_TOOLS` サブリスト追加（`ADK_WORKSPACE_TOOLS = GMAIL + CALENDAR`）
+  - `company_db_agent.py` に `ADK_GMAIL_TOOLS` をインポート・統合（9→13ツール）
+  - `ca_support_agent.py` に `ADK_GMAIL_TOOLS` をインポート・統合（27→31ツール）
+  - 両エージェントの指示文に**メールによる企業情報補完**の説明を追加:
+    - 企業DBにない情報（採用担当とのやり取り、条件交渉経緯、非公開求人、選考フィードバック）をメールから取得
+    - ツール選択マトリクスにGmail系4ツール追加
+    - ワークフロー例に「DB情報+メール生情報の統合」パターン追加
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
