@@ -94,53 +94,6 @@ export default function MarketingV2Page({
     return tokenRef.current.secret!;
   }, []);
 
-  // New conversation handler
-  const handleNewConversation = useCallback(() => {
-    setCurrentConversationId(null);
-    if (typeof window !== "undefined" && window.location.pathname !== "/marketing-v2") {
-      window.history.replaceState({}, "", "/marketing-v2");
-    }
-    setAttachments([]);
-    setShareInfo(null);
-    setIsReadOnly(false);
-    // Clear chat messages
-    chatRef.current?.clearMessages();
-  }, []);
-
-  // Select conversation from history
-  const handleSelectConversation = useCallback((conv: Conversation) => {
-    setCurrentConversationId(conv.id);
-    if (typeof window !== "undefined") {
-      window.history.replaceState({}, "", `/marketing-v2/${conv.id}`);
-    }
-    // Load attachments and share status
-    loadAttachments(conv.id);
-    loadShareStatus(conv.id);
-  }, []);
-
-  // Conversation change handler (from chat component)
-  const handleConversationChange = useCallback(
-    (conversationId: string | null) => {
-      setCurrentConversationId(conversationId);
-
-      // Update URL without remounting
-      const target = conversationId
-        ? `/marketing-v2/${conversationId}`
-        : "/marketing-v2";
-      if (typeof window !== "undefined" && window.location.pathname !== target) {
-        window.history.replaceState({}, "", target);
-      }
-
-      // Refresh history panel
-      setRefreshTrigger((t) => t + 1);
-
-      // Load attachments and share status
-      loadAttachments(conversationId);
-      loadShareStatus(conversationId);
-    },
-    []
-  );
-
   // Load attachments
   const loadAttachments = useCallback(
     async (conversationId: string | null) => {
@@ -205,6 +158,55 @@ export default function MarketingV2Page({
       }
     },
     [ensureClientSecret]
+  );
+
+  // New conversation handler
+  const handleNewConversation = useCallback(() => {
+    setCurrentConversationId(null);
+    if (typeof window !== "undefined" && window.location.pathname !== "/marketing-v2") {
+      window.history.replaceState({}, "", "/marketing-v2");
+    }
+    setAttachments([]);
+    setShareInfo(null);
+    setIsReadOnly(false);
+    // Clear chat messages
+    chatRef.current?.clearMessages();
+  }, []);
+
+  // Select conversation from history
+  const handleSelectConversation = useCallback((conv: Conversation) => {
+    setCurrentConversationId(conv.id);
+    if (typeof window !== "undefined") {
+      window.history.replaceState({}, "", `/marketing-v2/${conv.id}`);
+    }
+    // Load conversation messages via chat component
+    chatRef.current?.loadConversation(conv.id);
+    // Load attachments and share status
+    loadAttachments(conv.id);
+    loadShareStatus(conv.id);
+  }, [loadAttachments, loadShareStatus]);
+
+  // Conversation change handler (from chat component)
+  const handleConversationChange = useCallback(
+    (conversationId: string | null) => {
+      setCurrentConversationId(conversationId);
+
+      // Update URL without remounting
+      const target = conversationId
+        ? `/marketing-v2/${conversationId}`
+        : "/marketing-v2";
+      if (typeof window !== "undefined" && window.location.pathname !== target) {
+        window.history.replaceState({}, "", target);
+      }
+
+      // Refresh history panel
+      setRefreshTrigger((t) => t + 1);
+
+      // Load attachments and share status
+      loadAttachments(conversationId);
+      loadShareStatus(conversationId);
+    },
+    [loadAttachments, loadShareStatus]
   );
 
   // Toggle share

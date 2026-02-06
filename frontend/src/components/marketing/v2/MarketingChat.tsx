@@ -72,6 +72,7 @@ export interface MarketingChatProps {
 
 export interface MarketingChatRef {
   clearMessages: () => void;
+  loadConversation: (id: string) => Promise<void>;
 }
 
 // Empty state suggestions - comprehensive queries covering all agents
@@ -185,15 +186,17 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       sendMessage,
       cancelStream,
       clearMessages,
+      loadConversation,
     } = useMarketingChat({
       initialConversationId,
       onConversationChange,
     });
 
-    // Expose clearMessages via ref
+    // Expose clearMessages and loadConversation via ref
     useImperativeHandle(ref, () => ({
       clearMessages,
-    }), [clearMessages]);
+      loadConversation,
+    }), [clearMessages, loadConversation]);
 
     const handleSend = useCallback(
       async (content: string, files?: File[]) => {

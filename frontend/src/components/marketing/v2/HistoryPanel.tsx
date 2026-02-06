@@ -177,7 +177,7 @@ export function HistoryPanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="p-0 w-80 sm:w-96 flex flex-col bg-white border-l border-[#e5e7eb]"
+        className="p-0 w-80 sm:w-96 flex flex-col bg-white border-l border-[#e5e7eb] [&>button:last-of-type]:hidden"
       >
         <SheetTitle className="sr-only">会話履歴</SheetTitle>
 
