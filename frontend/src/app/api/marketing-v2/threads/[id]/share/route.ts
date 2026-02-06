@@ -70,8 +70,8 @@ async function getIdToken(): Promise<string> {
 }
 
 async function forward(request: NextRequest, threadId: string) {
-  // V2 uses the same backend share endpoint
-  const backendUrl = `${BACKEND_BASE.replace(/\/$/, "")}/api/v1/marketing/threads/${threadId}/share`;
+  // V2 uses its own backend share endpoint
+  const backendUrl = `${BACKEND_BASE.replace(/\/$/, "")}/api/v1/marketing-v2/threads/${threadId}/share`;
 
   const clientSecret = request.headers.get(CLIENT_SECRET_HEADER);
   if (!clientSecret) {

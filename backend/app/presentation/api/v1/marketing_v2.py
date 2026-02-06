@@ -196,6 +196,32 @@ async def chat_stream(
                 detail="添付ファイルの合計サイズが上限(20MB)を超えています",
             )
 
+    # Read-only check: non-owners of shared conversations cannot send messages
+    if body.conversation_id:
+        sb_check = get_supabase()
+        try:
+            conv_check = (
+                sb_check.table("marketing_conversations")
+                .select("owner_clerk_id, is_shared")
+                .eq("id", body.conversation_id)
+                .limit(1)
+                .execute()
+            )
+            if conv_check.data:
+                row = conv_check.data[0]
+                if row.get("owner_clerk_id") != context.user_id:
+                    if row.get("is_shared"):
+                        raise HTTPException(
+                            status_code=403,
+                            detail="共有された会話は閲覧のみ可能です",
+                        )
+                    else:
+                        raise HTTPException(status_code=403, detail="Access denied")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"[Auth] Failed to check conversation ownership: {e}")
+
     # Load model asset if specified
     model_asset = None
     asset_id = body.model_asset_id or context.model_asset_id
@@ -612,7 +638,7 @@ async def get_thread_detail(
 
         # Check access (owner or shared)
         is_owner = conversation.get("owner_email") == context.user_email
-        is_shared = conversation.get("metadata", {}).get("is_shared", False)
+        is_shared = conversation.get("is_shared", False)
         if not is_owner and not is_shared:
             raise HTTPException(status_code=403, detail="Access denied")
 
@@ -649,6 +675,8 @@ async def get_thread_detail(
                 "created_at": conversation.get("created_at"),
                 "last_message_at": conversation.get("last_message_at"),
                 "is_owner": is_owner,
+                "is_shared": is_shared,
+                "can_edit": is_owner,
             },
             "messages": messages,
             "context_items": context_items,
@@ -658,3 +686,113 @@ async def get_thread_detail(
     except Exception as exc:
         logger.exception("Failed to load thread %s", thread_id)
         raise HTTPException(status_code=500, detail="Failed to load conversation") from exc
+
+
+# ============================================================
+# Thread Sharing Endpoints (V2)
+# ============================================================
+
+class ShareToggleRequest(BaseModel):
+    """Request body for toggling thread share."""
+    is_shared: bool
+
+
+@router.post("/threads/{thread_id}/share")
+async def toggle_thread_share(
+    thread_id: str,
+    body: ShareToggleRequest,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Toggle sharing for a V2 thread. Only the owner can change sharing status.
+
+    Returns: { "thread_id", "is_shared", "share_url" }
+    """
+    sb = get_supabase()
+
+    try:
+        # Verify ownership
+        conv_result = (
+            sb.table("marketing_conversations")
+            .select("owner_clerk_id, is_shared")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not conv_result.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        if conv_result.data[0].get("owner_clerk_id") != context.user_id:
+            raise HTTPException(status_code=403, detail="Only the owner can share this thread")
+
+        # Update sharing status
+        update_payload: dict = {
+            "is_shared": body.is_shared,
+        }
+        if body.is_shared and not conv_result.data[0].get("is_shared"):
+            # First time sharing - record who and when
+            update_payload["shared_at"] = datetime.utcnow().isoformat()
+            update_payload["shared_by_email"] = context.user_email
+            update_payload["shared_by_clerk_id"] = context.user_id
+
+        sb.table("marketing_conversations").update(update_payload).eq("id", thread_id).execute()
+        logger.info("Thread %s sharing toggled to %s by %s", thread_id, body.is_shared, context.user_email)
+
+        return {
+            "thread_id": thread_id,
+            "is_shared": body.is_shared,
+            "share_url": f"/marketing-v2/{thread_id}" if body.is_shared else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to toggle share for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to update share settings") from exc
+
+
+@router.get("/threads/{thread_id}/share")
+async def get_thread_share_status(
+    thread_id: str,
+    context: MarketingRequestContext = Depends(require_marketing_context),
+):
+    """
+    Get current sharing status for a V2 thread.
+
+    Returns: { "thread_id", "is_shared", "shared_at", "is_owner", "can_toggle", "share_url" }
+    """
+    sb = get_supabase()
+
+    try:
+        conv_result = (
+            sb.table("marketing_conversations")
+            .select("id, is_shared, shared_at, shared_by_email, owner_clerk_id, owner_email")
+            .eq("id", thread_id)
+            .limit(1)
+            .execute()
+        )
+        if not conv_result.data:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        row = conv_result.data[0]
+        is_owner = row.get("owner_clerk_id") == context.user_id
+        is_shared = row.get("is_shared", False)
+
+        # Non-owners can only see shared threads
+        if not is_owner and not is_shared:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        return {
+            "thread_id": thread_id,
+            "is_shared": is_shared,
+            "shared_at": row.get("shared_at"),
+            "shared_by_email": row.get("shared_by_email") if is_owner else None,
+            "owner_email": row.get("owner_email", ""),
+            "is_owner": is_owner,
+            "can_toggle": is_owner,
+            "share_url": f"/marketing-v2/{thread_id}" if is_shared else None,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to get share status for thread %s", thread_id)
+        raise HTTPException(status_code=500, detail="Failed to get share status") from exc
