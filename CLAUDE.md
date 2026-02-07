@@ -460,6 +460,28 @@
   - **ADK知見**: `McpToolset(tool_filter=List[str])` でツール名リストによるフィルタリング。`ToolPredicate`（callable）も使用可能
   - **ADK知見**: `before_model_callback`で`llm_request.config.tools[i].function_declarations[j].description`を直接変更可能
 
+- **Zoho CRMツール最適化（トークン大幅削減）**
+  - **目的**: get_module_schemaレスポンス(~29,140トークン/回)を中心にZoho関連トークンを60-80%削減
+  - **3段階最適化**:
+    1. **ツールレベル（zoho_crm_tools.py）**:
+       - `get_module_schema`: picklist値を20件に制限（500+→20）、複合値の重複排除（`「X」×「Y」`形式）
+       - `get_record_detail`: null/空フィールドを除去（296→~150フィールド、50%削減）
+       - `_clean_lookup_fields(strip_empty=True)` 追加
+       - `_deduplicate_picklist_values()` 新規関数
+       - `_MAX_PICKLIST_VALUES = 20` 定数
+    2. **プラグインレベル（mcp_response_optimizer.py）**:
+       - `before_model_callback` にZoho 12ツールの圧縮説明文を追加
+       - `MCP_TOOL_NAMES` → `COMPRESSIBLE_TOOL_NAMES` にリネーム（5→21ツール）
+       - `_COMPRESSED_DESCRIPTIONS` にZoho Tier 1/2/3 全12ツールを追加
+    3. **指示文レベル**:
+       - `CASupportAgent`: 4,446→1,685文字（**62%削減**）。ツール個別テーブルをグループ一覧に集約、ワークフロー例を3パターンに圧縮
+       - `ZohoCRMAgent`: ツールテーブル→箇条書き、COQL Tipsを簡潔化
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/tools/zoho_crm_tools.py` - picklist圧縮、null除去
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - Zoho description圧縮
+    - `backend/app/infrastructure/adk/agents/zoho_crm_agent.py` - 指示文簡潔化
+    - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - 指示文62%削減
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

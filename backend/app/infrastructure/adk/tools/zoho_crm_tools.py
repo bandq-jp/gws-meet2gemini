@@ -118,11 +118,19 @@ _FUNNEL_STAGES = [
 ]
 
 
-def _clean_lookup_fields(record: Dict[str, Any]) -> Dict[str, Any]:
-    """ルックアップフィールドを展開し、$系システムフィールドを除去。"""
+def _clean_lookup_fields(record: Dict[str, Any], strip_empty: bool = False) -> Dict[str, Any]:
+    """ルックアップフィールドを展開し、$系システムフィールドを除去。
+
+    Args:
+        record: Zohoレコード
+        strip_empty: Trueの場合、null/空文字/空リストのフィールドも除去（トークン節約）
+    """
     cleaned = {}
     for k, v in record.items():
         if k.startswith("$"):
+            continue
+        # Strip empty values when requested
+        if strip_empty and (v is None or v == "" or v == [] or v == {}):
             continue
         if isinstance(v, dict) and "name" in v and "id" in v and len(v) <= 3:
             cleaned[k] = v.get("name")
@@ -194,6 +202,37 @@ def list_crm_modules(
         return {"success": False, "error": str(e)}
 
 
+# Picklist compression settings
+_MAX_PICKLIST_VALUES = 20  # Max picklist values per field (reduces ~500→20)
+
+
+def _deduplicate_picklist_values(values: list) -> list:
+    """Deduplicate composite picklist values like '「X」×「Y」'.
+
+    Zoho picklists often contain cross-product duplicates:
+    - '「マイナビ転職」×「マイナビ転職」' → just keep 'マイナビ転職'
+    - Both '有料_meta_lead' and '有料_meta_lead×スカウト' → keep unique base values
+    """
+    if not values:
+        return values
+
+    seen = set()
+    unique = []
+    for v in values:
+        if not isinstance(v, str):
+            unique.append(v)
+            continue
+        # Extract base value from composite format: '「A」×「B」' or 'A×B'
+        # For cross-product values, keep only unique base parts
+        base = v.split("×")[0].strip().strip("「」")
+        if base and base not in seen:
+            seen.add(base)
+            unique.append(v.split("×")[0].strip() if "×" in v else v)
+        elif not base:
+            unique.append(v)
+    return unique
+
+
 def get_module_schema(
     module_api_name: str,
     include_picklist_values: bool = True,
@@ -234,18 +273,22 @@ def get_module_schema(
                 "api_name": f["api_name"],
                 "display_label": f.get("display_label"),
                 "data_type": f.get("data_type"),
-                "custom_field": f.get("custom_field", False),
             }
 
             dt = f.get("data_type", "")
             if dt in ("picklist", "multiselectpicklist") and include_picklist_values:
-                vals = f.get("pick_list_values", [])
-                entry["pick_list_values"] = vals
+                raw_vals = f.get("pick_list_values", [])
+                # Deduplicate composite values then cap at _MAX_PICKLIST_VALUES
+                deduped = _deduplicate_picklist_values(raw_vals)
+                capped = deduped[:_MAX_PICKLIST_VALUES]
+                entry["pick_list_values"] = capped
+                if len(deduped) > _MAX_PICKLIST_VALUES:
+                    entry["pick_list_total"] = len(raw_vals)
                 picklist_fields.append({
                     "api_name": f["api_name"],
                     "display_label": f.get("display_label"),
-                    "value_count": len(vals),
-                    "sample_values": vals[:10],
+                    "value_count": len(raw_vals),
+                    "values": capped,
                 })
             elif dt == "lookup":
                 lk_module = f.get("lookup_module")
@@ -265,7 +308,6 @@ def get_module_schema(
             "fields": output_fields,
             "picklist_summary": picklist_fields if picklist_fields else None,
             "lookup_summary": lookup_fields if lookup_fields else None,
-            "hint": "query_crm_recordsのfieldsにapi_nameを、whereにピックリスト値を使用できます。",
         }
     except ZohoAuthError:
         return {"success": False, "error": "認証エラー。管理者に連絡してください。"}
@@ -517,7 +559,7 @@ def get_record_detail(
         if not record:
             return {"success": False, "error": f"レコードが見つかりません: {module}/{record_id}"}
 
-        cleaned = _clean_lookup_fields(record)
+        cleaned = _clean_lookup_fields(record, strip_empty=True)
 
         # State tracking
         if tool_context:
