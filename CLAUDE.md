@@ -423,6 +423,43 @@
     - `frontend/src/components/app-sidebar.tsx`
   - 環境変数: `ADK_TELEMETRY_ENABLED`, `PHOENIX_ENDPOINT`, `NEXT_PUBLIC_PHOENIX_URL`
 
+- **GA4 run_report ツール最適化（2026-02-07）**
+  - **目的**: GA4 MCPレスポンスのトークン消費を60-70%削減
+  - **MCPレスポンス圧縮プラグイン**: `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py`
+    - `after_tool_callback` でGA4 `run_report` レスポンスをインターセプト
+    - 冗長なネストJSON（`dimension_values`/`metric_values`）→ パイプ区切りcompact table
+    - 対象: `run_report`, `run_realtime_report`, `run_pivot_report`
+    - 200行上限、圧縮率ログ出力
+  - **プラグイン登録**: `agent_service.py` に `MCPResponseOptimizerPlugin` 追加（`SubAgentStreamingPlugin` と並列）
+  - **AnalyticsAgent指示文強化**: `analytics_agent.py`
+    - `limit` 必須化（デフォルト50）、`order_bys` 必須化
+    - dimension組み合わせの注意（date × 高カーディナリティ禁止）
+    - `dimension_filter` でノイズイベント除外
+    - 主要dimension/metric一覧拡充（14 dimensions、15 metrics）
+    - サイト固有CVイベント情報（Thanks_All, 法人向け問い合わせ完了等）
+    - 効率的なクエリパターン5例
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - **新規**
+    - `backend/app/infrastructure/adk/plugins/__init__.py` - エクスポート追加
+    - `backend/app/infrastructure/adk/agent_service.py` - プラグイン登録
+    - `backend/app/infrastructure/adk/agents/analytics_agent.py` - 指示文強化
+
+- **MCPツール定義最適化（入力トークン削減）**
+  - **目的**: Gemini APIリクエストのツール定義が~10,000入力トークンを消費 → 大幅削減
+  - **McpToolset tool_filter**: 不要ツールを除外してツール数を削減
+    - GA4: 6→2ツール（`run_report`, `run_realtime_report`のみ保持）
+    - GSC: 9→7ツール（`list_properties`, `get_site_details`, `batch_url_inspection`除外）
+    - 合計15→9ツール（40%削減）
+  - **before_model_callback**: 残存ツールの冗長な説明文を圧縮
+    - `run_report`の巨大なHints/Examples/Notesセクションを除去
+    - 事前定義の簡潔な説明文で置換（エージェント指示文に詳細は記載済み）
+    - その他MCPツールも200文字超の説明はHints/Notes/Examplesを自動ストリップ
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/mcp_manager.py` - `GA4_TOOL_FILTER`, `GSC_TOOL_FILTER`定数追加、`tool_filter`パラメータ適用
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - `before_model_callback`追加（ツール説明圧縮）
+  - **ADK知見**: `McpToolset(tool_filter=List[str])` でツール名リストによるフィルタリング。`ToolPredicate`（callable）も使用可能
+  - **ADK知見**: `before_model_callback`で`llm_request.config.tools[i].function_declarations[j].description`を直接変更可能
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

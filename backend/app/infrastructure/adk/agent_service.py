@@ -32,7 +32,7 @@ from opentelemetry import trace as otel_trace
 
 from .agents import OrchestratorAgentFactory
 from .mcp_manager import ADKMCPManager
-from .plugins import SubAgentStreamingPlugin
+from .plugins import SubAgentStreamingPlugin, MCPResponseOptimizerPlugin
 from .utils import normalize_agent_name, sanitize_error
 
 if TYPE_CHECKING:
@@ -286,14 +286,16 @@ class ADKAgentService:
             # Create plugin for streaming sub-agent internal events
             # This captures tool calls, reasoning, and errors from within sub-agents
             sub_agent_plugin = SubAgentStreamingPlugin(emit_callback=emit_event)
+            # Plugin to compress verbose MCP responses (GA4 etc.) for token savings
+            mcp_optimizer_plugin = MCPResponseOptimizerPlugin()
 
-            # Create runner with memory service and sub-agent streaming plugin
+            # Create runner with memory service and plugins
             runner = Runner(
                 agent=orchestrator,
                 app_name="marketing_ai",
                 session_service=self._session_service,
                 memory_service=self._memory_service if self._settings.memory_preload_enabled else None,
-                plugins=[sub_agent_plugin],
+                plugins=[sub_agent_plugin, mcp_optimizer_plugin],
             )
 
             # Create user content (multimodal: text + file attachments)
