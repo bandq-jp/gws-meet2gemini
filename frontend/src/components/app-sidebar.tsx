@@ -21,6 +21,7 @@ import {
   Settings,
   BarChart3,
   Building2,
+  Briefcase,
   Award,
   User,
   LogOut,
@@ -34,6 +35,7 @@ import {
   MessageSquare,
   PieChart,
   ImageIcon,
+  Activity,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -58,6 +60,13 @@ export function AppSidebar() {
       id: "hitocari",
       enabled: true,
       icon: Users,
+    },
+    {
+      name: "Agent Analytics",
+      href: "/operations",
+      id: "operations",
+      enabled: true,
+      icon: Activity,
     },
     {
       name: "マーケティング",
@@ -213,6 +222,17 @@ export function AppSidebar() {
             id: "marketing-dashboard",
             enabled: true,
             description: "Ahrefs・GSC・GA4・社内CRMの主要指標を俯瞰",
+          },
+        ];
+      case 'operations':
+        return [
+          {
+            title: "b&q Agent Analytics",
+            icon: Activity,
+            href: "/operations",
+            id: "operations-home",
+            enabled: true,
+            description: "ADKトレース・ツール・トークン・ルーティング分析",
           },
         ];
       case 'monotech':

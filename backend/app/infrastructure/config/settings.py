@@ -163,6 +163,10 @@ class Settings:
     slack_bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
     slack_user_token: str = os.getenv("SLACK_USER_TOKEN", "")
 
+    # Agent Analytics / Telemetry
+    adk_telemetry_enabled: bool = os.getenv("ADK_TELEMETRY_ENABLED", "true").lower() == "true"
+    phoenix_endpoint: str = os.getenv("PHOENIX_ENDPOINT", "http://localhost:6006/v1/traces")
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

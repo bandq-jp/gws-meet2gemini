@@ -28,6 +28,7 @@ from google.adk.memory import InMemoryMemoryService
 from google.adk.runners import Runner, RunConfig
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
+from opentelemetry import trace as otel_trace
 
 from .agents import OrchestratorAgentFactory
 from .mcp_manager import ADKMCPManager
@@ -318,6 +319,13 @@ class ADKAgentService:
                 role="user",
                 parts=parts,
             )
+
+            # Inject user/conversation info into current OTel span for SupabaseSpanExporter
+            current_span = otel_trace.get_current_span()
+            if current_span and current_span.is_recording():
+                current_span.set_attribute("user.email", user_email)
+                current_span.set_attribute("user.id", user_id)
+                current_span.set_attribute("conversation.id", session_id)
 
             # Progress: all setup done, LLM analysis starting
             yield {"type": "progress", "text": "エージェントを選択中..."}

@@ -7,6 +7,7 @@ import {
   Users,
   Building2,
   Briefcase,
+  Target,
   ArrowRight,
   FileText,
   Search,
@@ -110,6 +111,44 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
+          {/* 業務推進室 Card */}
+          <Card className="relative overflow-hidden border border-primary/20 bg-white shadow-sm">
+            <CardHeader className="pb-2">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <Target className="w-6 h-6" />
+                </div>
+                <Badge variant="default">
+                  利用可能
+                </Badge>
+              </div>
+              <CardTitle className="text-xl">業務推進室</CardTitle>
+              <CardDescription>
+                全社横断の業務改善施策を整理・推進する部門ページ
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <TrendingUp className="w-4 h-4" />
+                <span>施策進行管理</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileText className="w-4 h-4" />
+                <span>運用ルール整理</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Search className="w-4 h-4" />
+                <span>課題抽出と改善アクション管理</span>
+              </div>
+              <Button asChild className="w-full mt-4" variant="secondary">
+                <Link href="/operations" className="flex items-center gap-2">
+                  ページを開く
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+
           {/* モノテック Card */}
           <Card className="relative overflow-hidden opacity-75">
             <CardHeader className="pb-2">
@@ -188,14 +227,14 @@ export default function Dashboard() {
                 </Link>
               </Button>
               
-              <Button variant="outline" disabled className="h-auto p-4 opacity-50">
-                <div className="flex flex-col items-center gap-2">
-                  <Search className="w-6 h-6" />
+              <Button asChild variant="outline" className="h-auto p-4">
+                <Link href="/operations" className="flex flex-col items-center gap-2">
+                  <Target className="w-6 h-6" />
                   <div className="text-center">
-                    <div className="font-medium">候補者検索</div>
-                    <div className="text-xs text-muted-foreground">準備中</div>
+                    <div className="font-medium">業務推進室</div>
+                    <div className="text-xs text-muted-foreground">施策管理</div>
                   </div>
-                </div>
+                </Link>
               </Button>
               
               <Button variant="outline" disabled className="h-auto p-4 opacity-50">

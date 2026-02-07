@@ -8,6 +8,7 @@ from .custom_schemas import router as custom_schemas_router
 from .marketing import router as marketing_router
 from .marketing_v2 import router as marketing_v2_router
 from .image_gen import router as image_gen_router
+from .agent_analytics import router as agent_analytics_router
 
 router = APIRouter()
 router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
@@ -18,3 +19,4 @@ router.include_router(custom_schemas_router)
 router.include_router(marketing_router)
 router.include_router(marketing_v2_router)
 router.include_router(image_gen_router)
+router.include_router(agent_analytics_router)

@@ -19,7 +19,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "b&q Hub",
-  description: "b&q社内統合管理システム - ひとキャリ、モノテック、AchieveHR",
+  description: "b&q社内統合管理システム - ひとキャリ、業務推進室、モノテック、AchieveHR",
   keywords: ["b&q", "人材", "採用", "議事録", "CRM", "内部システム"],
   authors: [{ name: "b&q Inc." }],
   icons: {

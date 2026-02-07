@@ -357,6 +357,72 @@
   - 環境変数: `SLACK_BOT_TOKEN`, `SLACK_USER_TOKEN`
   - **Slack API制約**: `search.messages`はUser Token(`xoxp-`)のみ対応、Bot Token(`xoxb-`)では`not_allowed_token_type`エラー
 
+- **b&q Hub部門追加: 業務推進室（2026-02-07）**
+  - ユーザー要望: 「サイドバーと最初のページ（ダッシュボード）に新部門として業務推進室を追加」
+  - 変更ファイル:
+    - `frontend/src/components/app-sidebar.tsx` - `teamItems` に `業務推進室`（`/operations`）を追加、`operations` 用メニューを追加
+    - `frontend/src/app/page.tsx` - サービスカードに `業務推進室` を追加、クイックアクションにも導線を追加
+    - `frontend/src/app/operations/page.tsx` - 新規部門トップページを追加
+    - `frontend/src/app/layout.tsx` - metadata description を `業務推進室` 含む内容に更新
+
+- **b&q Agent Analytics ダッシュボード実装（2026-02-07）**
+  - **目的**: `/operations` ページをADKエージェント観測・分析ダッシュボードに変換
+  - **アーキテクチャ**: Phoenix + 独自UI ハイブリッド
+    - ADK OTelスパン → BatchSpanProcessor × 2（Supabase + Phoenix OTLP）
+    - 独自UI (`/operations`): 日常モニタリング（KPI、トレース、ツール統計、トークンコスト）
+    - Phoenix UI (`:6006`): 深い分析（スパンウォーターフォール、評価）
+  - **Phase 1 - データ収集基盤**:
+    - 依存追加: `arize-phoenix`, `openinference-instrumentation-google-adk`, `opentelemetry-exporter-otlp-proto-http`
+    - DBマイグレーション: `supabase/migrations/0021_add_agent_traces.sql`
+      - `agent_traces` テーブル（trace_id, user_email, tokens, sub_agents_used[], tools_used[]）
+      - `agent_spans` テーブル（span_id, operation_name, agent_name, tool_name, attributes JSONB）
+      - `agent_daily_summary`, `agent_tool_summary` ビュー
+    - カスタムSpanExporter: `backend/app/infrastructure/adk/telemetry/supabase_exporter.py`
+      - OTel SpanExporter継承、ADK属性パース、Supabaseバッチ書き込み
+      - invocationルートスパン検出 → agent_traces集約
+    - OTel初期化: `backend/app/infrastructure/adk/telemetry/setup.py`
+      - SupabaseSpanExporter + OTLPSpanExporter（Phoenix）の2つを並列登録
+      - `GoogleADKInstrumentor().instrument()` でOpenInference計装
+    - 設定追加: `settings.py` に `adk_telemetry_enabled`, `phoenix_endpoint`
+    - agent_service.py: OTelスパンに `user.email`, `user.id`, `conversation.id` 注入
+    - marketing/agent_service.py: テレメトリ初期化呼び出し追加
+  - **Phase 2 - バックエンドAPI**:
+    - `backend/app/presentation/api/v1/agent_analytics.py` - 8 GETエンドポイント
+      - `/overview`, `/traces`, `/traces/{trace_id}`, `/tool-usage`, `/agent-routing`, `/token-usage`, `/user-usage`, `/errors`
+    - 認証: `require_marketing_context` 流用
+  - **Phase 3 - フロントエンド**:
+    - 型定義: `frontend/src/lib/operations/types.ts`
+    - フック: `frontend/src/hooks/use-agent-analytics.ts`（8カスタムフック、トークンキャッシュ付き）
+    - コンポーネント（10個、全て新規）:
+      - `PeriodFilter.tsx` - Today/7d/30d/All切替
+      - `OverviewCards.tsx` - KPIカード4枚
+      - `TraceList.tsx` - トレース一覧テーブル（ページネーション、Phoenix UIリンク）
+      - `TraceDetail.tsx` - Sheet詳細表示
+      - `SpanTree.tsx` - 再帰スパンツリー+ウォーターフォール
+      - `ToolUsageChart.tsx` - recharts棒グラフ+テーブル
+      - `AgentRoutingChart.tsx` - recharts円グラフ+棒グラフ
+      - `TokenUsageChart.tsx` - recharts AreaChart+コストサマリー
+      - `UserUsageTable.tsx` - ユーザー別使用状況テーブル
+      - `ErrorList.tsx` - エラー追跡一覧
+    - メインページ: `frontend/src/app/operations/page.tsx` 全面書き換え
+    - サイドバー: `app-sidebar.tsx` - 「業務推進室」→「Agent Analytics」に変更、Activityアイコン
+  - 新規ファイル（15）:
+    - `supabase/migrations/0021_add_agent_traces.sql`
+    - `backend/app/infrastructure/adk/telemetry/__init__.py`
+    - `backend/app/infrastructure/adk/telemetry/supabase_exporter.py`
+    - `backend/app/infrastructure/adk/telemetry/setup.py`
+    - `backend/app/presentation/api/v1/agent_analytics.py`
+    - `frontend/src/lib/operations/types.ts`
+    - `frontend/src/hooks/use-agent-analytics.ts`
+    - `frontend/src/components/operations/` 以下10コンポーネント
+  - 変更ファイル（5）:
+    - `backend/app/infrastructure/config/settings.py`
+    - `backend/app/infrastructure/marketing/agent_service.py`
+    - `backend/app/infrastructure/adk/agent_service.py`
+    - `backend/app/presentation/api/v1/__init__.py`
+    - `frontend/src/components/app-sidebar.tsx`
+  - 環境変数: `ADK_TELEMETRY_ENABLED`, `PHOENIX_ENDPOINT`, `NEXT_PUBLIC_PHOENIX_URL`
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
