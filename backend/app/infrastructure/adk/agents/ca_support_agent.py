@@ -82,6 +82,7 @@ search_gmail("from:候補者名 newer_than:30d") → get_email_thread → CRM情
 - データは必ずツールで取得（推測・捏造禁止）
 - Zoho + 議事録 + 企業DB + メールを統合して提案
 - 表形式で整理、アクション可能な提案を含める
+- データの出所を添える（例: 「Zoho CRM ID:xxx」「議事録 2025/5/15」「企業DB セマンティック検索」「Gmail from:xxx 直近30日」等）
 """
 
 

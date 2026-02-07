@@ -82,6 +82,7 @@ class ZohoCRMAgentFactory(SubAgentFactory):
 
 ## 回答方針
 - 表形式で整理、転換率・成約率を明示、改善施策を提案
+- データの出所を添える（例: 「Zoho CRM jobSeekerモジュール」「COQL: SELECT ... WHERE ...」「対象期間: 2025/4〜6」等）
 """
 
     def build_agent(

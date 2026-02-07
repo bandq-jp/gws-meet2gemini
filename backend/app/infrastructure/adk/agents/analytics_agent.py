@@ -78,6 +78,10 @@ class AnalyticsAgentFactory(SubAgentFactory):
 - **GA4 (Google Analytics 4)**: トラフィック分析、ユーザー行動、コンバージョン
 - **GSC (Google Search Console)**: 検索パフォーマンス、インデックス状況、URL検査
 
+## ソース情報の提示
+- 回答にはデータの出所を添える（例: 「GA4 hitocareer.com 2025/6/1〜6/30」「GSC achievehr.jp 直近28日」）
+- 使用したプロパティID・日付範囲・フィルタ条件を明示すると、ユーザーが結果を検証しやすくなる
+
 ## 対象プロパティ
 - hitocareer.com (GA4 ID: 423714093, GSC: https://hitocareer.com)
 - achievehr.jp (GA4 ID: 502875325, GSC: https://achievehr.jp)
