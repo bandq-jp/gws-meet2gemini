@@ -16,13 +16,43 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ChatMessage } from "./ChatMessage";
 import type { Message } from "@/lib/marketing/types";
+import type {
+  FeedbackTag,
+  FeedbackDimension,
+  MessageFeedback,
+  MessageAnnotation,
+  FeedbackCreatePayload,
+  AnnotationCreatePayload,
+} from "@/lib/feedback/types";
 
 export interface MessageListProps {
   messages: Message[];
   isStreaming?: boolean;
+  // Feedback props
+  feedbackByMessage?: Record<string, MessageFeedback>;
+  annotationsByMessage?: Record<string, MessageAnnotation[]>;
+  feedbackTags?: FeedbackTag[];
+  feedbackDimensions?: FeedbackDimension[];
+  isFeedbackMode?: boolean;
+  conversationId?: string | null;
+  onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
+  onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
+  onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
 }
 
-export function MessageList({ messages, isStreaming }: MessageListProps) {
+export function MessageList({
+  messages,
+  isStreaming,
+  feedbackByMessage,
+  annotationsByMessage,
+  feedbackTags,
+  feedbackDimensions,
+  isFeedbackMode,
+  conversationId,
+  onSubmitFeedback,
+  onCreateAnnotation,
+  onDeleteAnnotation,
+}: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMessageCountRef = useRef(0);
   const isNearBottomRef = useRef(true);
@@ -120,7 +150,19 @@ export function MessageList({ messages, isStreaming }: MessageListProps) {
       <div ref={scrollRef} className="h-full overflow-y-auto overflow-x-hidden">
         <div className="max-w-3xl mx-auto py-4 sm:py-6 px-4 sm:px-6 space-y-5 sm:space-y-6 min-w-0">
           {messages.map((msg) => (
-            <ChatMessage key={msg.id} message={msg} />
+            <ChatMessage
+              key={msg.id}
+              message={msg}
+              feedback={feedbackByMessage?.[msg.id]}
+              annotations={annotationsByMessage?.[msg.id]}
+              feedbackTags={feedbackTags}
+              feedbackDimensions={feedbackDimensions}
+              isFeedbackMode={isFeedbackMode}
+              conversationId={conversationId || undefined}
+              onSubmitFeedback={onSubmitFeedback}
+              onCreateAnnotation={onCreateAnnotation}
+              onDeleteAnnotation={onDeleteAnnotation}
+            />
           ))}
         </div>
       </div>

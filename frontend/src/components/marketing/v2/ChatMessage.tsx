@@ -52,6 +52,16 @@ import type {
   CodeResultActivityItem,
 } from "@/lib/marketing/types";
 import { ChartRenderer } from "./charts";
+import { FeedbackBar } from "@/components/feedback/FeedbackBar";
+import { AnnotationLayer } from "@/components/feedback/AnnotationLayer";
+import type {
+  FeedbackTag,
+  FeedbackDimension,
+  MessageFeedback,
+  MessageAnnotation,
+  FeedbackCreatePayload,
+  AnnotationCreatePayload,
+} from "@/lib/feedback/types";
 
 // ---------------------------------------------------------------------------
 // Sub-agent configuration
@@ -1212,15 +1222,39 @@ function UserMessage({ message }: { message: Message }) {
 // AssistantMessage
 // ---------------------------------------------------------------------------
 
-function AssistantMessage({ message }: { message: Message }) {
+interface AssistantMessageProps {
+  message: Message;
+  feedback?: MessageFeedback | null;
+  annotations?: MessageAnnotation[];
+  feedbackTags?: FeedbackTag[];
+  feedbackDimensions?: FeedbackDimension[];
+  isFeedbackMode?: boolean;
+  conversationId?: string;
+  onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
+  onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
+  onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
+}
+
+function AssistantMessage({
+  message,
+  feedback,
+  annotations = [],
+  feedbackTags = [],
+  feedbackDimensions = [],
+  isFeedbackMode = false,
+  conversationId,
+  onSubmitFeedback,
+  onCreateAnnotation,
+  onDeleteAnnotation,
+}: AssistantMessageProps) {
   const items = message.activityItems || [];
   const hasItems = items.length > 0;
 
   // Show thinking indicator when streaming started but no events yet
   const showThinking = !!message.isStreaming && !hasItems && !message.content;
 
-  return (
-    <div className="assistant-response overflow-hidden min-w-0">
+  const messageContent = (
+    <>
       {showThinking ? (
         <ThinkingIndicator progressText={message.progressText} />
       ) : hasItems ? (
@@ -1239,6 +1273,38 @@ function AssistantMessage({ message }: { message: Message }) {
           )}
         </div>
       ) : null}
+    </>
+  );
+
+  return (
+    <div className="assistant-response overflow-hidden min-w-0 group/msg">
+      {isFeedbackMode && onCreateAnnotation && onDeleteAnnotation && conversationId ? (
+        <AnnotationLayer
+          messageId={message.id}
+          conversationId={conversationId}
+          plainText={message.content || ""}
+          annotations={annotations}
+          tags={feedbackTags}
+          onCreateAnnotation={onCreateAnnotation}
+          onDeleteAnnotation={onDeleteAnnotation}
+        >
+          {messageContent}
+        </AnnotationLayer>
+      ) : (
+        messageContent
+      )}
+
+      {/* Feedback bar (always visible on hover, always visible in FB mode) */}
+      {!message.isStreaming && onSubmitFeedback && (
+        <FeedbackBar
+          messageId={message.id}
+          existingFeedback={feedback}
+          tags={feedbackTags}
+          dimensions={feedbackDimensions}
+          onSubmit={onSubmitFeedback}
+          isFeedbackMode={isFeedbackMode}
+        />
+      )}
     </div>
   );
 }
@@ -1249,11 +1315,44 @@ function AssistantMessage({ message }: { message: Message }) {
 
 export interface ChatMessageProps {
   message: Message;
+  feedback?: MessageFeedback | null;
+  annotations?: MessageAnnotation[];
+  feedbackTags?: FeedbackTag[];
+  feedbackDimensions?: FeedbackDimension[];
+  isFeedbackMode?: boolean;
+  conversationId?: string;
+  onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
+  onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
+  onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
 }
 
-export const ChatMessage = memo(function ChatMessage({ message }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({
+  message,
+  feedback,
+  annotations,
+  feedbackTags,
+  feedbackDimensions,
+  isFeedbackMode,
+  conversationId,
+  onSubmitFeedback,
+  onCreateAnnotation,
+  onDeleteAnnotation,
+}: ChatMessageProps) {
   if (message.role === "user") {
     return <UserMessage message={message} />;
   }
-  return <AssistantMessage message={message} />;
+  return (
+    <AssistantMessage
+      message={message}
+      feedback={feedback}
+      annotations={annotations}
+      feedbackTags={feedbackTags}
+      feedbackDimensions={feedbackDimensions}
+      isFeedbackMode={isFeedbackMode}
+      conversationId={conversationId}
+      onSubmitFeedback={onSubmitFeedback}
+      onCreateAnnotation={onCreateAnnotation}
+      onDeleteAnnotation={onDeleteAnnotation}
+    />
+  );
 });

@@ -7,8 +7,10 @@
  * Full-stack mode with all agents enabled by default.
  */
 
-import { useCallback, forwardRef, useImperativeHandle, useState } from "react";
+import { useCallback, forwardRef, useImperativeHandle, useState, useEffect, useRef } from "react";
 import { useMarketingChat } from "@/hooks/use-marketing-chat-v2";
+import { useFeedback } from "@/hooks/use-feedback";
+import { FeedbackModeToggle } from "@/components/feedback/FeedbackModeToggle";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { SuggestionCarousel } from "./SuggestionCarousel";
@@ -76,6 +78,7 @@ export interface MarketingChatProps {
   attachments?: Attachment[];
   isReadOnly?: boolean;
   className?: string;
+  getClientSecret?: () => string | null;
 }
 
 export interface MarketingChatRef {
@@ -312,6 +315,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       attachments = [],
       isReadOnly = false,
       className = "",
+      getClientSecret: getClientSecretProp,
     },
     ref
   ) {
@@ -330,6 +334,27 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       initialConversationId,
       onConversationChange,
     });
+
+    // Feedback system
+    const getClientSecretFn = useCallback(() => getClientSecretProp?.() || null, [getClientSecretProp]);
+    const feedback = useFeedback(getClientSecretFn);
+
+    // Load feedback master data on mount (safe if token not ready — will no-op)
+    const masterDataLoaded = useRef(false);
+    useEffect(() => {
+      if (getClientSecretProp && !masterDataLoaded.current) {
+        feedback.loadMasterData().then(() => { masterDataLoaded.current = true; });
+      }
+    }, [getClientSecretProp]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Load feedback when conversation changes
+    useEffect(() => {
+      if (conversationId && getClientSecretProp) {
+        feedback.loadConversationFeedback(conversationId);
+      } else {
+        feedback.clearFeedback();
+      }
+    }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Expose clearMessages and loadConversation via ref
     useImperativeHandle(ref, () => ({
@@ -421,6 +446,14 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
                 </Tooltip>
               )}
 
+              {/* FB Mode Toggle */}
+              {!isReadOnly && (
+                <FeedbackModeToggle
+                  isActive={feedback.isFeedbackMode}
+                  onToggle={feedback.setIsFeedbackMode}
+                />
+              )}
+
               {/* More menu (attachments only now) */}
               {attachments.length > 0 && (
                 <DropdownMenu>
@@ -447,7 +480,19 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
                 <EmptyState onSend={handleSend} />
               </div>
             ) : (
-              <MessageList messages={messages} isStreaming={isStreaming} />
+              <MessageList
+                messages={messages}
+                isStreaming={isStreaming}
+                feedbackByMessage={feedback.feedbackByMessage}
+                annotationsByMessage={feedback.annotationsByMessage}
+                feedbackTags={feedback.tags}
+                feedbackDimensions={feedback.dimensions}
+                isFeedbackMode={feedback.isFeedbackMode}
+                conversationId={conversationId}
+                onSubmitFeedback={feedback.submitFeedback}
+                onCreateAnnotation={feedback.createAnnotation}
+                onDeleteAnnotation={feedback.deleteAnnotation}
+              />
             )}
 
             {/* Error display (U-5: user-friendly messages with retry) */}

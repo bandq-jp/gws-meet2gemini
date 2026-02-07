@@ -278,6 +278,7 @@ export default function MarketingV2Page({
         attachments={attachments}
         isReadOnly={isReadOnly}
         className="h-full"
+        getClientSecret={() => tokenRef.current.secret}
       />
     </>
   );

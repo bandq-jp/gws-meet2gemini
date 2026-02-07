@@ -528,6 +528,64 @@
     - `frontend/src/components/app-sidebar.tsx` - operations項目・case削除
     - `frontend/src/app/page.tsx` - 業務推進室カード・クイックリンク削除
 
+- **フィードバック・アノテーションシステム全面実装（2026-02-07）**
+  - **目的**: b&qエージェントの応答品質をユーザーFBで改善するための包括的フィードバック収集・レビュー・エクスポート基盤
+  - **UXモード**:
+    - **通常モード**: アシスタントメッセージにホバーでThumbsUp/Down表示。ThumbsDownでPopover（タグ選択・コメント・修正案・次元別評価）
+    - **FBモード**: ヘッダーのトグルで有効化。メッセージ内テキスト選択→アノテーション作成（重要度・タグ・コメント・修正案）
+  - **テキストアンカリング**: W3C Web Annotation Data Model準拠。position（文字オフセット）+ quote（prefix/exact/suffix）デュアルセレクタで永続化
+  - **DBスキーマ**: 4テーブル + 3ビュー
+    - `feedback_dimensions`: 評価次元マスタ（accuracy, relevance, completeness, tone, tool_usage, helpfulness の6次元プリセット）
+    - `feedback_tags`: タグマスタ（positive/negative/neutral 16タグプリセット）
+    - `message_feedback`: メッセージ単位FB（rating, tags, comment, correction, dimension_scores, content_hash）UNIQUE(message_id, user_email)
+    - `message_annotations`: テキスト範囲アノテーション（selector JSONB, severity, tags, comment, correction）
+    - ビュー: `feedback_conversation_summary`, `feedback_tag_frequency`, `feedback_daily_trend`
+  - **バックエンドAPI**: `backend/app/presentation/api/v1/feedback.py` - 13エンドポイント
+    - FB CRUD: `GET/POST /messages/{id}/feedback`, `POST /messages/{id}/annotations`, `DELETE /annotations/{id}`
+    - レビュー: `GET /overview`, `GET /list`, `PUT /messages/{id}/feedback/review`
+    - マスタ: `GET /tags`, `GET /dimensions`
+    - エクスポート: `GET /export` (JSONL/CSV StreamingResponse)
+    - 認証: MarketingTokenService流用（x-marketing-client-secret）
+  - **フロントエンド**:
+    - 型定義: `frontend/src/lib/feedback/types.ts` - 全型（FeedbackDimension, FeedbackTag, MessageFeedback, MessageAnnotation, セレクタ型等）
+    - テキスト選択: `frontend/src/lib/feedback/text-selector.ts` - captureTextSelection（TreeWalker+オフセット計算）、resolveSelector（ファジーフォールバック）
+    - フック: `frontend/src/hooks/use-feedback.ts` - useFeedback（チャット用）、useFeedbackDashboard（レビュー用）
+    - コンポーネント:
+      - `FeedbackBar.tsx` - メッセージ下のFBコントロール（ThumbsUp/Down + Popover）
+      - `AnnotationLayer.tsx` - FBモード時のテキスト選択+アノテーション表示
+      - `FeedbackModeToggle.tsx` - ヘッダーのFBモード切替トグル
+      - `TagSelector.tsx` - チップ型タグ選択（センチメント別フィルタ）
+      - `DimensionRating.tsx` - 星評価コンポーネント（1-5）
+    - APIプロキシ: `frontend/src/app/api/feedback/[...path]/route.ts` - キャッチオールプロキシ（Cloud Run ID Token対応）
+    - レビューダッシュボード: `frontend/src/app/feedback/page.tsx` - KPIカード、日次トレンド、タグ頻度、フィルタ付き一覧、詳細Sheet、レビューワークフロー、JSONL/CSVエクスポート
+  - **既存ファイル変更**:
+    - `ChatMessage.tsx` - FeedbackBar, AnnotationLayer統合
+    - `MessageList.tsx` - FB props パススルー
+    - `MarketingChat.tsx` - useFeedbackフック統合、FBモードトグル追加、getClientSecret prop追加
+    - `marketing-v2/page.tsx` - getClientSecret propをMarketingChatに渡す
+    - `app-sidebar.tsx` - マーケティングメニューに「FB レビュー」追加（ClipboardCheckアイコン）、/feedbackパスでマーケティングチーム判定
+    - `backend/app/presentation/api/v1/__init__.py` - feedback router追加
+  - 新規ファイル（14）:
+    - `supabase/migrations/0022_add_feedback_system.sql`
+    - `backend/app/presentation/api/v1/feedback.py`
+    - `frontend/src/lib/feedback/types.ts`
+    - `frontend/src/lib/feedback/text-selector.ts`
+    - `frontend/src/hooks/use-feedback.ts`
+    - `frontend/src/components/feedback/FeedbackBar.tsx`
+    - `frontend/src/components/feedback/AnnotationLayer.tsx`
+    - `frontend/src/components/feedback/FeedbackModeToggle.tsx`
+    - `frontend/src/components/feedback/TagSelector.tsx`
+    - `frontend/src/components/feedback/DimensionRating.tsx`
+    - `frontend/src/components/feedback/index.ts`
+    - `frontend/src/app/api/feedback/[...path]/route.ts`
+    - `frontend/src/app/feedback/page.tsx`
+    - `docs/feedback-system-proposal.md`
+  - **設計判断**:
+    - 新規ライブラリ依存なし（既存shadcn/ui + recharts + lucideで全UI構築）
+    - content_hash（SHA-256）でメッセージ内容変更検知
+    - レビューワークフロー: new → reviewed → actioned → dismissed
+    - エクスポート: JSONL（RLHF/DPO学習用）、CSV（スプレッドシート分析用）
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
