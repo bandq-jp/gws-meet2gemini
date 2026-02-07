@@ -1,6 +1,5 @@
-"""ADK Telemetry module - OpenTelemetry span collection for agent analytics."""
+"""ADK Telemetry module - OpenTelemetry span collection for Phoenix."""
 
 from .setup import setup_adk_telemetry
-from .supabase_exporter import SupabaseSpanExporter
 
-__all__ = ["setup_adk_telemetry", "SupabaseSpanExporter"]
+__all__ = ["setup_adk_telemetry"]

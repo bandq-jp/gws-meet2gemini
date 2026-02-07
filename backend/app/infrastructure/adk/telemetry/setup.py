@@ -1,9 +1,9 @@
 """
-ADK Telemetry Setup - Initialize OpenTelemetry providers for agent analytics.
+ADK Telemetry Setup - Initialize OpenTelemetry providers for Arize Phoenix.
 
-Registers two span processors in parallel:
-1. SupabaseSpanExporter → Supabase DB (for custom dashboard)
-2. OTLPSpanExporter → Arize Phoenix (for advanced trace analysis)
+Registers:
+1. OTLPSpanExporter → Arize Phoenix (trace analysis, token tracking, cache metrics)
+2. GoogleADKInstrumentor → OpenInference semantic conventions
 """
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ def setup_adk_telemetry(settings: Settings) -> None:
     """Initialize ADK OpenTelemetry providers (call once at app startup).
 
     Sets up:
-    - SupabaseSpanExporter for custom dashboard data
-    - OTLPSpanExporter for Phoenix UI (if phoenix_endpoint configured)
+    - OTLPSpanExporter for Phoenix UI
     - GoogleADKInstrumentor for OpenInference semantic conventions
+    - Cache token attribute patch for Phoenix cache metrics
     """
     global _initialized
     if _initialized:
@@ -36,22 +36,9 @@ def setup_adk_telemetry(settings: Settings) -> None:
         from google.adk.telemetry.setup import OTelHooks, maybe_set_otel_providers
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-        from .supabase_exporter import SupabaseSpanExporter
-
         span_processors = []
 
-        # 1. Supabase exporter (always enabled)
-        supabase_exporter = SupabaseSpanExporter()
-        span_processors.append(
-            BatchSpanProcessor(
-                supabase_exporter,
-                max_queue_size=2048,
-                max_export_batch_size=128,
-            )
-        )
-        logger.info("[Telemetry] SupabaseSpanExporter registered")
-
-        # 2. Phoenix OTLP exporter (if endpoint configured)
+        # Phoenix OTLP exporter
         phoenix_endpoint = settings.phoenix_endpoint
         if phoenix_endpoint:
             try:
@@ -71,8 +58,11 @@ def setup_adk_telemetry(settings: Settings) -> None:
                 )
             except Exception as e:
                 logger.warning(f"[Telemetry] Failed to initialize Phoenix exporter: {e}")
+        else:
+            logger.info("[Telemetry] No PHOENIX_ENDPOINT configured, telemetry disabled")
+            return
 
-        # Register all processors with ADK's OTel setup
+        # Register processors with ADK's OTel setup
         hooks = OTelHooks(span_processors=span_processors)
 
         # Set OTEL_SERVICE_NAME for resource detection
@@ -82,7 +72,7 @@ def setup_adk_telemetry(settings: Settings) -> None:
         maybe_set_otel_providers(otel_hooks_to_setup=[hooks])
         logger.info("[Telemetry] ADK OTel providers initialized")
 
-        # 3. OpenInference ADK Instrumentor (enriches spans for Phoenix)
+        # OpenInference ADK Instrumentor (enriches spans for Phoenix)
         try:
             from openinference.instrumentation.google_adk import GoogleADKInstrumentor
 

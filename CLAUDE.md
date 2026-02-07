@@ -505,6 +505,29 @@
     - OpenAI: 50%割引 vs Gemini: 90%割引（Explicit Cache）
     - Gemini Implicit Cache（自動、設定不要、90%割引）も別途存在するが、ADKのContext CacheはExplicit
 
+- **Phoenix キャッシュトークン表示パッチ**
+  - OpenInference instrumentorが`cached_content_token_count`を`llm.token_count.prompt_details.cache_read`にマッピングしていなかった
+  - `telemetry/setup.py`に`_patch_cache_token_attributes()`を追加し、モンキーパッチで補完
+  - Phoenixのトレース UIでキャッシュヒットトークン数が表示されるように
+
+- **Agent Analytics ページ削除（Phoenix UIに移行）**
+  - `/operations`ページ・サイドバー・ダッシュボードカードを全削除
+  - SupabaseSpanExporter削除（agent_traces/agent_spansテーブルへの書き込みを停止）
+  - agent_analytics API（`/api/v1/agent-analytics`）削除
+  - テレメトリはPhoenix OTLPエクスポーターのみに集約
+  - 削除ファイル:
+    - `frontend/src/app/operations/page.tsx`
+    - `frontend/src/components/operations/` (8コンポーネント)
+    - `frontend/src/hooks/use-agent-analytics.ts`
+    - `backend/app/presentation/api/v1/agent_analytics.py`
+    - `backend/app/infrastructure/adk/telemetry/supabase_exporter.py`
+  - 変更ファイル:
+    - `backend/app/presentation/api/v1/__init__.py` - agent_analytics import削除
+    - `backend/app/infrastructure/adk/telemetry/__init__.py` - SupabaseSpanExporter export削除
+    - `backend/app/infrastructure/adk/telemetry/setup.py` - SupabaseSpanExporter登録削除、Phoenix only
+    - `frontend/src/components/app-sidebar.tsx` - operations項目・case削除
+    - `frontend/src/app/page.tsx` - 業務推進室カード・クイックリンク削除
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
