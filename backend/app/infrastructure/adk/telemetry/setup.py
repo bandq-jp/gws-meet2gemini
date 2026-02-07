@@ -88,6 +88,12 @@ def setup_adk_telemetry(settings: Settings) -> None:
 
             GoogleADKInstrumentor().instrument()
             logger.info("[Telemetry] GoogleADKInstrumentor activated")
+
+            # Patch: Add cache token attributes to spans
+            # The upstream instrumentor doesn't extract cached_content_token_count
+            # even though the semantic convention (LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ)
+            # is defined. This patch adds it so Phoenix can display cache hit metrics.
+            _patch_cache_token_attributes()
         except ImportError:
             logger.info(
                 "[Telemetry] openinference-instrumentation-google-adk not installed, "
@@ -98,3 +104,35 @@ def setup_adk_telemetry(settings: Settings) -> None:
 
     except Exception as e:
         logger.error(f"[Telemetry] Setup failed: {e}", exc_info=True)
+
+
+def _patch_cache_token_attributes() -> None:
+    """Patch OpenInference instrumentor to include Gemini cache token counts.
+
+    The upstream _get_attributes_from_usage_metadata() doesn't extract
+    cached_content_token_count from Gemini API responses, even though
+    the OpenInference semantic convention defines the attribute.
+    This patch adds it so Phoenix displays cache hit metrics in the UI.
+    """
+    try:
+        import openinference.instrumentation.google_adk._wrappers as _wrappers
+        from openinference.semconv.trace import SpanAttributes
+
+        _original_fn = _wrappers._get_attributes_from_usage_metadata
+
+        def _patched_fn(obj):  # type: ignore[no-untyped-def]
+            yield from _original_fn(obj)
+            try:
+                cached = getattr(obj, "cached_content_token_count", None)
+                if cached:
+                    yield (
+                        SpanAttributes.LLM_TOKEN_COUNT_PROMPT_DETAILS_CACHE_READ,
+                        cached,
+                    )
+            except Exception:
+                pass
+
+        _wrappers._get_attributes_from_usage_metadata = _patched_fn
+        logger.info("[Telemetry] Patched cache token attributes for Phoenix")
+    except Exception as e:
+        logger.warning(f"[Telemetry] Failed to patch cache token attributes: {e}")
