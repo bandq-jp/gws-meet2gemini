@@ -482,6 +482,29 @@
     - `backend/app/infrastructure/adk/agents/zoho_crm_agent.py` - 指示文簡潔化
     - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - 指示文62%削減
 
+- **ADK Context Caching実装（Gemini Explicit Cache: 入力トークン90%コスト削減）**
+  - **目的**: ADKの毎LLMコールで再送信されるsystem_instruction+tools+会話履歴をGeminiサーバー上にキャッシュし、入力トークンコストを90%削減
+  - **仕組み**:
+    1. 初回LLMコール: フィンガープリント（SHA256）のみ生成
+    2. 2回目: フィンガープリント一致 + トークン数 > min_tokens → Gemini CachedContent作成
+    3. 3回目以降: キャッシュ再利用（system_instruction/tools/cached_contentsをリクエストから除去、`cached_content=cache_name`をセット）
+  - **キャッシュ管理**: `GeminiContextCacheManager`（ADK内蔵）がライフサイクル管理（作成・検証・有効期限・クリーンアップ）
+  - 変更ファイル:
+    - `backend/app/infrastructure/config/settings.py` - キャッシュ設定4項目追加
+    - `backend/app/infrastructure/adk/agent_service.py` - `Runner(agent=...)` → `Runner(app=App(...))` に変換、ContextCacheConfig適用
+  - 環境変数:
+    - `ADK_CONTEXT_CACHE_ENABLED`: キャッシュ有効/無効（デフォルト: `true`）
+    - `ADK_CACHE_TTL_SECONDS`: キャッシュ有効期間（デフォルト: `1800` = 30分）
+    - `ADK_CACHE_MIN_TOKENS`: キャッシュ作成の最小トークン数（デフォルト: `2048`）
+    - `ADK_CACHE_INTERVALS`: キャッシュを再作成するまでの呼び出し回数（デフォルト: `10`）
+  - **ADK知見**:
+    - `ContextCacheConfig`は`@experimental`（将来変更の可能性あり）
+    - `App`オブジェクト必須（`Runner(agent=..., app_name=...)`では不可）
+    - `App`使用時はpluginsを`App`に設定（`Runner`ではなく）
+    - `static_instruction`はADK v1.22.1には存在しない
+    - OpenAI: 50%割引 vs Gemini: 90%割引（Explicit Cache）
+    - Gemini Implicit Cache（自動、設定不要、90%割引）も別途存在するが、ADKのContext CacheはExplicit
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

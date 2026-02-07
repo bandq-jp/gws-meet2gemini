@@ -23,7 +23,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict, List, Optional
 
 from google.adk.agents import Agent
+from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.agents.run_config import StreamingMode
+from google.adk.apps.app import App
 from google.adk.memory import InMemoryMemoryService
 from google.adk.runners import Runner, RunConfig
 from google.adk.sessions import InMemorySessionService
@@ -289,13 +291,31 @@ class ADKAgentService:
             # Plugin to compress verbose MCP responses (GA4 etc.) for token savings
             mcp_optimizer_plugin = MCPResponseOptimizerPlugin()
 
-            # Create runner with memory service and plugins
+            # Build App with context caching for 90% input token cost reduction
+            # Context caching caches system_instruction + tools + conversation history
+            # on Gemini's servers, so only new contents are sent on subsequent LLM calls
+            app_plugins = [sub_agent_plugin, mcp_optimizer_plugin]
+            cache_config = None
+            if self._settings.adk_context_cache_enabled:
+                cache_config = ContextCacheConfig(
+                    min_tokens=self._settings.adk_cache_min_tokens,
+                    ttl_seconds=self._settings.adk_cache_ttl_seconds,
+                    cache_intervals=self._settings.adk_cache_intervals,
+                )
+                logger.info(f"[ADK] Context caching enabled: {cache_config}")
+
+            app = App(
+                name="marketing_ai",
+                root_agent=orchestrator,
+                plugins=app_plugins,
+                context_cache_config=cache_config,
+            )
+
+            # Create runner with App (required for context caching)
             runner = Runner(
-                agent=orchestrator,
-                app_name="marketing_ai",
+                app=app,
                 session_service=self._session_service,
                 memory_service=self._memory_service if self._settings.memory_preload_enabled else None,
-                plugins=[sub_agent_plugin, mcp_optimizer_plugin],
             )
 
             # Create user content (multimodal: text + file attachments)

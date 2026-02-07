@@ -96,6 +96,39 @@ runner = Runner(
 
 **実装**: `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py`
 
+### ADK Context Caching (@experimental, v1.22.1)
+Gemini Explicit Cacheを活用し、毎LLMコールの入力トークンコストを**90%削減**。
+
+**フロー**: `App.context_cache_config` → `Runner` → `InvocationContext` → `ContextCacheRequestProcessor` → `GeminiContextCacheManager`
+
+**キャッシュライフサイクル**:
+1. 初回: フィンガープリント生成（SHA256 of system_instruction + tools + contents）
+2. 2回目: フィンガープリント一致 + トークン > min_tokens → CachedContent作成
+3. 3回目+: キャッシュ再利用（system_instruction/tools/cached_contentsをリクエストから除去）
+
+```python
+from google.adk.agents.context_cache_config import ContextCacheConfig
+from google.adk.apps.app import App
+
+app = App(
+    name="marketing_ai",
+    root_agent=orchestrator,
+    plugins=[...],
+    context_cache_config=ContextCacheConfig(
+        min_tokens=2048,     # キャッシュ作成の最小トークン数
+        ttl_seconds=1800,    # 30分有効
+        cache_intervals=10,  # 10回の呼び出しで再作成
+    ),
+)
+runner = Runner(app=app, session_service=..., memory_service=...)
+```
+
+**重要な注意点**:
+- `App`オブジェクト必須（`Runner(agent=..., app_name=...)`では使えない）
+- `App`使用時、pluginsは`App`に設定する（`Runner`ではなく）
+- `static_instruction`はADK v1.22.1には存在しない
+- ADKソース: `.venv/.../google/adk/models/gemini_context_cache_manager.py`
+
 ## Gemini 3 Flash (gemini-3-flash-preview)
 - **モデルID**: `gemini-3-flash-preview`
 - **最大入力トークン**: 1,048,576 (1M)

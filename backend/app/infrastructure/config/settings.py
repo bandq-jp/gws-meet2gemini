@@ -146,6 +146,11 @@ class Settings:
     adk_max_llm_calls: int = int(os.getenv("ADK_MAX_LLM_CALLS", "0"))
     # Max output tokens per response (Gemini 3 Flash max: 65536)
     adk_max_output_tokens: int = int(os.getenv("ADK_MAX_OUTPUT_TOKENS", "65536"))
+    # Context caching (Gemini Explicit Cache: 90% input token cost reduction)
+    adk_context_cache_enabled: bool = os.getenv("ADK_CONTEXT_CACHE_ENABLED", "true").lower() == "true"
+    adk_cache_ttl_seconds: int = int(os.getenv("ADK_CACHE_TTL_SECONDS", "1800"))  # 30分
+    adk_cache_min_tokens: int = int(os.getenv("ADK_CACHE_MIN_TOKENS", "2048"))
+    adk_cache_intervals: int = int(os.getenv("ADK_CACHE_INTERVALS", "10"))
 
     # ADK Memory Service settings
     memory_service_type: str = os.getenv("MEMORY_SERVICE_TYPE", "supabase")
