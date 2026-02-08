@@ -18,7 +18,6 @@ import { ChatMessage } from "./ChatMessage";
 import type { Message } from "@/lib/marketing/types";
 import type {
   FeedbackTag,
-  FeedbackDimension,
   MessageFeedback,
   MessageAnnotation,
   FeedbackCreatePayload,
@@ -32,7 +31,6 @@ export interface MessageListProps {
   feedbackByMessage?: Record<string, MessageFeedback>;
   annotationsByMessage?: Record<string, MessageAnnotation[]>;
   feedbackTags?: FeedbackTag[];
-  feedbackDimensions?: FeedbackDimension[];
   isFeedbackMode?: boolean;
   conversationId?: string | null;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
@@ -46,7 +44,6 @@ export function MessageList({
   feedbackByMessage,
   annotationsByMessage,
   feedbackTags,
-  feedbackDimensions,
   isFeedbackMode,
   conversationId,
   onSubmitFeedback,
@@ -156,7 +153,6 @@ export function MessageList({
               feedback={feedbackByMessage?.[msg.id]}
               annotations={annotationsByMessage?.[msg.id]}
               feedbackTags={feedbackTags}
-              feedbackDimensions={feedbackDimensions}
               isFeedbackMode={isFeedbackMode}
               conversationId={conversationId || undefined}
               onSubmitFeedback={onSubmitFeedback}

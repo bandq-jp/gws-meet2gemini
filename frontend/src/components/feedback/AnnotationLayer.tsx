@@ -1,23 +1,22 @@
 "use client";
 
 /**
- * AnnotationLayer - Text selection annotation overlay for FB mode.
+ * AnnotationLayer - Inline text annotation for FB mode.
  *
- * When FB mode is active, this wraps assistant message content and:
- * 1. Listens for text selection events
- * 2. Shows a popover to create annotations on selected text
- * 3. Renders existing annotations as highlights
+ * Architecture:
+ * - contentRef wraps ONLY the message content (no UI elements inside)
+ * - mark.js applies <mark> highlights to the content DOM
+ * - UI overlays (form, popover) use createPortal to document.body
+ *
+ * Flow: text selection → full annotation form opens directly (no intermediate toolbar)
  */
 
-import { useRef, useState, useCallback, useEffect } from "react";
-import { MessageSquarePlus, X, Trash2 } from "lucide-react";
+import { useRef, useState, useCallback, useLayoutEffect, useEffect } from "react";
+import { createPortal } from "react-dom";
+import Mark from "mark.js";
+import { X, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { TagSelector } from "./TagSelector";
 import { captureTextSelection, resolveSelector, simpleHash } from "@/lib/feedback/text-selector";
 import type {
@@ -27,6 +26,10 @@ import type {
   TextSpanSelector,
   AnnotationSeverity,
 } from "@/lib/feedback/types";
+
+// ---------------------------------------------------------------------------
+// Types & Constants
+// ---------------------------------------------------------------------------
 
 interface AnnotationLayerProps {
   messageId: string;
@@ -39,13 +42,33 @@ interface AnnotationLayerProps {
   children: React.ReactNode;
 }
 
-const SEVERITY_OPTIONS: { value: AnnotationSeverity; label: string; color: string }[] = [
-  { value: "critical", label: "重大", color: "#ef4444" },
-  { value: "major", label: "中程度", color: "#f97316" },
-  { value: "minor", label: "軽微", color: "#eab308" },
-  { value: "info", label: "情報", color: "#6b7280" },
-  { value: "positive", label: "良い", color: "#22c55e" },
+const SEVERITY_OPTIONS: { value: AnnotationSeverity; label: string }[] = [
+  { value: "critical", label: "重大" },
+  { value: "major", label: "中" },
+  { value: "minor", label: "軽" },
+  { value: "info", label: "情報" },
+  { value: "positive", label: "良" },
 ];
+
+const SEVERITY_BADGE: Record<AnnotationSeverity, string> = {
+  critical: "text-red-700 bg-red-50 border-red-200",
+  major: "text-orange-700 bg-orange-50 border-orange-200",
+  minor: "text-yellow-700 bg-yellow-50 border-yellow-200",
+  info: "text-blue-700 bg-blue-50 border-blue-200",
+  positive: "text-emerald-700 bg-emerald-50 border-emerald-200",
+};
+
+const SEVERITY_LABEL: Record<AnnotationSeverity, string> = {
+  critical: "重大",
+  major: "中程度",
+  minor: "軽微",
+  info: "情報",
+  positive: "良い点",
+};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export function AnnotationLayer({
   messageId,
@@ -57,240 +80,383 @@ export function AnnotationLayer({
   onDeleteAnnotation,
   children,
 }: AnnotationLayerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [pendingSelector, setPendingSelector] = useState<TextSpanSelector | null>(null);
-  const [popoverPos, setPopoverPos] = useState<{ x: number; y: number } | null>(null);
-  const [comment, setComment] = useState("");
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [severity, setSeverity] = useState<AnnotationSeverity>("info");
-  const [correction, setCorrection] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [viewingAnnotation, setViewingAnnotation] = useState<MessageAnnotation | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const markRef = useRef<Mark | null>(null);
 
-  // Listen for mouseup to detect text selection
-  const handleMouseUp = useCallback(() => {
-    if (!containerRef.current) return;
-    // Small delay to let selection finalize
-    setTimeout(() => {
-      if (!containerRef.current) return;
-      const selector = captureTextSelection(containerRef.current);
-      if (selector && selector.quote.exact.length > 2) {
-        const selection = window.getSelection();
-        if (selection && selection.rangeCount > 0) {
-          const range = selection.getRangeAt(0);
-          const rect = range.getBoundingClientRect();
-          const containerRect = containerRef.current.getBoundingClientRect();
-          setPopoverPos({
-            x: rect.left - containerRect.left + rect.width / 2,
-            y: rect.top - containerRect.top - 8,
-          });
-        }
-        setPendingSelector(selector);
-      }
-    }, 10);
-  }, []);
+  // --- Annotation Form (opens directly on text selection) ---
+  const [form, setForm] = useState<{
+    rect: DOMRect;
+    selector: TextSpanSelector;
+    severity: AnnotationSeverity;
+  } | null>(null);
+  const [formComment, setFormComment] = useState("");
+  const [formTags, setFormTags] = useState<string[]>([]);
+  const [formCorrection, setFormCorrection] = useState("");
+  const [formSubmitting, setFormSubmitting] = useState(false);
 
-  const handleSubmit = useCallback(async () => {
-    if (!pendingSelector) return;
-    setSubmitting(true);
-    try {
-      await onCreateAnnotation({
-        message_id: messageId,
-        conversation_id: conversationId,
-        selector: pendingSelector,
-        comment: comment || null,
-        tags: selectedTags.length > 0 ? selectedTags : null,
-        severity,
-        correction: correction || null,
-        content_hash: simpleHash(plainText),
-      });
-      // Reset
-      setPendingSelector(null);
-      setPopoverPos(null);
-      setComment("");
-      setSelectedTags([]);
-      setSeverity("info");
-      setCorrection("");
-      window.getSelection()?.removeAllRanges();
-    } finally {
-      setSubmitting(false);
-    }
-  }, [pendingSelector, messageId, conversationId, comment, selectedTags, severity, correction, plainText, onCreateAnnotation]);
+  // --- Highlight Detail Popover ---
+  const [detail, setDetail] = useState<{
+    annotation: MessageAnnotation;
+    rect: DOMRect;
+  } | null>(null);
 
-  const cancelAnnotation = useCallback(() => {
-    setPendingSelector(null);
-    setPopoverPos(null);
-    setComment("");
-    setSelectedTags([]);
-    setCorrection("");
-    window.getSelection()?.removeAllRanges();
-  }, []);
-
-  // Resolve existing annotations to highlight ranges
+  // Filter text_span annotations
   const textAnnotations = annotations.filter(
     a => (a.selector as TextSpanSelector).type === "text_span"
   );
 
-  const severityColor = (sev: AnnotationSeverity) => {
-    switch (sev) {
-      case "critical": return "bg-red-100 border-red-300";
-      case "major": return "bg-orange-100 border-orange-300";
-      case "minor": return "bg-yellow-100 border-yellow-300";
-      case "positive": return "bg-emerald-100 border-emerald-300";
-      default: return "bg-blue-100 border-blue-300";
+  // =========================================================================
+  // mark.js: Apply inline highlights
+  // =========================================================================
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    if (markRef.current) {
+      markRef.current.unmark();
     }
-  };
+    markRef.current = new Mark(el);
 
+    if (textAnnotations.length === 0) return;
+
+    const rangeMap = new Map<object, { id: string; severity: AnnotationSeverity }>();
+    const ranges: { start: number; length: number }[] = [];
+
+    for (const ann of textAnnotations) {
+      const sel = ann.selector as TextSpanSelector;
+      const resolved = resolveSelector(plainText, sel);
+      if (!resolved) continue;
+      const range = { start: resolved.start, length: resolved.end - resolved.start };
+      rangeMap.set(range, { id: ann.id, severity: ann.severity });
+      ranges.push(range);
+    }
+
+    if (ranges.length === 0) return;
+
+    markRef.current.markRanges(ranges, {
+      each: (element, range) => {
+        const info = rangeMap.get(range);
+        if (!info) return;
+        element.classList.add("annotation-hl", `annotation-hl-${info.severity}`);
+        element.dataset.annotationId = info.id;
+        element.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const ann = textAnnotations.find(a => a.id === info.id);
+          if (ann) {
+            setDetail({
+              annotation: ann,
+              rect: (e.target as HTMLElement).getBoundingClientRect(),
+            });
+            setForm(null);
+          }
+        });
+      },
+    });
+
+    return () => {
+      markRef.current?.unmark();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [textAnnotations.length, plainText]);
+
+  // =========================================================================
+  // Text selection → directly open form
+  // =========================================================================
+  const handleMouseUp = useCallback(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    if (form) return; // Don't capture while form is open
+
+    requestAnimationFrame(() => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+        return;
+      }
+
+      if (!el.contains(selection.anchorNode) || !el.contains(selection.focusNode)) {
+        return;
+      }
+
+      const selector = captureTextSelection(el);
+      if (selector && selector.quote.exact.trim().length > 2) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        setForm({ rect, selector, severity: "info" });
+        setFormComment("");
+        setFormTags([]);
+        setFormCorrection("");
+        setDetail(null);
+        // Clear selection after capturing
+        selection.removeAllRanges();
+      }
+    });
+  }, [form]);
+
+  // Dismiss overlays on click outside
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-annotation-overlay]")) return;
+      if (target.closest("mark.annotation-hl")) return;
+      setDetail(null);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // Dismiss on Escape
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setForm(null);
+        setDetail(null);
+        window.getSelection()?.removeAllRanges();
+      }
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, []);
+
+  // =========================================================================
+  // Submit annotation
+  // =========================================================================
+  const handleFormSubmit = useCallback(async () => {
+    if (!form) return;
+    setFormSubmitting(true);
+    try {
+      await onCreateAnnotation({
+        message_id: messageId,
+        conversation_id: conversationId,
+        selector: form.selector,
+        severity: form.severity,
+        comment: formComment || null,
+        tags: formTags.length > 0 ? formTags : null,
+        correction: formCorrection || null,
+        content_hash: simpleHash(plainText),
+      });
+      setForm(null);
+    } finally {
+      setFormSubmitting(false);
+    }
+  }, [form, messageId, conversationId, formComment, formTags, formCorrection, plainText, onCreateAnnotation]);
+
+  // =========================================================================
+  // Render
+  // =========================================================================
   return (
-    <div className="relative" ref={containerRef} onMouseUp={handleMouseUp}>
-      {/* Render children (message content) */}
-      {children}
+    <div className="relative">
+      {/* Content area — ONLY message content, no UI elements */}
+      <div
+        ref={contentRef}
+        onMouseUp={handleMouseUp}
+        className="annotation-content-area"
+        style={{ userSelect: "text" }}
+      >
+        {children}
+      </div>
 
-      {/* Existing annotation badges */}
-      {textAnnotations.length > 0 && (
-        <div className="mt-2 space-y-1">
-          {textAnnotations.map(ann => {
-            const sel = ann.selector as TextSpanSelector;
-            return (
-              <div
-                key={ann.id}
-                className={`flex items-start gap-2 rounded-md border px-2 py-1.5 text-xs cursor-pointer transition-colors hover:shadow-sm ${severityColor(ann.severity)}`}
-                onClick={() => setViewingAnnotation(ann)}
-              >
-                <span className="font-medium text-muted-foreground shrink-0">
-                  &ldquo;{sel.quote.exact.slice(0, 40)}{sel.quote.exact.length > 40 ? "..." : ""}&rdquo;
-                </span>
-                {ann.comment && (
-                  <span className="text-foreground truncate">{ann.comment}</span>
-                )}
-                <div className="ml-auto flex gap-1 shrink-0">
-                  {ann.tags?.map(t => (
-                    <span key={t} className="rounded-full bg-white/60 px-1.5 py-0.5 text-[10px]">{t}</span>
-                  ))}
+      {/* ===== Annotation Form (Portal — opens directly on text selection) ===== */}
+      {form && typeof document !== "undefined" && (() => {
+        const gap = 8;
+        const formW = 336;
+        const spaceAbove = form.rect.top;
+        const spaceBelow = window.innerHeight - form.rect.bottom;
+        const placeBelow = spaceBelow >= 280 || spaceBelow > spaceAbove;
+        const top = placeBelow
+          ? Math.min(form.rect.bottom + gap, window.innerHeight - 40)
+          : Math.max(gap, form.rect.top - gap);
+        const left = Math.max(12, Math.min(
+          form.rect.left + form.rect.width / 2 - formW / 2,
+          window.innerWidth - formW - 12,
+        ));
+        const maxH = placeBelow
+          ? window.innerHeight - form.rect.bottom - gap * 2
+          : form.rect.top - gap * 2;
+
+        return createPortal(
+          <div
+            data-annotation-overlay
+            className={`fixed z-[9999] animate-in fade-in duration-150 ${
+              placeBelow ? "slide-in-from-top-1" : "slide-in-from-bottom-1"
+            }`}
+            style={{
+              left,
+              top,
+              ...(!placeBelow && { transform: "translateY(-100%)" }),
+            }}
+          >
+            <div
+              className="bg-white rounded-xl shadow-2xl border border-border/60 overflow-hidden"
+              style={{ width: formW, maxHeight: Math.max(maxH, 200) }}
+            >
+              <div className="overflow-y-auto overscroll-contain" style={{ maxHeight: Math.max(maxH - 2, 198) }}>
+                <div className="p-3.5 space-y-3">
+                  {/* Header */}
+                  <div className="flex items-center justify-between sticky top-0 bg-white z-10 -mt-3.5 -mx-3.5 px-3.5 pt-3.5 pb-2 border-b border-border/30">
+                    <span className="text-sm font-semibold">アノテーション</span>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setForm(null)}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+
+                  {/* Quote */}
+                  <div className="bg-muted/50 rounded-lg px-3 py-2 text-xs text-muted-foreground leading-relaxed border-l-2 border-[var(--brand-300)]">
+                    &ldquo;{form.selector.quote.exact.slice(0, 120)}
+                    {form.selector.quote.exact.length > 120 ? "..." : ""}&rdquo;
+                  </div>
+
+                  {/* Severity */}
+                  <div>
+                    <label className="text-[11px] font-medium text-muted-foreground mb-1.5 block">重大さ</label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {SEVERITY_OPTIONS.map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setForm(f => f ? { ...f, severity: opt.value } : null)}
+                          className={`rounded-full px-3 py-1 text-[11px] font-medium transition-all border ${
+                            form.severity === opt.value
+                              ? `${SEVERITY_BADGE[opt.value]} border-current shadow-sm`
+                              : "bg-white text-muted-foreground border-border hover:border-foreground/30"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tags */}
+                  {tags.length > 0 && (
+                    <div>
+                      <label className="text-[11px] font-medium text-muted-foreground mb-1.5 block">タグ</label>
+                      <TagSelector tags={tags} selected={formTags} onChange={setFormTags} />
+                    </div>
+                  )}
+
+                  {/* Comment */}
+                  <Textarea
+                    placeholder="コメント（任意）"
+                    value={formComment}
+                    onChange={e => setFormComment(e.target.value)}
+                    className="text-sm min-h-[50px] resize-none"
+                    autoFocus
+                  />
+
+                  {/* Correction */}
+                  <Textarea
+                    placeholder="修正案（任意）"
+                    value={formCorrection}
+                    onChange={e => setFormCorrection(e.target.value)}
+                    className="text-sm min-h-[40px] resize-none"
+                  />
+
+                  {/* Actions */}
+                  <div className="flex justify-end gap-2 pt-1 sticky bottom-0 bg-white -mb-3.5 -mx-3.5 px-3.5 pb-3.5 pt-2 border-t border-border/30">
+                    <Button variant="outline" size="sm" onClick={() => setForm(null)}>
+                      キャンセル
+                    </Button>
+                    <Button size="sm" onClick={handleFormSubmit} disabled={formSubmitting}>
+                      {formSubmitting ? "保存中..." : "保存"}
+                    </Button>
+                  </div>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* New annotation popover (appears at selection position) */}
-      {pendingSelector && popoverPos && (
-        <div
-          className="absolute z-50"
-          style={{ left: popoverPos.x - 160, top: popoverPos.y - 4, transform: "translateY(-100%)" }}
-        >
-          <div className="bg-white rounded-lg shadow-xl border p-3 w-80 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-sm font-medium">
-                <MessageSquarePlus className="w-4 h-4" />
-                アノテーション
-              </div>
-              <Button variant="ghost" size="icon" className="h-6 w-6" onClick={cancelAnnotation}>
-                <X className="w-3.5 h-3.5" />
-              </Button>
             </div>
+          </div>,
+          document.body,
+        );
+      })()}
 
-            <div className="bg-muted rounded px-2 py-1 text-xs text-muted-foreground italic">
-              &ldquo;{pendingSelector.quote.exact.slice(0, 80)}{pendingSelector.quote.exact.length > 80 ? "..." : ""}&rdquo;
-            </div>
+      {/* ===== Highlight Detail Popover (Portal) ===== */}
+      {detail && typeof document !== "undefined" && (() => {
+        const gap = 6;
+        const popW = 288;
+        const spaceBelow = window.innerHeight - detail.rect.bottom;
+        const placeBelow = spaceBelow >= 180 || spaceBelow > detail.rect.top;
+        const top = placeBelow
+          ? detail.rect.bottom + gap
+          : Math.max(gap, detail.rect.top - gap);
+        const left = Math.max(12, Math.min(
+          detail.rect.left + detail.rect.width / 2 - popW / 2,
+          window.innerWidth - popW - 12,
+        ));
 
-            {/* Severity */}
-            <div className="flex gap-1">
-              {SEVERITY_OPTIONS.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setSeverity(opt.value)}
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-medium transition-all ${
-                    severity === opt.value
-                      ? "ring-2 ring-offset-1 shadow-sm text-white"
-                      : "opacity-60 hover:opacity-100"
-                  }`}
-                  style={{
-                    backgroundColor: severity === opt.value ? opt.color : `${opt.color}20`,
-                    color: severity === opt.value ? "white" : opt.color,
-                  }}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+        return createPortal(
+          <div
+            data-annotation-overlay
+            className={`fixed z-[9999] animate-in fade-in zoom-in-95 duration-150`}
+            style={{
+              left,
+              top,
+              ...(!placeBelow && { transform: "translateY(-100%)" }),
+            }}
+          >
+            <div className="bg-white rounded-xl shadow-2xl border border-border/60" style={{ width: popW }}>
+              <div className="p-3 space-y-2">
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <span className={`text-[11px] font-semibold rounded-full px-2.5 py-0.5 border ${SEVERITY_BADGE[detail.annotation.severity]}`}>
+                    {SEVERITY_LABEL[detail.annotation.severity]}
+                  </span>
+                  <div className="flex items-center gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"
+                      onClick={async () => {
+                        await onDeleteAnnotation(detail.annotation.id, messageId);
+                        setDetail(null);
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDetail(null)}>
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
 
-            {/* Tags */}
-            <TagSelector
-              tags={tags}
-              selected={selectedTags}
-              onChange={setSelectedTags}
-            />
+                {/* Quote */}
+                <div className="text-xs text-muted-foreground italic leading-relaxed">
+                  &ldquo;{(detail.annotation.selector as TextSpanSelector).quote?.exact.slice(0, 80)}
+                  {((detail.annotation.selector as TextSpanSelector).quote?.exact.length || 0) > 80 ? "..." : ""}&rdquo;
+                </div>
 
-            <Textarea
-              placeholder="コメント"
-              value={comment}
-              onChange={e => setComment(e.target.value)}
-              className="text-sm min-h-[50px] resize-none"
-              autoFocus
-            />
+                {/* Tags */}
+                {detail.annotation.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {detail.annotation.tags.map(t => (
+                      <span key={t} className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
-            <Textarea
-              placeholder="修正案（任意）"
-              value={correction}
-              onChange={e => setCorrection(e.target.value)}
-              className="text-sm min-h-[40px] resize-none"
-            />
+                {/* Comment */}
+                {detail.annotation.comment && (
+                  <p className="text-xs text-foreground leading-relaxed">{detail.annotation.comment}</p>
+                )}
 
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={cancelAnnotation}>キャンセル</Button>
-              <Button size="sm" onClick={handleSubmit} disabled={submitting}>
-                {submitting ? "保存中..." : "保存"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+                {/* Correction */}
+                {detail.annotation.correction && (
+                  <div className="text-xs bg-emerald-50 rounded-md px-2 py-1.5 border border-emerald-200">
+                    <span className="font-medium text-emerald-700">修正案: </span>
+                    <span className="text-emerald-900">{detail.annotation.correction}</span>
+                  </div>
+                )}
 
-      {/* Viewing annotation detail */}
-      {viewingAnnotation && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20" onClick={() => setViewingAnnotation(null)}>
-          <div className="bg-white rounded-lg shadow-xl border p-4 w-96 space-y-3" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h4 className="text-sm font-medium">アノテーション詳細</h4>
-              <div className="flex gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-red-500 hover:text-red-700"
-                  onClick={async () => {
-                    await onDeleteAnnotation(viewingAnnotation.id, messageId);
-                    setViewingAnnotation(null);
-                  }}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setViewingAnnotation(null)}>
-                  <X className="w-3.5 h-3.5" />
-                </Button>
+                {/* Meta */}
+                <div className="text-[10px] text-muted-foreground/60 pt-1.5 border-t border-border/40">
+                  {new Date(detail.annotation.created_at).toLocaleString("ja-JP")}
+                </div>
               </div>
             </div>
-            <div className="bg-muted rounded px-2 py-1 text-xs italic">
-              &ldquo;{(viewingAnnotation.selector as TextSpanSelector).quote?.exact || "N/A"}&rdquo;
-            </div>
-            <div className="text-xs space-y-1">
-              <div><span className="font-medium">深刻度:</span> {viewingAnnotation.severity}</div>
-              {viewingAnnotation.tags.length > 0 && (
-                <div><span className="font-medium">タグ:</span> {viewingAnnotation.tags.join(", ")}</div>
-              )}
-              {viewingAnnotation.comment && (
-                <div><span className="font-medium">コメント:</span> {viewingAnnotation.comment}</div>
-              )}
-              {viewingAnnotation.correction && (
-                <div><span className="font-medium">修正案:</span> {viewingAnnotation.correction}</div>
-              )}
-              <div className="text-muted-foreground">{viewingAnnotation.user_email} - {new Date(viewingAnnotation.created_at).toLocaleString("ja-JP")}</div>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        );
+      })()}
     </div>
   );
 }

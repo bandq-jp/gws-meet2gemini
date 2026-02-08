@@ -56,7 +56,6 @@ import { FeedbackBar } from "@/components/feedback/FeedbackBar";
 import { AnnotationLayer } from "@/components/feedback/AnnotationLayer";
 import type {
   FeedbackTag,
-  FeedbackDimension,
   MessageFeedback,
   MessageAnnotation,
   FeedbackCreatePayload,
@@ -1227,7 +1226,6 @@ interface AssistantMessageProps {
   feedback?: MessageFeedback | null;
   annotations?: MessageAnnotation[];
   feedbackTags?: FeedbackTag[];
-  feedbackDimensions?: FeedbackDimension[];
   isFeedbackMode?: boolean;
   conversationId?: string;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
@@ -1240,7 +1238,6 @@ function AssistantMessage({
   feedback,
   annotations = [],
   feedbackTags = [],
-  feedbackDimensions = [],
   isFeedbackMode = false,
   conversationId,
   onSubmitFeedback,
@@ -1300,7 +1297,6 @@ function AssistantMessage({
           messageId={message.id}
           existingFeedback={feedback}
           tags={feedbackTags}
-          dimensions={feedbackDimensions}
           onSubmit={onSubmitFeedback}
           isFeedbackMode={isFeedbackMode}
         />
@@ -1318,7 +1314,6 @@ export interface ChatMessageProps {
   feedback?: MessageFeedback | null;
   annotations?: MessageAnnotation[];
   feedbackTags?: FeedbackTag[];
-  feedbackDimensions?: FeedbackDimension[];
   isFeedbackMode?: boolean;
   conversationId?: string;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
@@ -1331,7 +1326,6 @@ export const ChatMessage = memo(function ChatMessage({
   feedback,
   annotations,
   feedbackTags,
-  feedbackDimensions,
   isFeedbackMode,
   conversationId,
   onSubmitFeedback,
@@ -1347,7 +1341,6 @@ export const ChatMessage = memo(function ChatMessage({
       feedback={feedback}
       annotations={annotations}
       feedbackTags={feedbackTags}
-      feedbackDimensions={feedbackDimensions}
       isFeedbackMode={isFeedbackMode}
       conversationId={conversationId}
       onSubmitFeedback={onSubmitFeedback}

@@ -1,14 +1,16 @@
 "use client";
 
 /**
- * FeedbackBar - Compact feedback controls shown below each assistant message.
+ * FeedbackBar - Compact feedback controls below each assistant message.
  *
- * Normal mode: 👍 👎 + "詳細FB" button
- * Shows a popover for detailed feedback when 👎 is clicked or "詳細FB" is triggered.
+ * - Thumbs up/down are toggleable (click again to un-select)
+ * - Good click submits immediately but does NOT lock the UI
+ * - "コメント" button always visible to add/edit tags, comment, correction
+ * - Existing feedback is pre-filled and editable
  */
 
-import { useState, useCallback } from "react";
-import { ThumbsUp, ThumbsDown, MessageSquarePlus, X } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { ThumbsUp, ThumbsDown, MessageSquarePlus, X, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -17,10 +19,8 @@ import {
 } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import { TagSelector } from "./TagSelector";
-import { DimensionRating } from "./DimensionRating";
 import type {
   FeedbackTag,
-  FeedbackDimension,
   FeedbackCreatePayload,
   MessageFeedback,
   Rating,
@@ -30,7 +30,6 @@ interface FeedbackBarProps {
   messageId: string;
   existingFeedback?: MessageFeedback | null;
   tags: FeedbackTag[];
-  dimensions: FeedbackDimension[];
   onSubmit: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   isFeedbackMode?: boolean;
 }
@@ -39,7 +38,6 @@ export function FeedbackBar({
   messageId,
   existingFeedback,
   tags,
-  dimensions,
   onSubmit,
   isFeedbackMode,
 }: FeedbackBarProps) {
@@ -50,72 +48,121 @@ export function FeedbackBar({
   const [comment, setComment] = useState(existingFeedback?.comment || "");
   const [correction, setCorrection] = useState(existingFeedback?.correction || "");
   const [selectedTags, setSelectedTags] = useState<string[]>(existingFeedback?.tags || []);
-  const [dimensionScores, setDimensionScores] = useState<Record<string, number>>(
-    existingFeedback?.dimension_scores || {}
-  );
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(!!existingFeedback?.rating);
 
-  const handleQuickRating = useCallback(async (rating: Rating) => {
-    setSelectedRating(rating);
-    if (rating === "good") {
-      setSubmitting(true);
-      try {
-        await onSubmit(messageId, { rating });
-        setSubmitted(true);
-      } finally {
-        setSubmitting(false);
-      }
-    } else {
-      setPopoverOpen(true);
+  // Sync when existingFeedback changes (e.g., loaded from server)
+  useEffect(() => {
+    setSelectedRating(existingFeedback?.rating || null);
+    setComment(existingFeedback?.comment || "");
+    setCorrection(existingFeedback?.correction || "");
+    setSelectedTags(existingFeedback?.tags || []);
+  }, [existingFeedback]);
+
+  const hasExisting = !!existingFeedback?.rating;
+  const hasDetails = !!(existingFeedback?.comment || existingFeedback?.tags?.length);
+
+  // Toggle rating: click same thumb to un-select, different thumb to switch
+  const handleToggleRating = useCallback(async (rating: Rating) => {
+    const newRating = selectedRating === rating ? null : rating;
+    setSelectedRating(newRating);
+    setSubmitting(true);
+    try {
+      await onSubmit(messageId, {
+        rating: newRating,
+        comment: comment || null,
+        tags: selectedTags.length > 0 ? selectedTags : null,
+        correction: correction || null,
+      });
+    } finally {
+      setSubmitting(false);
     }
-  }, [messageId, onSubmit]);
+  }, [messageId, onSubmit, selectedRating, comment, selectedTags, correction]);
 
+  // Submit detailed feedback from popover
   const handleSubmitDetailed = useCallback(async () => {
     setSubmitting(true);
     try {
-      const payload: FeedbackCreatePayload = {
+      await onSubmit(messageId, {
         rating: selectedRating,
         comment: comment || null,
         correction: correction || null,
         tags: selectedTags.length > 0 ? selectedTags : null,
-        dimension_scores: Object.keys(dimensionScores).length > 0 ? dimensionScores : null,
-      };
-      await onSubmit(messageId, payload);
-      setSubmitted(true);
+      });
       setPopoverOpen(false);
     } finally {
       setSubmitting(false);
     }
-  }, [messageId, selectedRating, comment, correction, selectedTags, dimensionScores, onSubmit]);
+  }, [messageId, selectedRating, comment, correction, selectedTags, onSubmit]);
 
-  const currentRating = existingFeedback?.rating || selectedRating;
+  // Reset all feedback
+  const handleReset = useCallback(async () => {
+    setSubmitting(true);
+    try {
+      await onSubmit(messageId, {
+        rating: null,
+        comment: null,
+        correction: null,
+        tags: null,
+      });
+      setSelectedRating(null);
+      setComment("");
+      setCorrection("");
+      setSelectedTags([]);
+      setPopoverOpen(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [messageId, onSubmit]);
 
   return (
-    <div className="flex items-center gap-1 mt-2 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200"
+    <div
+      className="flex items-center gap-1 mt-1.5 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200"
       style={isFeedbackMode ? { opacity: 1 } : undefined}
     >
-      {/* Quick thumbs */}
+      {/* Thumbs Up - toggleable */}
       <Button
         variant="ghost"
         size="icon"
-        className={`h-7 w-7 rounded-full ${currentRating === "good" ? "bg-emerald-100 text-emerald-600" : "text-muted-foreground hover:text-emerald-600"}`}
-        onClick={() => handleQuickRating("good")}
+        className={`h-7 w-7 rounded-full transition-colors ${
+          selectedRating === "good"
+            ? "bg-emerald-100 text-emerald-600 hover:bg-emerald-200"
+            : "text-muted-foreground/60 hover:text-emerald-600 hover:bg-emerald-50"
+        }`}
+        onClick={() => handleToggleRating("good")}
         disabled={submitting}
       >
         <ThumbsUp className="w-3.5 h-3.5" />
       </Button>
 
+      {/* Thumbs Down - toggleable */}
+      <Button
+        variant="ghost"
+        size="icon"
+        className={`h-7 w-7 rounded-full transition-colors ${
+          selectedRating === "bad"
+            ? "bg-red-100 text-red-600 hover:bg-red-200"
+            : "text-muted-foreground/60 hover:text-red-500 hover:bg-red-50"
+        }`}
+        onClick={() => handleToggleRating("bad")}
+        disabled={submitting}
+      >
+        <ThumbsDown className="w-3.5 h-3.5" />
+      </Button>
+
+      {/* Comment / Edit button - always visible */}
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
-            size="icon"
-            className={`h-7 w-7 rounded-full ${currentRating === "bad" ? "bg-red-100 text-red-600" : "text-muted-foreground hover:text-red-500"}`}
-            onClick={() => handleQuickRating("bad")}
-            disabled={submitting}
+            size="sm"
+            className={`h-7 px-2 text-xs transition-colors ${
+              hasDetails
+                ? "text-blue-600 hover:text-blue-700"
+                : "text-muted-foreground/60 hover:text-foreground"
+            }`}
           >
-            <ThumbsDown className="w-3.5 h-3.5" />
+            <MessageSquarePlus className="w-3.5 h-3.5 mr-1" />
+            {hasDetails ? "編集" : "コメント"}
           </Button>
         </PopoverTrigger>
 
@@ -129,24 +176,16 @@ export function FeedbackBar({
             </div>
 
             {/* Tags */}
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">何が問題？</label>
-              <TagSelector
-                tags={tags}
-                selected={selectedTags}
-                onChange={setSelectedTags}
-                sentiment={selectedRating === "good" ? "positive" : "negative"}
-              />
-            </div>
-
-            {/* Dimension ratings (FB mode only) */}
-            {isFeedbackMode && dimensions.length > 0 && (
+            {tags.length > 0 && (
               <div>
-                <label className="text-xs text-muted-foreground mb-1 block">多次元評価</label>
-                <DimensionRating
-                  dimensions={dimensions}
-                  scores={dimensionScores}
-                  onChange={setDimensionScores}
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  {selectedRating === "good" ? "良かった点" : selectedRating === "bad" ? "問題点" : "タグ"}
+                </label>
+                <TagSelector
+                  tags={tags}
+                  selected={selectedTags}
+                  onChange={setSelectedTags}
+                  sentiment={selectedRating === "good" ? "positive" : selectedRating === "bad" ? "negative" : "all"}
                 />
               </div>
             )}
@@ -159,48 +198,46 @@ export function FeedbackBar({
               className="text-sm min-h-[60px] resize-none"
             />
 
-            {/* Correction (FB mode only) */}
-            {isFeedbackMode && (
-              <Textarea
-                placeholder="修正案（正しい回答はこうあるべき）"
-                value={correction}
-                onChange={e => setCorrection(e.target.value)}
-                className="text-sm min-h-[50px] resize-none"
-              />
-            )}
+            {/* Correction */}
+            <Textarea
+              placeholder="修正案（正しい回答はこうあるべき）"
+              value={correction}
+              onChange={e => setCorrection(e.target.value)}
+              className="text-sm min-h-[50px] resize-none"
+            />
 
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setPopoverOpen(false)}>
-                キャンセル
-              </Button>
-              <Button size="sm" onClick={handleSubmitDetailed} disabled={submitting}>
-                {submitting ? "送信中..." : "送信"}
-              </Button>
+            <div className="flex items-center justify-between">
+              {/* Reset button */}
+              {hasExisting && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs text-muted-foreground hover:text-red-600"
+                  onClick={handleReset}
+                  disabled={submitting}
+                >
+                  <RotateCcw className="w-3 h-3 mr-1" />
+                  リセット
+                </Button>
+              )}
+              <div className="flex gap-2 ml-auto">
+                <Button variant="outline" size="sm" onClick={() => setPopoverOpen(false)}>
+                  キャンセル
+                </Button>
+                <Button size="sm" onClick={handleSubmitDetailed} disabled={submitting}>
+                  {submitting ? "送信中..." : "保存"}
+                </Button>
+              </div>
             </div>
           </div>
         </PopoverContent>
       </Popover>
 
-      {/* Detailed FB button */}
-      {!submitted && !popoverOpen && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            setSelectedRating(null);
-            setPopoverOpen(true);
-          }}
-        >
-          <MessageSquarePlus className="w-3.5 h-3.5 mr-1" />
-          詳細FB
-        </Button>
-      )}
-
-      {submitted && (
-        <span className="text-[10px] text-muted-foreground ml-1">
-          FB済み
-        </span>
+      {/* Subtle indicator when feedback exists */}
+      {hasExisting && !popoverOpen && (
+        <span className={`inline-block w-1.5 h-1.5 rounded-full ml-0.5 ${
+          selectedRating === "good" ? "bg-emerald-400" : "bg-red-400"
+        }`} />
       )}
     </div>
   );

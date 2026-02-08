@@ -176,6 +176,58 @@ body {
   .thinking-dot-1 { animation-delay: 0s; }
   .thinking-dot-2 { animation-delay: 0.2s; }
   .thinking-dot-3 { animation-delay: 0.4s; }
+
+  /* FB mode: custom text selection color, caret & visual hint */
+  .annotation-content-area {
+    caret-color: var(--brand-400);
+    cursor: text;
+    border-left: 3px solid color-mix(in oklab, var(--brand-300) 60%, transparent);
+    padding-left: 12px;
+    border-radius: 2px;
+    transition: border-color 0.2s ease;
+  }
+  .annotation-content-area ::selection {
+    background-color: color-mix(in oklab, var(--brand-300) 35%, transparent);
+    color: inherit;
+  }
+  .annotation-content-area ::-moz-selection {
+    background-color: color-mix(in oklab, var(--brand-300) 35%, transparent);
+    color: inherit;
+  }
+
+  /* Feedback annotation highlights (applied by mark.js) */
+  mark[data-markjs] {
+    background: transparent;
+  }
+  mark.annotation-hl {
+    cursor: pointer;
+    border-radius: 2px;
+    padding: 1px 0;
+    transition: filter 0.15s ease, background-color 0.15s ease;
+  }
+  mark.annotation-hl:hover {
+    filter: brightness(0.85);
+  }
+  mark.annotation-hl-critical {
+    background-color: rgba(239, 68, 68, 0.25);
+    border-bottom: 2px solid #ef4444;
+  }
+  mark.annotation-hl-major {
+    background-color: rgba(249, 115, 22, 0.25);
+    border-bottom: 2px solid #f97316;
+  }
+  mark.annotation-hl-minor {
+    background-color: rgba(234, 179, 8, 0.25);
+    border-bottom: 2px solid #eab308;
+  }
+  mark.annotation-hl-info {
+    background-color: rgba(59, 130, 246, 0.25);
+    border-bottom: 2px solid #3b82f6;
+  }
+  mark.annotation-hl-positive {
+    background-color: rgba(34, 197, 94, 0.25);
+    border-bottom: 2px solid #22c55e;
+  }
 }
 
 @keyframes thinking-bounce {

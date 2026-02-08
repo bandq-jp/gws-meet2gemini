@@ -586,6 +586,25 @@
     - レビューワークフロー: new → reviewed → actioned → dismissed
     - エクスポート: JSONL（RLHF/DPO学習用）、CSV（スプレッドシート分析用）
 
+- **フィードバックUX大幅改善（2026-02-07）**
+  - **問題**: Good/BadクリックでFBロック、メッセージ全体FBとテキスト選択アノテーションの混同、アノテーションがインラインでない、DimensionRating不要
+  - **FeedbackBar改善** (`FeedbackBar.tsx` 全面書き換え):
+    - ThumbsUp/Downをトグル式に（再クリックで解除、ロックしない）
+    - `submitted` state 完全削除 → `hasExisting` 派生値で判定
+    - 「コメント」ボタンを常時表示（FB済みでも編集可能）
+    - Popoverにプリフィル表示 + 「リセット」ボタン追加
+    - `DimensionRating` import/props完全削除
+  - **AnnotationLayer改善** (`AnnotationLayer.tsx` 全面書き換え):
+    - **インラインハイライト**: `useLayoutEffect` で `applyHighlights()` を呼び、既存アノテーションをテキスト内に `<mark>` で色付き表示
+    - **SelectionToolbar**: テキスト選択時にミニバー表示（重要度ドット5色 + 詳細ボタン）
+    - **クイックアノテーション**: 重要度ドットクリック → severity のみで即保存（最小摩擦）
+    - **AnnotationForm**: 「詳細」クリック → フルフォーム（引用プレビュー + 重要度 + タグ + コメント + 修正案）
+    - **HighlightPopover**: ハイライトクリック → アノテーション詳細 + 削除ボタン
+    - 下部バッジリスト廃止
+  - **新規ファイル**: `frontend/src/lib/feedback/highlight-renderer.ts` - DOM TreeWalker + `Range.surroundContents()` でテキストノードを `<mark>` ラップ
+  - **prop chain整理**: `feedbackDimensions` を `ChatMessage`, `MessageList`, `MarketingChat`, `ChatMessageProps`, `MessageListProps`, `AssistantMessageProps` から全削除
+  - **重要度別ハイライトCSS**: critical(赤), major(橙), minor(黄), info(青), positive(緑) の5色
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

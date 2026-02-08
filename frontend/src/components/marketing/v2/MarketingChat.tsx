@@ -486,7 +486,6 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
                 feedbackByMessage={feedback.feedbackByMessage}
                 annotationsByMessage={feedback.annotationsByMessage}
                 feedbackTags={feedback.tags}
-                feedbackDimensions={feedback.dimensions}
                 isFeedbackMode={feedback.isFeedbackMode}
                 conversationId={conversationId}
                 onSubmitFeedback={feedback.submitFeedback}
