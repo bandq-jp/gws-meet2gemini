@@ -782,6 +782,90 @@
     - `skip_summarization=True`でLLMがNone応答を要約しない
     - ADKには`get_user_choice_tool`（組み込み）も存在するが、optionsがstring[]のみでdescription不可のため独自実装
 
+- **ask_user_clarification UX改善（2026-02-08）**
+  - ラジオ即送信廃止 → 全質問下部に「送信」「スキップ」ボタン
+  - ラジオボタンの選択解除（トグル式）対応
+  - 全質問にシステムが自動で「その他（自由入力）」を追加（LLMは生成しない）
+  - LLM指示文に「その他は含めないこと」を明記
+  - `AskUserPrompt.tsx` 全面書き換え
+  - `orchestrator.py`, `ask_user_tools.py` docstring更新
+
+- **ask_user永続化修正（2026-02-08）**
+  - `marketing_v2.py`: `ask_user`イベントを`activity_items`リストに蓄積（DB保存対応）
+  - `use-marketing-chat-v2.ts`: 復元時にask_userの`answered`フラグを後続userメッセージ有無で補正
+  - `use-marketing-chat-v2.ts`: ライブ送信時に直前assistantのask_userを`answered: true`に更新
+
+- **ask_user重複表示バグ修正（2026-02-08）**
+  - 原因: `agent_service.py`で`ask_user_clarification`のfunction_callが`partial=True`と`partial=False`の両パスで検知→2回イベント生成
+  - 修正: `_process_non_text_part()`（partial=Falseパス）の検知を`pass`に変更、partial=True/Noneパスのみで1回処理
+
+- **ユーザーパーソナライズ基盤実装（2026-02-08）**
+  - **目的**: Clerk認証情報を全エージェントに注入し、パーソナライズされた応答を実現
+  - **Phase 1: ユーザーコンテキスト拡充**
+    - `marketing_v2.py`: `initial_state`に`app:user_name`, `app:user_id`を追加注入（既存の`app:user_email`に加えて）
+    - Slack ID自動解決: `SlackService.lookup_user_by_email()`呼び出し→`app:slack_user_id`, `app:slack_username`, `app:slack_display_name`をstateに注入
+  - **Phase 2: Slack email→user ID解決**
+    - `slack_service.py`: `lookup_user_by_email(email)` 新メソッド追加
+    - Slack API `users.lookupByEmail` 使用（`users:read.email` scope必要）
+    - 24時間TTLキャッシュ（pipe-separated compact format）、未発見も`__not_found__`でネガティブキャッシュ
+    - user_id, username, display_name, real_name を返却
+  - **Phase 3: Slackエージェントパーソナライズ**
+    - `slack_tools.py`: `get_my_slack_activity` 新ツール追加（自分の投稿+メンション一括取得）
+      - `activity_type`: "all" / "my_posts" / "mentions"
+      - stateから`app:slack_user_id`を自動取得、`from:<@USER_ID>`/`<@USER_ID>`で検索
+      - ADK_SLACK_TOOLS: 6→7ツール
+    - `slack_agent.py`: 指示文全面更新
+      - 「現在のユーザー情報」セクション追加（state keyの参照方法を明記）
+      - `get_my_slack_activity`のツール説明・ワークフロー例追加
+      - 「自分の」「私の」リクエストの解釈ルール追加
+      - 回答方針: ユーザー名で呼びかけ、自分の投稿は「あなたの投稿」と表現
+    - `ChatMessage.tsx`: `get_my_slack_activity`のアイコン(User)・ラベル(自分のSlack活動)追加
+  - **Phase 4: 全エージェント横断パーソナライズ**
+    - `orchestrator.py`: 「現在のユーザー」セクション追加
+      - state keyの参照方法を明記（user_name, user_email, user_id, slack_*）
+      - パーソナライズルール: ユーザー名で呼びかけ、「自分の」表現の解釈マトリクス
+      - キーワードマトリクスに「自分のSlack/メール/予定/担当」ルーティング追加
+    - `workspace_agent.py`: 「現在のユーザー」セクション追加（氏名で呼びかけ指示）
+    - `ca_support_agent.py`: 「現在のユーザー（担当CA）」セクション追加
+      - 「自分の担当候補者」→ Zoho Owner/PICフィールドで検索する指示
+      - 「自分の面談」→ 議事録ツールでユーザー名検索する指示
+  - 変更ファイル（9）:
+    - `backend/app/presentation/api/v1/marketing_v2.py` - initial_state拡充 + Slack ID解決
+    - `backend/app/infrastructure/slack/slack_service.py` - lookup_user_by_email追加
+    - `backend/app/infrastructure/adk/tools/slack_tools.py` - get_my_slack_activity追加
+    - `backend/app/infrastructure/adk/agents/slack_agent.py` - 指示文パーソナライズ
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - ユーザー情報 + ルーティング
+    - `backend/app/infrastructure/adk/agents/workspace_agent.py` - ユーザー情報追加
+    - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - 担当CA情報追加
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - ツールUI設定追加
+    - `backend/app/infrastructure/adk/agent_service.py` - ask_user重複修正
+  - **Slack API知見**: `users.lookupByEmail`はBot Tokenで使用可能。`users:read.email` scopeが必要。email未登録ユーザーは`users_not_found`エラー
+  - **ローマ字名対応**: Clerk/Slackから送られるユーザー名はローマ字表記が多い。エージェント指示文では「そのままの表記で呼びかけること」と指示（「日本語名」表現は使わない）
+  - **ADK State検証知見（2026-02-08）**:
+    - `initial_state → create_session(state=) → extract_state_delta() → prefix分離保存 → _merge_state() → prefix再付与 → session.state → State wrapper → tool_context.state`
+    - `app:` prefix = アプリ全体共有、`user:` = ユーザー単位、`temp:` = 破棄、prefix無し = セッション単位
+    - サブエージェントは`AgentTool`経由で親stateの完全コピーを受け取り、変更は`event.actions.state_delta`で親に伝播
+    - **全state key**(`app:user_email`, `app:user_name`, `app:user_id`, `app:slack_user_id`, `app:slack_username`, `app:slack_display_name`)は全サブエージェント内ツールから`tool_context.state.get("app:...")`で正しくアクセス可能
+
+- **ADK State Injection重大バグ修正（2026-02-08）**
+  - **問題**: エージェントがユーザーを間違った名前で呼ぶ（例: Gaku Masudaなのに「yoshidaさん」）
+  - **根本原因**: 指示文で `` `app:user_name` `` とバッククォート記法で「stateキーの名前」を文書として記載していたが、ADKはこれを自動展開しない。モデルは実際のstate値にアクセスできず、名前を推測（捏造）していた
+  - **ADK State Injection仕様**: ADKは `{app:user_name}` 構文（波括弧）で指示文にstate値を自動注入する機能を持つ
+    - `instructions_utils.py` の `inject_session_state()` が正規表現 `r'{+[^{}]*}+'` でプレースホルダーを検出
+    - `session.state[var_name]` から値を取得して置換
+    - `{app:key?}` — `?` サフィックスでオプショナル（未設定時にKeyError回避）
+    - `instruction` が文字列の場合のみ自動注入。`InstructionProvider`（callable）の場合はバイパス
+    - ADKソース: `.venv/.../google/adk/utils/instructions_utils.py` L30-124
+  - **修正**: 4ファイルの指示文をバッククォート記法 → 波括弧state injection構文に変更
+    - `orchestrator.py`: `{app:user_name}`, `{app:user_email}`, `{app:slack_display_name?}`, `{app:slack_username?}`
+    - `workspace_agent.py`: `{app:user_name}`, `{app:user_email}`
+    - `slack_agent.py`: `{app:user_name}`, `{app:user_email}`, `{app:slack_user_id?}`, `{app:slack_username?}`, `{app:slack_display_name?}`
+    - `ca_support_agent.py`: `{app:user_name}`, `{app:user_email}`
+  - **自己改善**:
+    - ADKの指示文テンプレート機能を正確に理解してから実装すべきだった
+    - stateキーの「ドキュメント記載」と「値の注入」は全く別物。モデルは指示文内のキー名だけでは値を読めない
+    - 新機能の実装時、SDKのテンプレート/注入機能を最初に確認すること
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

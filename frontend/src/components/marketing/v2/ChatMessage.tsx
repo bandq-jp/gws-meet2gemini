@@ -38,6 +38,7 @@ import {
   Calendar,
   MessageSquare,
   Hash,
+  User,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -389,6 +390,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   list_slack_channels: Hash,
   search_company_in_slack: Database,
   search_candidate_in_slack: Users,
+  get_my_slack_activity: User,
   // General
   code_interpreter: Code2,
   web_search: Globe,
@@ -458,6 +460,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_slack_channels: "チャネル一覧",
   search_company_in_slack: "企業Slack検索",
   search_candidate_in_slack: "候補者Slack検索",
+  get_my_slack_activity: "自分のSlack活動",
   // General
   code_interpreter: "コード実行",
   web_search: "Web検索",
