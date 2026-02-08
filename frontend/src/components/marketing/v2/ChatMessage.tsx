@@ -47,11 +47,13 @@ import type {
   ToolActivityItem,
   ReasoningActivityItem,
   SubAgentActivityItem,
+  AskUserActivityItem,
   ChartActivityItem,
   CodeExecutionActivityItem,
   CodeResultActivityItem,
 } from "@/lib/marketing/types";
 import { ChartRenderer } from "./charts";
+import { AskUserPrompt } from "./AskUserPrompt";
 import { FeedbackBar } from "@/components/feedback/FeedbackBar";
 import { AnnotationLayer } from "@/components/feedback/AnnotationLayer";
 import type {
@@ -1034,9 +1036,11 @@ function TextSegment({
 function ActivityTimeline({
   items,
   isStreaming,
+  onSendMessage,
 }: {
   items: ActivityItem[];
   isStreaming?: boolean;
+  onSendMessage?: (content: string) => void;
 }) {
   if (!items || items.length === 0) return null;
 
@@ -1141,6 +1145,27 @@ function ActivityTimeline({
                     >
                       {codeItem.code}
                     </CodeBlock>
+                  );
+                })}
+              </div>
+            );
+
+          case "ask_user":
+            return (
+              <div key={groupIdx} className="space-y-2">
+                {group.items.map((item) => {
+                  const askItem = item as AskUserActivityItem;
+                  return (
+                    <AskUserPrompt
+                      key={item.id}
+                      questions={askItem.questions}
+                      answered={askItem.answered ?? false}
+                      onRespond={(response) => {
+                        if (onSendMessage) {
+                          onSendMessage(response);
+                        }
+                      }}
+                    />
                   );
                 })}
               </div>
@@ -1252,6 +1277,7 @@ interface AssistantMessageProps {
   isFeedbackMode?: boolean;
   conversationId?: string;
   activeAnnotationId?: string | null;
+  onSendMessage?: (content: string) => void;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
@@ -1266,6 +1292,7 @@ function AssistantMessage({
   isFeedbackMode = false,
   conversationId,
   activeAnnotationId,
+  onSendMessage,
   onSubmitFeedback,
   onCreateAnnotation,
   onDeleteAnnotation,
@@ -1282,7 +1309,7 @@ function AssistantMessage({
       {showThinking ? (
         <ThinkingIndicator progressText={message.progressText} />
       ) : hasItems ? (
-        <ActivityTimeline items={items} isStreaming={message.isStreaming} />
+        <ActivityTimeline items={items} isStreaming={message.isStreaming} onSendMessage={onSendMessage} />
       ) : message.content ? (
         <div className="report-content overflow-hidden min-w-0">
           <ReactMarkdown
@@ -1345,6 +1372,7 @@ export interface ChatMessageProps {
   isFeedbackMode?: boolean;
   conversationId?: string;
   activeAnnotationId?: string | null;
+  onSendMessage?: (content: string) => void;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
@@ -1359,6 +1387,7 @@ export const ChatMessage = memo(function ChatMessage({
   isFeedbackMode,
   conversationId,
   activeAnnotationId,
+  onSendMessage,
   onSubmitFeedback,
   onCreateAnnotation,
   onDeleteAnnotation,
@@ -1377,6 +1406,7 @@ export const ChatMessage = memo(function ChatMessage({
         isFeedbackMode={isFeedbackMode}
         conversationId={conversationId}
         activeAnnotationId={activeAnnotationId}
+        onSendMessage={onSendMessage}
         onSubmitFeedback={onSubmitFeedback}
         onCreateAnnotation={onCreateAnnotation}
         onDeleteAnnotation={onDeleteAnnotation}

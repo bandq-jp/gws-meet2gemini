@@ -580,7 +580,10 @@ class ADKAgentService:
             fc = part.function_call
             tool_name = getattr(fc, "name", "unknown")
 
-            if tool_name.endswith("Agent"):
+            if tool_name == "ask_user_clarification":
+                # Skip here — handled in partial=True/None path to avoid duplication
+                pass
+            elif tool_name.endswith("Agent"):
                 agent_name = normalize_agent_name(tool_name)
                 sub_agent_states[agent_name] = {"is_running": True}
                 results.append({
@@ -703,8 +706,17 @@ class ADKAgentService:
                         fc = part.function_call
                         tool_name = getattr(fc, "name", "unknown")
 
+                        # Check if this is an ask_user_clarification call
+                        if tool_name == "ask_user_clarification":
+                            args = getattr(fc, "args", {}) or {}
+                            questions = args.get("questions", [])
+                            results.append({
+                                "type": "ask_user",
+                                "group_id": str(uuid.uuid4()),
+                                "questions": questions,
+                            })
                         # Check if this is a sub-agent call (AgentTool)
-                        if tool_name.endswith("Agent"):
+                        elif tool_name.endswith("Agent"):
                             # Extract agent name (e.g., "ZohoCRMAgent" -> "zoho_crm")
                             agent_name = normalize_agent_name(tool_name)
                             sub_agent_states[agent_name] = {"is_running": True}

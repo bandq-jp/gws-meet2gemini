@@ -15,6 +15,7 @@ import type {
   ToolActivityItem,
   ReasoningActivityItem,
   SubAgentActivityItem,
+  AskUserActivityItem,
   ChartActivityItem,
   CodeExecutionActivityItem,
   CodeResultActivityItem,
@@ -438,6 +439,20 @@ export function useMarketingChat(
             break;
           }
 
+          case "ask_user": {
+            // Clarification/choice UI from ask_user_clarification tool
+            currentTextIdRef.current = null;
+            items.push({
+              id: generateId(),
+              kind: "ask_user",
+              sequence: seqRef.current++,
+              groupId: event.group_id || generateId(),
+              questions: event.questions || [],
+              answered: false,
+            } as AskUserActivityItem);
+            break;
+          }
+
           case "agent_updated": {
             // Agent switch - could add visual indicator
             break;
@@ -577,7 +592,27 @@ export function useMarketingChat(
         createdAt: new Date(),
       };
 
-      setMessages((prev) => [...prev, userMessage, assistantMessage]);
+      setMessages((prev) => {
+        // Mark any ask_user items in the last assistant message as answered
+        const updated = prev.map((msg, i) => {
+          if (
+            i === prev.length - 1 &&
+            msg.role === "assistant" &&
+            msg.activityItems?.some((item) => item.kind === "ask_user")
+          ) {
+            return {
+              ...msg,
+              activityItems: msg.activityItems.map((item) =>
+                item.kind === "ask_user"
+                  ? { ...item, answered: true }
+                  : item
+              ),
+            };
+          }
+          return msg;
+        });
+        return [...updated, userMessage, assistantMessage];
+      });
 
       try {
         const token = await ensureToken();
@@ -792,6 +827,22 @@ export function useMarketingChat(
             };
           }
         );
+
+        // Mark ask_user items as answered if a user message follows
+        for (let i = 0; i < restoredMessages.length; i++) {
+          const msg = restoredMessages[i];
+          if (msg.role !== "assistant" || !msg.activityItems) continue;
+          const hasFollowingUserMsg = restoredMessages
+            .slice(i + 1)
+            .some((m) => m.role === "user");
+          if (hasFollowingUserMsg) {
+            for (const item of msg.activityItems) {
+              if (item.kind === "ask_user") {
+                (item as AskUserActivityItem).answered = true;
+              }
+            }
+          }
+        }
 
         setMessages(restoredMessages);
         setConversationId(id);

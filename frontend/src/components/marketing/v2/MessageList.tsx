@@ -27,6 +27,8 @@ import type {
 export interface MessageListProps {
   messages: Message[];
   isStreaming?: boolean;
+  // Ask user clarification callback
+  onSendMessage?: (content: string) => void;
   // Feedback props
   feedbackByMessage?: Record<string, MessageFeedback>;
   annotationsByMessage?: Record<string, MessageAnnotation[]>;
@@ -43,6 +45,7 @@ export interface MessageListProps {
 export function MessageList({
   messages,
   isStreaming,
+  onSendMessage,
   feedbackByMessage,
   annotationsByMessage,
   feedbackTags,
@@ -160,6 +163,7 @@ export function MessageList({
               isFeedbackMode={isFeedbackMode}
               conversationId={conversationId || undefined}
               activeAnnotationId={activeAnnotationId}
+              onSendMessage={onSendMessage}
               onSubmitFeedback={onSubmitFeedback}
               onCreateAnnotation={onCreateAnnotation}
               onDeleteAnnotation={onDeleteAnnotation}

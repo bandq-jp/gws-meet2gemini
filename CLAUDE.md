@@ -754,6 +754,34 @@
     - `frontend/src/components/marketing/v2/ChatMessage.tsx` - `img` component追加
     - `backend/app/infrastructure/adk/agents/ad_platform_agent.py` - 指示文更新
 
+- **ユーザー確認・選択肢UI（ask_user_clarification）実装（2026-02-08）**
+  - **目的**: エージェントがユーザーの意図が曖昧な場合に、Claude Code風のインタラクティブ選択UIを表示して確認を取る機能
+  - **アーキテクチャ**: ADKネイティブ `LongRunningFunctionTool` + カスタムSSEイベント + フロントエンド選択UI
+  - **設計判断**: Approach A（カスタムツール+新メッセージ応答）を採用。ADK `ResumabilityConfig`（@experimental）への依存を避け、安定した実装を優先
+  - **フロー**:
+    1. オーケストレーターが`ask_user_clarification(questions=[...])`を呼び出し
+    2. ツールはNoneを返す（LongRunningFunctionTool: skip_summarization=True）
+    3. `_process_adk_event`がfunction_callを検知→`ask_user` SSEイベントを生成
+    4. フロントエンドが選択肢ボタンUIを表示
+    5. ユーザーがクリック→選択結果を新しいメッセージとして自動送信
+    6. エージェントが次のターンで選択結果を受け取り続行
+  - 新規ファイル:
+    - `backend/app/infrastructure/adk/tools/ask_user_tools.py` - `ask_user_clarification` LongRunningFunctionTool + ADK_ASK_USER_TOOLS
+    - `frontend/src/components/marketing/v2/AskUserPrompt.tsx` - 選択肢UIコンポーネント（シングル/マルチセレクト対応）
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agent_service.py` - `_process_adk_event`と`_process_non_text_part`にask_user検知ロジック追加
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - ツール登録（ADK_ASK_USER_TOOLS）+ 指示文にガイドライン追加
+    - `frontend/src/hooks/use-marketing-chat-v2.ts` - `processEvent`に`ask_user`ケース追加、AskUserActivityItem import
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - ActivityTimelineに`ask_user`レンダリング追加、`onSendMessage` propチェーン追加
+    - `frontend/src/components/marketing/v2/MessageList.tsx` - `onSendMessage` prop追加・パススルー
+    - `frontend/src/components/marketing/v2/MarketingChat.tsx` - MessageListに`handleSend`を`onSendMessage`として渡す
+  - **UX**: シングルセレクト=クリック即送信、マルチセレクト=選択後「選択して続行」ボタン
+  - **型定義**: `AskUserQuestionItem`, `AskUserEvent`, `AskUserActivityItem`は既存（types.tsに定義済み）
+  - **ADK知見**:
+    - `LongRunningFunctionTool`はツール説明に自動で「NOTE: This is a long-running operation...」を付加
+    - `skip_summarization=True`でLLMがNone応答を要約しない
+    - ADKには`get_user_choice_tool`（組み込み）も存在するが、optionsがstring[]のみでdescription不可のため独自実装
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

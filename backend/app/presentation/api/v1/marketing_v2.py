@@ -429,6 +429,19 @@ async def chat_stream(
                     })
                     seq += 1
 
+                elif event_type == "ask_user":
+                    # User clarification choices from ask_user_clarification tool
+                    current_text_id = None
+                    activity_items.append({
+                        "kind": "ask_user",
+                        "sequence": seq,
+                        "id": str(uuid.uuid4()),
+                        "groupId": event.get("group_id", str(uuid.uuid4())),
+                        "questions": event.get("questions", []),
+                        "answered": False,
+                    })
+                    seq += 1
+
                 elif event_type == "_context_items":
                     # Save context_items + user:/app: state to conversation metadata
                     try:

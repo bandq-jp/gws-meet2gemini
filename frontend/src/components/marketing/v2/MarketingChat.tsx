@@ -513,6 +513,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
                 <MessageList
                   messages={messages}
                   isStreaming={isStreaming}
+                  onSendMessage={handleSend}
                   feedbackByMessage={feedback.feedbackByMessage}
                   annotationsByMessage={feedback.annotationsByMessage}
                   feedbackTags={feedback.tags}
