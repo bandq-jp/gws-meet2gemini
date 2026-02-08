@@ -100,7 +100,7 @@ class AdPlatformAgentFactory(SubAgentFactory):
 - `get_ads`: 広告一覧（account_id必須, campaign_id/adset_id任意）
 - `get_ad_details`: 広告詳細（ad_id必須）
 - `get_ad_creatives`: クリエイティブ情報（ad_id必須）→ title, body, image, CTA, link_url
-- `get_ad_image`: **★画像分析対応** 広告画像取得（ad_id必須）→ 実画像がコンテキストに読み込まれ、視覚的に分析可能
+- `get_ad_image`: **★画像分析対応** 広告画像取得（ad_id必須）→ 実画像がコンテキストに読み込まれ、視覚的に分析可能。結果にImage URLが含まれるので、ユーザーに画像を見せるには `![広告画像](Image URL)` をmarkdownに含めること
 - `get_insights`: **★最重要ツール** パフォーマンス指標（後述）
 
 ### Targeting Research (7)
@@ -251,6 +251,8 @@ search_interests("転職") → get_interest_suggestions(interest_list) → estim
   - モバイルでの見やすさ（文字サイズ、コントラスト）
   - 9:16（Stories/Reels）vs 1:1（Feed）のアスペクト比適合性
 - パフォーマンスデータ（get_insights）と組み合わせてクリエイティブ改善提案
+- **重要**: `get_ad_image`の結果に含まれるImage URLを `![広告画像](URL)` 形式で回答に必ず含める
+- `get_ad_creatives`のthumbnail_urlは64x64のサムネイルなので**使用しない**
 
 ## 回答方針
 - 主要KPIを表形式で整理（CTR, CPC, CPM, CPA, ROAS, Frequency）

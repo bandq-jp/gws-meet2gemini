@@ -653,6 +653,29 @@ const markdownComponents: Components = {
       {children}
     </a>
   ),
+  img: ({ src, alt }) => {
+    const [hasError, setHasError] = useState(false);
+    const imgSrc = typeof src === "string" ? src : undefined;
+    if (hasError || !imgSrc) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-[11px] text-[#9ca3af] bg-[#f8f9fb] rounded-md px-3 py-2 border border-[#e5e7eb]">
+          <ImageIcon className="w-4 h-4" />
+          <span>{alt || "画像を読み込めませんでした"}</span>
+        </span>
+      );
+    }
+    return (
+      <a href={imgSrc} target="_blank" rel="noopener noreferrer" className="block my-3">
+        <img
+          src={imgSrc}
+          alt={alt || ""}
+          loading="lazy"
+          onError={() => setHasError(true)}
+          className="max-w-full max-h-[500px] w-auto rounded-lg shadow-sm border border-[#e5e7eb] hover:shadow-md transition-shadow cursor-pointer"
+        />
+      </a>
+    );
+  },
 };
 
 // ---------------------------------------------------------------------------

@@ -733,6 +733,27 @@
     - Frequency閾値: 認知3-5、検討2-4、CV4-7、リタゲ~10
     - 品質ランキング3指標: quality_ranking, engagement_rate_ranking, conversion_rate_ranking
 
+- **広告画像の表示・永続化修正（2026-02-08）**
+  - **問題**: 会話`6692c307`で確認。`get_ad_image`はbase64を返すが、エージェントは`get_ad_creatives`の64x64サムネイルURLをmarkdownに使用。画像が小さい＆一時URL＆フロントエンドに`img`スタイリングなし
+  - **修正1: Supabase Storageに画像を永続保存** (`mcp_response_optimizer.py`):
+    - `_handle_ad_image()`にSupabase Storageアップロード追加
+    - `_upload_ad_image_to_storage()` 新メソッド: `marketing-attachments/ad-images/ad_{ad_id}_{timestamp}.jpg`
+    - 返却テキストに永続公開URLを含め、エージェントが`![広告画像](URL)`でmarkdownに埋め込み可能に
+    - エラー時はURLなしで画像分析のみ続行（フォールバック安全）
+  - **修正2: Frontend `img` コンポーネント追加** (`ChatMessage.tsx`):
+    - `markdownComponents`に`img`を追加
+    - `max-w-full`, `max-h-[500px]`, `rounded-lg`, `shadow-sm`, `border`
+    - `onError`で壊れた画像のフォールバック（ImageIconプレースホルダー）
+    - クリックで原寸表示（`<a target="_blank">`ラップ）
+    - `loading="lazy"` でパフォーマンス最適化
+  - **修正3: Agent指示文にURL使用ガイダンス** (`ad_platform_agent.py`):
+    - `get_ad_image`結果のImage URLを`![広告画像](URL)`で回答に含める指示
+    - `get_ad_creatives`のthumbnail_url（64x64）は使用しない旨を明記
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - Storage upload追加
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - `img` component追加
+    - `backend/app/infrastructure/adk/agents/ad_platform_agent.py` - 指示文更新
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

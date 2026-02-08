@@ -354,11 +354,14 @@ class MCPResponseOptimizerPlugin(BasePlugin):
         tool_context: ToolContext,
         result: dict,
     ) -> Optional[dict]:
-        """Extract ad image from MCP response, resize, and store for LLM injection.
+        """Extract ad image from MCP response, resize, store, and inject into LLM.
 
-        MCP get_ad_image returns an Image content item with base64 JPEG data.
-        ADK serializes this to: {"content": [{"type": "image", "data": "<b64>", "mimeType": "image/jpeg"}]}
-        We extract, resize to ~Full HD, create types.Part, and return text-only result.
+        Pipeline:
+        1. Extract base64 from MCP Image response
+        2. Resize to ~Full HD with PIL
+        3. Upload to Supabase Storage → permanent public URL
+        4. Create types.Part and store for before_model_callback injection
+        5. Return text result with URL (agent uses it in markdown for user display)
         """
         ad_id = tool_args.get("ad_id", "unknown")
 
@@ -399,20 +402,63 @@ class MCPResponseOptimizerPlugin(BasePlugin):
         else:
             logger.warning("[MCPOptimizer] No invocation_id — image cannot be injected")
 
-        # Return text-only result (image will be injected in before_model_callback)
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f"[Ad image loaded: ad_id={ad_id}, {width}x{height}px, "
-                        f"{len(resized_bytes) // 1024}KB JPEG. "
-                        f"The image has been loaded for visual analysis — "
-                        f"you can see it in your context.]"
-                    ),
-                }
-            ],
-        }
+        # Upload to Supabase Storage for permanent URL
+        image_url = self._upload_ad_image_to_storage(ad_id, resized_bytes)
+
+        # Build result text
+        if image_url:
+            result_text = (
+                f"[Ad image: ad_id={ad_id}, {width}x{height}px, "
+                f"{len(resized_bytes) // 1024}KB]\n"
+                f"Image URL: {image_url}\n"
+                f"この画像はあなたのコンテキストに読み込み済みです（視覚分析可能）。\n"
+                f"ユーザーに画像を見せるには ![広告画像](Image URL) を回答に含めてください。"
+            )
+        else:
+            result_text = (
+                f"[Ad image: ad_id={ad_id}, {width}x{height}px, "
+                f"{len(resized_bytes) // 1024}KB]\n"
+                f"この画像はあなたのコンテキストに読み込み済みです（視覚分析可能）。\n"
+                f"（Storage URLは取得できませんでした。画像分析は可能です。）"
+            )
+
+        return {"content": [{"type": "text", "text": result_text}]}
+
+    @staticmethod
+    def _upload_ad_image_to_storage(ad_id: str, image_bytes: bytes) -> Optional[str]:
+        """Upload ad image to Supabase Storage and return signed URL.
+
+        Saves to: marketing-attachments/ad-images/ad_{ad_id}_{timestamp}.jpg
+        Returns signed URL (7-day expiry) or None on failure.
+        """
+        import time
+
+        try:
+            from app.infrastructure.supabase.client import get_supabase
+            sb = get_supabase()
+            timestamp = int(time.time())
+            storage_path = f"ad-images/ad_{ad_id}_{timestamp}.jpg"
+
+            sb.storage.from_("marketing-attachments").upload(
+                storage_path,
+                image_bytes,
+                file_options={"content-type": "image/jpeg"},
+            )
+
+            # Use signed URL (7 days) since bucket is private
+            res = sb.storage.from_("marketing-attachments").create_signed_url(
+                storage_path, expires_in=604800  # 7 days
+            )
+            url = res.get("signedURL", "") if isinstance(res, dict) else ""
+            if url:
+                logger.info(f"[MCPOptimizer] Ad image uploaded: {storage_path}")
+                return url
+
+            logger.warning("[MCPOptimizer] Signed URL creation returned empty")
+            return None
+        except Exception as e:
+            logger.warning(f"[MCPOptimizer] Failed to upload ad image to storage: {e}")
+            return None
 
     @staticmethod
     def _extract_image_from_mcp_result(
