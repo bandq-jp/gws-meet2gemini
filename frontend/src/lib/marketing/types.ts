@@ -161,6 +161,8 @@ export interface ProgressEvent extends BaseStreamEvent {
 export interface DoneEvent extends BaseStreamEvent {
   type: "done";
   conversation_id: string;
+  user_msg_id?: string;
+  assistant_msg_id?: string;
 }
 
 export interface ErrorEvent extends BaseStreamEvent {

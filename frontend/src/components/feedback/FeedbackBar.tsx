@@ -61,8 +61,12 @@ export function FeedbackBar({
   const hasExisting = !!existingFeedback?.rating;
   const hasDetails = !!(existingFeedback?.comment || existingFeedback?.tags?.length);
 
+  // Guard: check if message has been persisted (UUID format)
+  const isPersistedMessage = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(messageId);
+
   // Toggle rating: click same thumb to un-select, different thumb to switch
   const handleToggleRating = useCallback(async (rating: Rating) => {
+    if (!isPersistedMessage) return;
     const newRating = selectedRating === rating ? null : rating;
     setSelectedRating(newRating);
     setSubmitting(true);
@@ -76,10 +80,11 @@ export function FeedbackBar({
     } finally {
       setSubmitting(false);
     }
-  }, [messageId, onSubmit, selectedRating, comment, selectedTags, correction]);
+  }, [messageId, onSubmit, isPersistedMessage, selectedRating, comment, selectedTags, correction]);
 
   // Submit detailed feedback from popover
   const handleSubmitDetailed = useCallback(async () => {
+    if (!isPersistedMessage) return;
     setSubmitting(true);
     try {
       await onSubmit(messageId, {
@@ -92,10 +97,11 @@ export function FeedbackBar({
     } finally {
       setSubmitting(false);
     }
-  }, [messageId, selectedRating, comment, correction, selectedTags, onSubmit]);
+  }, [messageId, isPersistedMessage, selectedRating, comment, correction, selectedTags, onSubmit]);
 
   // Reset all feedback
   const handleReset = useCallback(async () => {
+    if (!isPersistedMessage) return;
     setSubmitting(true);
     try {
       await onSubmit(messageId, {

@@ -274,6 +274,14 @@ export function AnnotationLayer({
   // =========================================================================
   const handleFormSubmit = useCallback(async () => {
     if (!form) return;
+
+    // Guard: reject transient client-generated IDs (not yet saved to DB)
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(messageId)) {
+      alert("メッセージがまだ保存されていません。ページを再読み込みしてから再度お試しください。");
+      return;
+    }
+
     setFormSubmitting(true);
     try {
       // Use DOM textContent for content hash (consistent with capture)

@@ -298,6 +298,9 @@ async def chat_stream(
         # Inject user email into state for per-user Google Workspace delegation
         initial_state["app:user_email"] = context.user_email
 
+        # --- Pre-generate assistant message ID for done event ---
+        assistant_msg_id = str(uuid.uuid4())
+
         # --- Streaming with activity items accumulation ---
         activity_items: list[dict] = []
         full_text_content = ""
@@ -469,9 +472,11 @@ async def chat_stream(
                 # Remove internal flags before sending
                 event.pop("_needs_translation", None)
 
-                # Override conversation_id in done event
+                # Override conversation_id and include message IDs in done event
                 if event_type == "done":
                     event["conversation_id"] = conversation_id
+                    event["user_msg_id"] = user_msg_id
+                    event["assistant_msg_id"] = assistant_msg_id
 
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
@@ -484,7 +489,6 @@ async def chat_stream(
 
             # --- DB: Save assistant message with activity_items ---
             if full_text_content or activity_items:
-                assistant_msg_id = str(uuid.uuid4())
                 try:
                     sb.table("marketing_messages").insert({
                         "id": assistant_msg_id,

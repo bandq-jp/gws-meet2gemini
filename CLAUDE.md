@@ -649,6 +649,36 @@
     - `frontend/src/hooks/use-feedback.ts` - 3メソッド+4 state追加
     - `frontend/src/app/feedback/page.tsx` - 全面リライト
 
+- **FB自動共有 + エクスポート大幅拡張（2026-02-08）**
+  - **FB作成時に自動共有ON**:
+    - `_ensure_shared()` ヘルパー関数追加
+    - `upsert_message_feedback()` と `create_annotation()` の後に自動呼び出し
+    - 一度でもFBされた会話は`is_shared=true`になり、他ユーザーが閲覧可能に
+    - `shared_at`, `shared_by_email`, `shared_by_clerk_id` を記録（監査証跡）
+    - 失敗してもFB保存自体は成功する（try/except で安全にラップ）
+  - **エクスポート拡張（会話履歴+ツール+サブエージェント）**:
+    - 旧: FB/アノテーションのみ（メッセージは300文字切り詰め）
+    - 新: 全会話メッセージ + activity_items を含む完全なエクスポート
+    - **JSONL構造**: `type: conversation` → `type: message`（activity_items埋め込み、feedback/annotations付き）
+    - **CSV構造**: 行タイプ別フラット化
+      - `message`: テキスト内容（最大500文字）
+      - `activity:tool`: メインエージェントのツール呼び出し（name, arguments, output）
+      - `activity:sub_agent`: サブエージェント活動（agent_name, tool_name, arguments）
+      - `activity:sub_agent_tool`: サブエージェント内ツール呼び出し
+      - `activity:sub_agent_reasoning`: サブエージェント推論
+      - `activity:reasoning`: LLM推論
+      - `activity:chart`: チャート仕様（type, title, データ行数）
+      - `activity:code_execution`: コード実行（code, language）
+      - `activity:code_result`: 実行結果（output, outcome）
+      - `feedback`: メッセージ評価（rating, tags, comment, correction）
+      - `annotation`: テキストアノテーション（severity, selector quote, comment）
+    - `_flatten_activity_items()` ヘルパー関数追加: 深いネストを平坦化
+    - フィルタ: `rating`, `user_email`, `conversation_id` がエクスポートにも適用
+  - 変更ファイル:
+    - `backend/app/presentation/api/v1/feedback.py` - `_ensure_shared()`, `_flatten_activity_items()` 追加、export全面書き換え
+    - `frontend/src/hooks/use-feedback.ts` - exportFeedbackに`user_email`, `conversation_id`追加
+    - `frontend/src/app/feedback/page.tsx` - handleExportにフィルタ状態を全て渡す
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

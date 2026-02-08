@@ -105,6 +105,29 @@ def _content_hash(content: str | dict | None) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
+def _ensure_shared(sb, conversation_id: str, ctx: MarketingRequestContext) -> None:
+    """Auto-enable sharing on conversations that receive feedback."""
+    try:
+        conv = (
+            sb.table("marketing_conversations")
+            .select("is_shared")
+            .eq("id", conversation_id)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        if conv.data and not conv.data.get("is_shared"):
+            sb.table("marketing_conversations").update({
+                "is_shared": True,
+                "shared_at": datetime.now(timezone.utc).isoformat(),
+                "shared_by_email": ctx.user_email,
+                "shared_by_clerk_id": ctx.user_id,
+            }).eq("id", conversation_id).execute()
+            logger.info("Auto-shared conversation %s (feedback by %s)", conversation_id, ctx.user_email)
+    except Exception:
+        logger.warning("Failed to auto-share conversation %s", conversation_id, exc_info=True)
+
+
 # ============================================================
 # Message Feedback
 # ============================================================
@@ -140,6 +163,10 @@ async def upsert_message_feedback(
         .upsert(row, on_conflict="message_id,user_email")
         .execute()
     )
+
+    # Auto-enable sharing for conversations with feedback
+    _ensure_shared(sb, msg.data["conversation_id"], ctx)
+
     return result.data[0] if result.data else row
 
 
@@ -180,7 +207,20 @@ async def create_annotation(
         "correction": body.correction,
         "content_hash": body.content_hash,
     }
-    result = sb.table("message_annotations").insert(row).execute()
+    try:
+        result = sb.table("message_annotations").insert(row).execute()
+    except Exception as e:
+        err_msg = str(e)
+        if "23503" in err_msg or "foreign key" in err_msg.lower():
+            raise HTTPException(
+                status_code=400,
+                detail="メッセージがまだ保存されていません。ページを再読み込みしてください。",
+            )
+        raise
+
+    # Auto-enable sharing for conversations with annotations
+    _ensure_shared(sb, body.conversation_id, ctx)
+
     return result.data[0] if result.data else row
 
 
@@ -384,6 +424,66 @@ async def get_dimensions(ctx: MarketingRequestContext = Depends(require_feedback
 # Export
 # ============================================================
 
+def _flatten_activity_items(activity_items: list | None) -> list[dict]:
+    """Flatten activity_items into export-friendly rows."""
+    if not activity_items:
+        return []
+    rows = []
+    for item in sorted(activity_items, key=lambda x: x.get("sequence", 0)):
+        kind = item.get("kind", "")
+        base = {"kind": kind, "sequence": item.get("sequence", 0)}
+
+        if kind == "text":
+            base["content"] = (item.get("content") or "")[:500]
+        elif kind == "tool":
+            base["tool_name"] = item.get("name", "")
+            base["tool_arguments"] = item.get("arguments", "")
+            base["tool_output"] = (item.get("output") or "")[:1000]
+        elif kind == "sub_agent":
+            base["agent_name"] = item.get("agent", "")
+            base["event_type"] = item.get("event_type", "")
+            data = item.get("data") or {}
+            base["tool_name"] = data.get("tool_name", "")
+            base["tool_arguments"] = data.get("arguments", "")
+            base["tool_output"] = (data.get("output_preview") or data.get("content") or "")[:1000]
+            base["error"] = data.get("error", "")
+            # Flatten nested toolCalls if present
+            for tc in item.get("toolCalls") or []:
+                rows.append({
+                    "kind": "sub_agent_tool",
+                    "sequence": base["sequence"],
+                    "agent_name": base["agent_name"],
+                    "tool_name": tc.get("toolName", ""),
+                    "tool_arguments": tc.get("arguments", ""),
+                    "tool_output": "",
+                    "is_complete": tc.get("isComplete", False),
+                    "error": tc.get("error", ""),
+                })
+            if item.get("reasoningContent"):
+                rows.append({
+                    "kind": "sub_agent_reasoning",
+                    "sequence": base["sequence"],
+                    "agent_name": base["agent_name"],
+                    "content": (item["reasoningContent"] or "")[:500],
+                })
+        elif kind == "reasoning":
+            base["content"] = (item.get("content") or "")[:500]
+        elif kind == "chart":
+            spec = item.get("spec") or {}
+            base["chart_type"] = spec.get("type", "")
+            base["chart_title"] = spec.get("title", "")
+            base["chart_data_rows"] = len(spec.get("data") or [])
+        elif kind == "code_execution":
+            base["code"] = (item.get("code") or "")[:1000]
+            base["language"] = item.get("language", "")
+        elif kind == "code_result":
+            base["output"] = (item.get("output") or "")[:1000]
+            base["outcome"] = item.get("outcome", "")
+
+        rows.append(base)
+    return rows
+
+
 @router.get("/export")
 async def export_feedback(
     format: str = Query("jsonl", pattern="^(jsonl|csv)$"),
@@ -397,80 +497,137 @@ async def export_feedback(
     sb = get_supabase()
 
     # ── Feedback query ──
-    q = sb.table("message_feedback").select(
-        "*, marketing_messages!inner(id, role, content, plain_text, created_at), "
-        "marketing_conversations!inner(id, title, owner_email)"
-    )
+    fb_q = sb.table("message_feedback").select("*")
     if rating:
-        q = q.eq("rating", rating)
+        fb_q = fb_q.eq("rating", rating)
     if review_status:
-        q = q.eq("review_status", review_status)
+        fb_q = fb_q.eq("review_status", review_status)
     if tag:
-        q = q.contains("tags", [tag])
+        fb_q = fb_q.contains("tags", [tag])
     if user_email:
-        q = q.eq("user_email", user_email)
+        fb_q = fb_q.eq("user_email", user_email)
     if conversation_id:
-        q = q.eq("conversation_id", conversation_id)
-    q = q.order("created_at", desc=True)
-    result = q.execute()
-    fb_items = result.data or []
+        fb_q = fb_q.eq("conversation_id", conversation_id)
+    fb_q = fb_q.order("created_at", desc=True)
+    fb_items = (fb_q.execute()).data or []
 
-    # ── Annotations query (included in JSONL, separate section in CSV) ──
+    # ── Annotations query ──
     ann_q = sb.table("message_annotations").select("*")
     if user_email:
         ann_q = ann_q.eq("user_email", user_email)
     if conversation_id:
         ann_q = ann_q.eq("conversation_id", conversation_id)
     ann_q = ann_q.order("created_at", desc=True)
-    ann_result = ann_q.execute()
-    all_annotations = ann_result.data or []
+    all_annotations = (ann_q.execute()).data or []
 
-    # Group annotations by message_id for JSONL embedding
-    annotations_map: dict[str, list] = {}
-    for a in all_annotations:
-        annotations_map.setdefault(a["message_id"], []).append(a)
+    # ── Conversation IDs with feedback/annotations ──
+    conv_ids = set()
+    for r in fb_items:
+        conv_ids.add(r["conversation_id"])
+    for r in all_annotations:
+        conv_ids.add(r["conversation_id"])
+
+    # ── Load full conversation messages with activity_items ──
+    conv_meta: dict[str, dict] = {}
+    messages_by_conv: dict[str, list] = {}
+    for cid in conv_ids:
+        # Conversation metadata
+        meta_r = (
+            sb.table("marketing_conversations")
+            .select("id, title, owner_email, created_at, metadata")
+            .eq("id", cid)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+        if meta_r.data:
+            conv_meta[cid] = meta_r.data
+
+        # All messages in conversation (full content with activity_items)
+        msgs_r = (
+            sb.table("marketing_messages")
+            .select("id, conversation_id, role, content, plain_text, created_at")
+            .eq("conversation_id", cid)
+            .order("created_at", desc=False)
+            .limit(500)
+            .execute()
+        )
+        messages_by_conv[cid] = msgs_r.data or []
+
+    # ── Group feedback/annotations by message ──
+    fb_by_msg: dict[str, list] = {}
+    for fb in fb_items:
+        fb_by_msg.setdefault(fb["message_id"], []).append(fb)
+    ann_by_msg: dict[str, list] = {}
+    for ann in all_annotations:
+        ann_by_msg.setdefault(ann["message_id"], []).append(ann)
 
     if format == "jsonl":
         def generate():
-            # Feedback rows with embedded annotations
-            for item in fb_items:
-                row = {
-                    "type": "feedback",
-                    "feedback_id": item["id"],
-                    "conversation_id": item["conversation_id"],
-                    "message_id": item["message_id"],
-                    "user_email": item.get("user_email"),
-                    "rating": item["rating"],
-                    "comment": item.get("comment"),
-                    "correction": item.get("correction"),
-                    "dimension_scores": item.get("dimension_scores"),
-                    "tags": item.get("tags"),
-                    "review_status": item.get("review_status"),
-                    "created_at": item.get("created_at"),
-                    "message": item.get("marketing_messages"),
-                    "conversation": item.get("marketing_conversations"),
-                    "annotations": annotations_map.get(item["message_id"], []),
-                }
-                yield json.dumps(row, ensure_ascii=False, default=str) + "\n"
+            for cid in sorted(conv_ids):
+                meta = conv_meta.get(cid, {})
+                msgs = messages_by_conv.get(cid, [])
 
-            # Standalone annotations (not attached to any feedback row)
-            fb_message_ids = {item["message_id"] for item in fb_items}
-            for ann in all_annotations:
-                if ann["message_id"] not in fb_message_ids:
-                    row = {
-                        "type": "annotation",
-                        "annotation_id": ann["id"],
-                        "conversation_id": ann["conversation_id"],
-                        "message_id": ann["message_id"],
-                        "user_email": ann.get("user_email"),
-                        "severity": ann.get("severity"),
-                        "comment": ann.get("comment"),
-                        "correction": ann.get("correction"),
-                        "tags": ann.get("tags"),
-                        "selector": ann.get("selector"),
-                        "review_status": ann.get("review_status"),
-                        "created_at": ann.get("created_at"),
+                # 1. Conversation header
+                yield json.dumps({
+                    "type": "conversation",
+                    "conversation_id": cid,
+                    "title": meta.get("title", ""),
+                    "owner_email": meta.get("owner_email", ""),
+                    "created_at": meta.get("created_at", ""),
+                }, ensure_ascii=False, default=str) + "\n"
+
+                # 2. All messages with activity_items + attached feedback/annotations
+                for msg in msgs:
+                    content = msg.get("content") or {}
+                    activity_items = content.get("activity_items") or []
+                    text = content.get("text") or msg.get("plain_text") or ""
+
+                    row: dict = {
+                        "type": "message",
+                        "message_id": msg["id"],
+                        "conversation_id": cid,
+                        "role": msg["role"],
+                        "text": text,
+                        "created_at": msg.get("created_at", ""),
+                        "activity_items": activity_items,
                     }
+
+                    # Attach feedback for this message
+                    msg_fb = fb_by_msg.get(msg["id"])
+                    if msg_fb:
+                        row["feedback"] = [
+                            {
+                                "id": fb["id"],
+                                "user_email": fb.get("user_email"),
+                                "rating": fb.get("rating"),
+                                "comment": fb.get("comment"),
+                                "correction": fb.get("correction"),
+                                "tags": fb.get("tags"),
+                                "review_status": fb.get("review_status"),
+                                "created_at": fb.get("created_at"),
+                            }
+                            for fb in msg_fb
+                        ]
+
+                    # Attach annotations for this message
+                    msg_ann = ann_by_msg.get(msg["id"])
+                    if msg_ann:
+                        row["annotations"] = [
+                            {
+                                "id": ann["id"],
+                                "user_email": ann.get("user_email"),
+                                "severity": ann.get("severity"),
+                                "comment": ann.get("comment"),
+                                "correction": ann.get("correction"),
+                                "tags": ann.get("tags"),
+                                "selector": ann.get("selector"),
+                                "review_status": ann.get("review_status"),
+                                "created_at": ann.get("created_at"),
+                            }
+                            for ann in msg_ann
+                        ]
+
                     yield json.dumps(row, ensure_ascii=False, default=str) + "\n"
 
         return StreamingResponse(
@@ -479,55 +636,81 @@ async def export_feedback(
             headers={"Content-Disposition": f"attachment; filename=feedback_{datetime.now().strftime('%Y%m%d')}.jsonl"},
         )
     else:
+        # CSV: flat rows with type column
         buf = io.StringIO()
         writer = csv.writer(buf)
 
-        # Feedback sheet
         writer.writerow([
-            "type", "id", "conversation_id", "message_id", "user_email",
+            "type", "conversation_id", "conversation_title", "message_id",
+            "role", "sequence", "kind", "agent_name", "tool_name",
+            "tool_arguments", "tool_output", "text_content",
             "rating", "severity", "tags", "comment", "correction",
-            "review_status", "created_at", "message_text", "conversation_title",
+            "review_status", "user_email", "created_at",
         ])
-        for item in fb_items:
-            msg = item.get("marketing_messages") or {}
-            conv = item.get("marketing_conversations") or {}
-            writer.writerow([
-                "feedback",
-                item["id"],
-                item["conversation_id"],
-                item["message_id"],
-                item.get("user_email", ""),
-                item.get("rating", ""),
-                "",  # severity (feedback doesn't have it)
-                ", ".join(item.get("tags") or []),
-                item.get("comment", ""),
-                item.get("correction", ""),
-                item.get("review_status", ""),
-                item.get("created_at", ""),
-                (msg.get("plain_text") or "")[:300],
-                conv.get("title", ""),
-            ])
 
-        # Annotation rows in same CSV
-        for ann in all_annotations:
-            sel = ann.get("selector") or {}
-            quote = sel.get("quote", {}).get("exact", "")[:200] if isinstance(sel, dict) else ""
-            writer.writerow([
-                "annotation",
-                ann["id"],
-                ann["conversation_id"],
-                ann["message_id"],
-                ann.get("user_email", ""),
-                "",  # rating (annotation doesn't have it)
-                ann.get("severity", ""),
-                ", ".join(ann.get("tags") or []),
-                ann.get("comment", ""),
-                ann.get("correction", ""),
-                ann.get("review_status", ""),
-                ann.get("created_at", ""),
-                quote,
-                "",  # conversation_title (not joined for annotations)
-            ])
+        for cid in sorted(conv_ids):
+            meta = conv_meta.get(cid, {})
+            title = meta.get("title", "")
+            msgs = messages_by_conv.get(cid, [])
+
+            for msg in msgs:
+                mid = msg["id"]
+                role = msg["role"]
+                content = msg.get("content") or {}
+                text = content.get("text") or msg.get("plain_text") or ""
+                activity_items = content.get("activity_items") or []
+                created_at = msg.get("created_at", "")
+
+                # Message row (text content)
+                writer.writerow([
+                    "message", cid, title, mid,
+                    role, "", "", "", "",
+                    "", "", text[:500],
+                    "", "", "", "", "",
+                    "", "", created_at,
+                ])
+
+                # Activity item rows (tools, sub-agents, reasoning, charts, code)
+                for ai in _flatten_activity_items(activity_items):
+                    kind = ai.get("kind", "")
+                    writer.writerow([
+                        f"activity:{kind}", cid, title, mid,
+                        role, ai.get("sequence", ""), kind,
+                        ai.get("agent_name", ""), ai.get("tool_name", ""),
+                        (ai.get("tool_arguments") or "")[:500],
+                        (ai.get("tool_output") or ai.get("output") or "")[:500],
+                        (ai.get("content") or ai.get("code") or "")[:500],
+                        "", "", "", "", "",
+                        "", "", created_at,
+                    ])
+
+                # Feedback rows for this message
+                for fb in fb_by_msg.get(mid, []):
+                    writer.writerow([
+                        "feedback", cid, title, mid,
+                        "", "", "", "", "",
+                        "", "", "",
+                        fb.get("rating", ""), "",
+                        ", ".join(fb.get("tags") or []),
+                        fb.get("comment", ""), fb.get("correction", ""),
+                        fb.get("review_status", ""), fb.get("user_email", ""),
+                        fb.get("created_at", ""),
+                    ])
+
+                # Annotation rows for this message
+                for ann in ann_by_msg.get(mid, []):
+                    sel = ann.get("selector") or {}
+                    quote = sel.get("quote", {}).get("exact", "")[:200] if isinstance(sel, dict) else ""
+                    writer.writerow([
+                        "annotation", cid, title, mid,
+                        "", "", "", "", "",
+                        "", "", quote,
+                        "", ann.get("severity", ""),
+                        ", ".join(ann.get("tags") or []),
+                        ann.get("comment", ""), ann.get("correction", ""),
+                        ann.get("review_status", ""), ann.get("user_email", ""),
+                        ann.get("created_at", ""),
+                    ])
 
         buf.seek(0)
         return StreamingResponse(
