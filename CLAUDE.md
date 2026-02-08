@@ -357,6 +357,328 @@
   - 環境変数: `SLACK_BOT_TOKEN`, `SLACK_USER_TOKEN`
   - **Slack API制約**: `search.messages`はUser Token(`xoxp-`)のみ対応、Bot Token(`xoxb-`)では`not_allowed_token_type`エラー
 
+- **b&q Hub部門追加: 業務推進室（2026-02-07）**
+  - ユーザー要望: 「サイドバーと最初のページ（ダッシュボード）に新部門として業務推進室を追加」
+  - 変更ファイル:
+    - `frontend/src/components/app-sidebar.tsx` - `teamItems` に `業務推進室`（`/operations`）を追加、`operations` 用メニューを追加
+    - `frontend/src/app/page.tsx` - サービスカードに `業務推進室` を追加、クイックアクションにも導線を追加
+    - `frontend/src/app/operations/page.tsx` - 新規部門トップページを追加
+    - `frontend/src/app/layout.tsx` - metadata description を `業務推進室` 含む内容に更新
+
+- **b&q Agent Analytics ダッシュボード実装（2026-02-07）**
+  - **目的**: `/operations` ページをADKエージェント観測・分析ダッシュボードに変換
+  - **アーキテクチャ**: Phoenix + 独自UI ハイブリッド
+    - ADK OTelスパン → BatchSpanProcessor × 2（Supabase + Phoenix OTLP）
+    - 独自UI (`/operations`): 日常モニタリング（KPI、トレース、ツール統計、トークンコスト）
+    - Phoenix UI (`:6006`): 深い分析（スパンウォーターフォール、評価）
+  - **Phase 1 - データ収集基盤**:
+    - 依存追加: `arize-phoenix`, `openinference-instrumentation-google-adk`, `opentelemetry-exporter-otlp-proto-http`
+    - DBマイグレーション: `supabase/migrations/0021_add_agent_traces.sql`
+      - `agent_traces` テーブル（trace_id, user_email, tokens, sub_agents_used[], tools_used[]）
+      - `agent_spans` テーブル（span_id, operation_name, agent_name, tool_name, attributes JSONB）
+      - `agent_daily_summary`, `agent_tool_summary` ビュー
+    - カスタムSpanExporter: `backend/app/infrastructure/adk/telemetry/supabase_exporter.py`
+      - OTel SpanExporter継承、ADK属性パース、Supabaseバッチ書き込み
+      - invocationルートスパン検出 → agent_traces集約
+    - OTel初期化: `backend/app/infrastructure/adk/telemetry/setup.py`
+      - SupabaseSpanExporter + OTLPSpanExporter（Phoenix）の2つを並列登録
+      - `GoogleADKInstrumentor().instrument()` でOpenInference計装
+    - 設定追加: `settings.py` に `adk_telemetry_enabled`, `phoenix_endpoint`
+    - agent_service.py: OTelスパンに `user.email`, `user.id`, `conversation.id` 注入
+    - marketing/agent_service.py: テレメトリ初期化呼び出し追加
+  - **Phase 2 - バックエンドAPI**:
+    - `backend/app/presentation/api/v1/agent_analytics.py` - 8 GETエンドポイント
+      - `/overview`, `/traces`, `/traces/{trace_id}`, `/tool-usage`, `/agent-routing`, `/token-usage`, `/user-usage`, `/errors`
+    - 認証: `require_marketing_context` 流用
+  - **Phase 3 - フロントエンド**:
+    - 型定義: `frontend/src/lib/operations/types.ts`
+    - フック: `frontend/src/hooks/use-agent-analytics.ts`（8カスタムフック、トークンキャッシュ付き）
+    - コンポーネント（10個、全て新規）:
+      - `PeriodFilter.tsx` - Today/7d/30d/All切替
+      - `OverviewCards.tsx` - KPIカード4枚
+      - `TraceList.tsx` - トレース一覧テーブル（ページネーション、Phoenix UIリンク）
+      - `TraceDetail.tsx` - Sheet詳細表示
+      - `SpanTree.tsx` - 再帰スパンツリー+ウォーターフォール
+      - `ToolUsageChart.tsx` - recharts棒グラフ+テーブル
+      - `AgentRoutingChart.tsx` - recharts円グラフ+棒グラフ
+      - `TokenUsageChart.tsx` - recharts AreaChart+コストサマリー
+      - `UserUsageTable.tsx` - ユーザー別使用状況テーブル
+      - `ErrorList.tsx` - エラー追跡一覧
+    - メインページ: `frontend/src/app/operations/page.tsx` 全面書き換え
+    - サイドバー: `app-sidebar.tsx` - 「業務推進室」→「Agent Analytics」に変更、Activityアイコン
+  - 新規ファイル（15）:
+    - `supabase/migrations/0021_add_agent_traces.sql`
+    - `backend/app/infrastructure/adk/telemetry/__init__.py`
+    - `backend/app/infrastructure/adk/telemetry/supabase_exporter.py`
+    - `backend/app/infrastructure/adk/telemetry/setup.py`
+    - `backend/app/presentation/api/v1/agent_analytics.py`
+    - `frontend/src/lib/operations/types.ts`
+    - `frontend/src/hooks/use-agent-analytics.ts`
+    - `frontend/src/components/operations/` 以下10コンポーネント
+  - 変更ファイル（5）:
+    - `backend/app/infrastructure/config/settings.py`
+    - `backend/app/infrastructure/marketing/agent_service.py`
+    - `backend/app/infrastructure/adk/agent_service.py`
+    - `backend/app/presentation/api/v1/__init__.py`
+    - `frontend/src/components/app-sidebar.tsx`
+  - 環境変数: `ADK_TELEMETRY_ENABLED`, `PHOENIX_ENDPOINT`, `NEXT_PUBLIC_PHOENIX_URL`
+
+- **GA4 run_report ツール最適化（2026-02-07）**
+  - **目的**: GA4 MCPレスポンスのトークン消費を60-70%削減
+  - **MCPレスポンス圧縮プラグイン**: `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py`
+    - `after_tool_callback` でGA4 `run_report` レスポンスをインターセプト
+    - 冗長なネストJSON（`dimension_values`/`metric_values`）→ パイプ区切りcompact table
+    - 対象: `run_report`, `run_realtime_report`, `run_pivot_report`
+    - 200行上限、圧縮率ログ出力
+  - **プラグイン登録**: `agent_service.py` に `MCPResponseOptimizerPlugin` 追加（`SubAgentStreamingPlugin` と並列）
+  - **AnalyticsAgent指示文強化**: `analytics_agent.py`
+    - `limit` 必須化（デフォルト50）、`order_bys` 必須化
+    - dimension組み合わせの注意（date × 高カーディナリティ禁止）
+    - `dimension_filter` でノイズイベント除外
+    - 主要dimension/metric一覧拡充（14 dimensions、15 metrics）
+    - サイト固有CVイベント情報（Thanks_All, 法人向け問い合わせ完了等）
+    - 効率的なクエリパターン5例
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - **新規**
+    - `backend/app/infrastructure/adk/plugins/__init__.py` - エクスポート追加
+    - `backend/app/infrastructure/adk/agent_service.py` - プラグイン登録
+    - `backend/app/infrastructure/adk/agents/analytics_agent.py` - 指示文強化
+
+- **MCPツール定義最適化（入力トークン削減）**
+  - **目的**: Gemini APIリクエストのツール定義が~10,000入力トークンを消費 → 大幅削減
+  - **McpToolset tool_filter**: 不要ツールを除外してツール数を削減
+    - GA4: 6→2ツール（`run_report`, `run_realtime_report`のみ保持）
+    - GSC: 9→7ツール（`list_properties`, `get_site_details`, `batch_url_inspection`除外）
+    - 合計15→9ツール（40%削減）
+  - **before_model_callback**: 残存ツールの冗長な説明文を圧縮
+    - `run_report`の巨大なHints/Examples/Notesセクションを除去
+    - 事前定義の簡潔な説明文で置換（エージェント指示文に詳細は記載済み）
+    - その他MCPツールも200文字超の説明はHints/Notes/Examplesを自動ストリップ
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/mcp_manager.py` - `GA4_TOOL_FILTER`, `GSC_TOOL_FILTER`定数追加、`tool_filter`パラメータ適用
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - `before_model_callback`追加（ツール説明圧縮）
+  - **ADK知見**: `McpToolset(tool_filter=List[str])` でツール名リストによるフィルタリング。`ToolPredicate`（callable）も使用可能
+  - **ADK知見**: `before_model_callback`で`llm_request.config.tools[i].function_declarations[j].description`を直接変更可能
+
+- **Zoho CRMツール最適化（トークン大幅削減）**
+  - **目的**: get_module_schemaレスポンス(~29,140トークン/回)を中心にZoho関連トークンを60-80%削減
+  - **3段階最適化**:
+    1. **ツールレベル（zoho_crm_tools.py）**:
+       - `get_module_schema`: picklist値を20件に制限（500+→20）、複合値の重複排除（`「X」×「Y」`形式）
+       - `get_record_detail`: null/空フィールドを除去（296→~150フィールド、50%削減）
+       - `_clean_lookup_fields(strip_empty=True)` 追加
+       - `_deduplicate_picklist_values()` 新規関数
+       - `_MAX_PICKLIST_VALUES = 20` 定数
+    2. **プラグインレベル（mcp_response_optimizer.py）**:
+       - `before_model_callback` にZoho 12ツールの圧縮説明文を追加
+       - `MCP_TOOL_NAMES` → `COMPRESSIBLE_TOOL_NAMES` にリネーム（5→21ツール）
+       - `_COMPRESSED_DESCRIPTIONS` にZoho Tier 1/2/3 全12ツールを追加
+    3. **指示文レベル**:
+       - `CASupportAgent`: 4,446→1,685文字（**62%削減**）。ツール個別テーブルをグループ一覧に集約、ワークフロー例を3パターンに圧縮
+       - `ZohoCRMAgent`: ツールテーブル→箇条書き、COQL Tipsを簡潔化
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/tools/zoho_crm_tools.py` - picklist圧縮、null除去
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - Zoho description圧縮
+    - `backend/app/infrastructure/adk/agents/zoho_crm_agent.py` - 指示文簡潔化
+    - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - 指示文62%削減
+
+- **ADK Context Caching実装（Gemini Explicit Cache: 入力トークン90%コスト削減）**
+  - **目的**: ADKの毎LLMコールで再送信されるsystem_instruction+tools+会話履歴をGeminiサーバー上にキャッシュし、入力トークンコストを90%削減
+  - **仕組み**:
+    1. 初回LLMコール: フィンガープリント（SHA256）のみ生成
+    2. 2回目: フィンガープリント一致 + トークン数 > min_tokens → Gemini CachedContent作成
+    3. 3回目以降: キャッシュ再利用（system_instruction/tools/cached_contentsをリクエストから除去、`cached_content=cache_name`をセット）
+  - **キャッシュ管理**: `GeminiContextCacheManager`（ADK内蔵）がライフサイクル管理（作成・検証・有効期限・クリーンアップ）
+  - 変更ファイル:
+    - `backend/app/infrastructure/config/settings.py` - キャッシュ設定4項目追加
+    - `backend/app/infrastructure/adk/agent_service.py` - `Runner(agent=...)` → `Runner(app=App(...))` に変換、ContextCacheConfig適用
+  - 環境変数:
+    - `ADK_CONTEXT_CACHE_ENABLED`: キャッシュ有効/無効（デフォルト: `true`）
+    - `ADK_CACHE_TTL_SECONDS`: キャッシュ有効期間（デフォルト: `1800` = 30分）
+    - `ADK_CACHE_MIN_TOKENS`: キャッシュ作成の最小トークン数（デフォルト: `2048`）
+    - `ADK_CACHE_INTERVALS`: キャッシュを再作成するまでの呼び出し回数（デフォルト: `10`）
+  - **ADK知見**:
+    - `ContextCacheConfig`は`@experimental`（将来変更の可能性あり）
+    - `App`オブジェクト必須（`Runner(agent=..., app_name=...)`では不可）
+    - `App`使用時はpluginsを`App`に設定（`Runner`ではなく）
+    - `static_instruction`はADK v1.22.1には存在しない
+    - OpenAI: 50%割引 vs Gemini: 90%割引（Explicit Cache）
+    - Gemini Implicit Cache（自動、設定不要、90%割引）も別途存在するが、ADKのContext CacheはExplicit
+
+- **Phoenix キャッシュトークン表示パッチ**
+  - OpenInference instrumentorが`cached_content_token_count`を`llm.token_count.prompt_details.cache_read`にマッピングしていなかった
+  - `telemetry/setup.py`に`_patch_cache_token_attributes()`を追加し、モンキーパッチで補完
+  - Phoenixのトレース UIでキャッシュヒットトークン数が表示されるように
+
+- **Agent Analytics ページ削除（Phoenix UIに移行）**
+  - `/operations`ページ・サイドバー・ダッシュボードカードを全削除
+  - SupabaseSpanExporter削除（agent_traces/agent_spansテーブルへの書き込みを停止）
+  - agent_analytics API（`/api/v1/agent-analytics`）削除
+  - テレメトリはPhoenix OTLPエクスポーターのみに集約
+  - 削除ファイル:
+    - `frontend/src/app/operations/page.tsx`
+    - `frontend/src/components/operations/` (8コンポーネント)
+    - `frontend/src/hooks/use-agent-analytics.ts`
+    - `backend/app/presentation/api/v1/agent_analytics.py`
+    - `backend/app/infrastructure/adk/telemetry/supabase_exporter.py`
+  - 変更ファイル:
+    - `backend/app/presentation/api/v1/__init__.py` - agent_analytics import削除
+    - `backend/app/infrastructure/adk/telemetry/__init__.py` - SupabaseSpanExporter export削除
+    - `backend/app/infrastructure/adk/telemetry/setup.py` - SupabaseSpanExporter登録削除、Phoenix only
+    - `frontend/src/components/app-sidebar.tsx` - operations項目・case削除
+    - `frontend/src/app/page.tsx` - 業務推進室カード・クイックリンク削除
+
+- **フィードバック・アノテーションシステム全面実装（2026-02-07）**
+  - **目的**: b&qエージェントの応答品質をユーザーFBで改善するための包括的フィードバック収集・レビュー・エクスポート基盤
+  - **UXモード**:
+    - **通常モード**: アシスタントメッセージにホバーでThumbsUp/Down表示。ThumbsDownでPopover（タグ選択・コメント・修正案・次元別評価）
+    - **FBモード**: ヘッダーのトグルで有効化。メッセージ内テキスト選択→アノテーション作成（重要度・タグ・コメント・修正案）
+  - **テキストアンカリング**: W3C Web Annotation Data Model準拠。position（文字オフセット）+ quote（prefix/exact/suffix）デュアルセレクタで永続化
+  - **DBスキーマ**: 4テーブル + 3ビュー
+    - `feedback_dimensions`: 評価次元マスタ（accuracy, relevance, completeness, tone, tool_usage, helpfulness の6次元プリセット）
+    - `feedback_tags`: タグマスタ（positive/negative/neutral 16タグプリセット）
+    - `message_feedback`: メッセージ単位FB（rating, tags, comment, correction, dimension_scores, content_hash）UNIQUE(message_id, user_email)
+    - `message_annotations`: テキスト範囲アノテーション（selector JSONB, severity, tags, comment, correction）
+    - ビュー: `feedback_conversation_summary`, `feedback_tag_frequency`, `feedback_daily_trend`
+  - **バックエンドAPI**: `backend/app/presentation/api/v1/feedback.py` - 13エンドポイント
+    - FB CRUD: `GET/POST /messages/{id}/feedback`, `POST /messages/{id}/annotations`, `DELETE /annotations/{id}`
+    - レビュー: `GET /overview`, `GET /list`, `PUT /messages/{id}/feedback/review`
+    - マスタ: `GET /tags`, `GET /dimensions`
+    - エクスポート: `GET /export` (JSONL/CSV StreamingResponse)
+    - 認証: MarketingTokenService流用（x-marketing-client-secret）
+  - **フロントエンド**:
+    - 型定義: `frontend/src/lib/feedback/types.ts` - 全型（FeedbackDimension, FeedbackTag, MessageFeedback, MessageAnnotation, セレクタ型等）
+    - テキスト選択: `frontend/src/lib/feedback/text-selector.ts` - captureTextSelection（TreeWalker+オフセット計算）、resolveSelector（ファジーフォールバック）
+    - フック: `frontend/src/hooks/use-feedback.ts` - useFeedback（チャット用）、useFeedbackDashboard（レビュー用）
+    - コンポーネント:
+      - `FeedbackBar.tsx` - メッセージ下のFBコントロール（ThumbsUp/Down + Popover）
+      - `AnnotationLayer.tsx` - FBモード時のテキスト選択+アノテーション表示
+      - `FeedbackModeToggle.tsx` - ヘッダーのFBモード切替トグル
+      - `TagSelector.tsx` - チップ型タグ選択（センチメント別フィルタ）
+      - `DimensionRating.tsx` - 星評価コンポーネント（1-5）
+    - APIプロキシ: `frontend/src/app/api/feedback/[...path]/route.ts` - キャッチオールプロキシ（Cloud Run ID Token対応）
+    - レビューダッシュボード: `frontend/src/app/feedback/page.tsx` - KPIカード、日次トレンド、タグ頻度、フィルタ付き一覧、詳細Sheet、レビューワークフロー、JSONL/CSVエクスポート
+  - **既存ファイル変更**:
+    - `ChatMessage.tsx` - FeedbackBar, AnnotationLayer統合
+    - `MessageList.tsx` - FB props パススルー
+    - `MarketingChat.tsx` - useFeedbackフック統合、FBモードトグル追加、getClientSecret prop追加
+    - `marketing-v2/page.tsx` - getClientSecret propをMarketingChatに渡す
+    - `app-sidebar.tsx` - マーケティングメニューに「FB レビュー」追加（ClipboardCheckアイコン）、/feedbackパスでマーケティングチーム判定
+    - `backend/app/presentation/api/v1/__init__.py` - feedback router追加
+  - 新規ファイル（14）:
+    - `supabase/migrations/0022_add_feedback_system.sql`
+    - `backend/app/presentation/api/v1/feedback.py`
+    - `frontend/src/lib/feedback/types.ts`
+    - `frontend/src/lib/feedback/text-selector.ts`
+    - `frontend/src/hooks/use-feedback.ts`
+    - `frontend/src/components/feedback/FeedbackBar.tsx`
+    - `frontend/src/components/feedback/AnnotationLayer.tsx`
+    - `frontend/src/components/feedback/FeedbackModeToggle.tsx`
+    - `frontend/src/components/feedback/TagSelector.tsx`
+    - `frontend/src/components/feedback/DimensionRating.tsx`
+    - `frontend/src/components/feedback/index.ts`
+    - `frontend/src/app/api/feedback/[...path]/route.ts`
+    - `frontend/src/app/feedback/page.tsx`
+    - `docs/feedback-system-proposal.md`
+  - **設計判断**:
+    - 新規ライブラリ依存なし（既存shadcn/ui + recharts + lucideで全UI構築）
+    - content_hash（SHA-256）でメッセージ内容変更検知
+    - レビューワークフロー: new → reviewed → actioned → dismissed
+    - エクスポート: JSONL（RLHF/DPO学習用）、CSV（スプレッドシート分析用）
+
+- **フィードバックUX大幅改善（2026-02-07）**
+  - **問題**: Good/BadクリックでFBロック、メッセージ全体FBとテキスト選択アノテーションの混同、アノテーションがインラインでない、DimensionRating不要
+  - **FeedbackBar改善** (`FeedbackBar.tsx` 全面書き換え):
+    - ThumbsUp/Downをトグル式に（再クリックで解除、ロックしない）
+    - `submitted` state 完全削除 → `hasExisting` 派生値で判定
+    - 「コメント」ボタンを常時表示（FB済みでも編集可能）
+    - Popoverにプリフィル表示 + 「リセット」ボタン追加
+    - `DimensionRating` import/props完全削除
+  - **AnnotationLayer改善** (`AnnotationLayer.tsx` 全面書き換え):
+    - **インラインハイライト**: `useLayoutEffect` で `applyHighlights()` を呼び、既存アノテーションをテキスト内に `<mark>` で色付き表示
+    - **SelectionToolbar**: テキスト選択時にミニバー表示（重要度ドット5色 + 詳細ボタン）
+    - **クイックアノテーション**: 重要度ドットクリック → severity のみで即保存（最小摩擦）
+    - **AnnotationForm**: 「詳細」クリック → フルフォーム（引用プレビュー + 重要度 + タグ + コメント + 修正案）
+    - **HighlightPopover**: ハイライトクリック → アノテーション詳細 + 削除ボタン
+    - 下部バッジリスト廃止
+  - **新規ファイル**: `frontend/src/lib/feedback/highlight-renderer.ts` - DOM TreeWalker + `Range.surroundContents()` でテキストノードを `<mark>` ラップ
+  - **prop chain整理**: `feedbackDimensions` を `ChatMessage`, `MessageList`, `MarketingChat`, `ChatMessageProps`, `MessageListProps`, `AssistantMessageProps` から全削除
+  - **重要度別ハイライトCSS**: critical(赤), major(橙), minor(黄), info(青), positive(緑) の5色
+
+- **フィードバックUX: mark.js統合 + AnnotationPanel + 3重大バグ修正（2026-02-08）**
+  - **mark.jsによるインラインハイライト**: `AnnotationLayer.tsx`を全面書き換え、mark.jsでDOM上に`<mark>`ハイライト適用
+  - **AnnotationPanel**: 右サイドバー新規実装 (`AnnotationPanel.tsx`) — メッセージ別グループ、重要度カード、双方向同期
+  - **重大バグ修正3件**:
+    1. **plainText不一致**: `plainText={message.content}`はmarkdown原文を渡していたが、mark.jsはDOM textContentで動作。`resolveSelector`が常にnull返却。**修正: DOM textContentを直接使用**（`contentRef.current.textContent`）
+    2. **FB永続化失敗**: `getClientSecret()`がページロード時にnullを返すため、`loadConversationFeedback`が無言で失敗。**修正: リトライロジック追加**（最大3回、1.5s×attempt間隔）
+    3. **`<button>`ネスト**: AnnotationPanelのカード（`<button>`）内に削除ボタン（`<button>`）をネスト→HTML仕様違反・hydrationエラー。**修正: 外側を`<div role="button">`に変更**
+  - **追加改善**:
+    - `activeAnnotationId`共有状態で左右双方向同期（サイドバークリック→ハイライトスクロール＆フラッシュ、ハイライトクリック→サイドバーフォーカス）
+    - `annotation-hl-active` CSSクラス管理の実装（activeAnnotationId変更時に追加/削除）
+    - `handleMouseUp`のcallback依存をrefベースに最適化（安定したコールバック）
+    - `useLayoutEffect` → `useEffect`に変更（DOM textContent取得のため）
+    - annotationKey（ID+severity）ベースの依存配列で正確な再トリガー
+    - `onDeleteAnnotation` propをMarketingChat.tsx→AnnotationPanelに配線
+    - タグ読み込みバグ修正: `masterLoaded.current`を成功後にのみ設定、2sリトライ
+  - **自己改善**:
+    - **mark.jsのoffsetはDOM textContentベース**: markdown原文とDOM textContentは全く異なる（マークダウン記法・改行・HTMLタグが消える）。mark.jsの`markRanges`はDOM上のtextNodeを走査するため、offsetもDOM textContentで計算する必要がある
+    - **テキスト選択の`captureTextSelection`は正しくDOMベース**: `container.textContent`からオフセットを計算しているので、`resolveSelector`に渡すテキストも同じソースにすべき
+    - **トークン可用性のタイミング**: `getClientSecret()`は同期関数だがトークンは非同期フェッチ。ページロード直後は必ずnullになるため、リトライが必須
+
+- **FBレビューダッシュボード完全リライト（2026-02-08）**
+  - **目的**: `/feedback`ページを会話ごとのFBレビュー＋ユーザー別フィルタリング対応のマスター・ディテールUIにリデザイン
+  - **バックエンドAPI追加**:
+    - `GET /api/v1/feedback/conversations` - FB付き会話一覧（集計統計付き）、rating/user_emailフィルタ対応
+    - `GET /api/v1/feedback/conversations/{id}/users` - 会話にFBしたユニークユーザー一覧
+    - `GET /api/v1/feedback/conversation/{id}` - user_emailクエリパラメータ追加（ユーザー別フィルタ）
+  - **フロントエンド型定義追加**:
+    - `ConversationFeedbackSummary` - 会話ごとのFBサマリー型
+    - `ConversationListResponse` - ページネーション付きレスポンス型
+  - **フック拡張（useFeedbackDashboard）**:
+    - `loadConversations`, `loadConversationDetail`, `loadConversationUsers` メソッド追加
+    - `conversations`, `conversationDetail`, `conversationUsers`, `detailLoading` state追加
+  - **ページ完全リライト（feedback/page.tsx）**:
+    - 旧: 単一テーブル+Sheet詳細（504行）→ 新: 二パネルマスター・ディテール
+    - 左パネル: 会話リスト（検索、評価フィルタ、ユーザーフィルタ、ページネーション、未レビュー数バッジ）
+    - 右パネル: 選択会話の詳細（FB一覧+アノテーション一覧、ユーザー別フィルタ、レビューアクション）
+    - KPIカード: 合計FB / Good / Bad / 未レビュー
+    - 全UI日本語化、severity色分け、ブランドカラー統一
+  - 変更ファイル:
+    - `backend/app/presentation/api/v1/feedback.py` - 2エンドポイント追加 + user_emailフィルタ
+    - `frontend/src/lib/feedback/types.ts` - 2型追加
+    - `frontend/src/hooks/use-feedback.ts` - 3メソッド+4 state追加
+    - `frontend/src/app/feedback/page.tsx` - 全面リライト
+
+- **FB自動共有 + エクスポート大幅拡張（2026-02-08）**
+  - **FB作成時に自動共有ON**:
+    - `_ensure_shared()` ヘルパー関数追加
+    - `upsert_message_feedback()` と `create_annotation()` の後に自動呼び出し
+    - 一度でもFBされた会話は`is_shared=true`になり、他ユーザーが閲覧可能に
+    - `shared_at`, `shared_by_email`, `shared_by_clerk_id` を記録（監査証跡）
+    - 失敗してもFB保存自体は成功する（try/except で安全にラップ）
+  - **エクスポート拡張（会話履歴+ツール+サブエージェント）**:
+    - 旧: FB/アノテーションのみ（メッセージは300文字切り詰め）
+    - 新: 全会話メッセージ + activity_items を含む完全なエクスポート
+    - **JSONL構造**: `type: conversation` → `type: message`（activity_items埋め込み、feedback/annotations付き）
+    - **CSV構造**: 行タイプ別フラット化
+      - `message`: テキスト内容（最大500文字）
+      - `activity:tool`: メインエージェントのツール呼び出し（name, arguments, output）
+      - `activity:sub_agent`: サブエージェント活動（agent_name, tool_name, arguments）
+      - `activity:sub_agent_tool`: サブエージェント内ツール呼び出し
+      - `activity:sub_agent_reasoning`: サブエージェント推論
+      - `activity:reasoning`: LLM推論
+      - `activity:chart`: チャート仕様（type, title, データ行数）
+      - `activity:code_execution`: コード実行（code, language）
+      - `activity:code_result`: 実行結果（output, outcome）
+      - `feedback`: メッセージ評価（rating, tags, comment, correction）
+      - `annotation`: テキストアノテーション（severity, selector quote, comment）
+    - `_flatten_activity_items()` ヘルパー関数追加: 深いネストを平坦化
+    - フィルタ: `rating`, `user_email`, `conversation_id` がエクスポートにも適用
+  - 変更ファイル:
+    - `backend/app/presentation/api/v1/feedback.py` - `_ensure_shared()`, `_flatten_activity_items()` 追加、export全面書き換え
+    - `frontend/src/hooks/use-feedback.ts` - exportFeedbackに`user_email`, `conversation_id`追加
+    - `frontend/src/app/feedback/page.tsx` - handleExportにフィルタ状態を全て渡す
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

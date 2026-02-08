@@ -19,6 +19,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ── Tool filters to reduce input tokens ──
+# Only expose essential tools to the LLM (excludes rarely-used admin/utility tools)
+
+# GA4 (analytics-mcp): 6→2 tools
+# Keep: run_report (primary), run_realtime_report
+# Drop: get_account_summaries, list_google_ads_links, get_property_details,
+#        get_custom_dimensions_and_metrics
+GA4_TOOL_FILTER = ["run_report", "run_realtime_report"]
+
+# GSC (gsc_server.py): 9→6 tools
+# Keep: search analytics, overview, advanced, compare, page query, url inspect
+# Drop: list_properties (hardcoded in agent), get_site_details, batch_url_inspection
+GSC_TOOL_FILTER = [
+    "get_search_analytics",
+    "get_performance_overview",
+    "get_advanced_search_analytics",
+    "compare_search_periods",
+    "get_search_by_page_query",
+    "inspect_url_enhanced",
+    "get_sitemaps",
+]
+
 
 @dataclass
 class ADKMCPToolsets:
@@ -104,9 +126,12 @@ class ADKMCPManager:
                     ),
                     timeout=timeout,  # Override default 5s timeout
                 ),
-                # Note: tool_filter can be used to limit which tools are exposed
+                # Filter to essential tools only (6→2) to reduce input tokens
+                # Excluded: get_account_summaries, list_google_ads_links,
+                #           get_property_details, get_custom_dimensions_and_metrics
+                tool_filter=GA4_TOOL_FILTER,
             )
-            logger.info("[ADK MCP] GA4: ready (analytics-mcp, timeout=%ds)", int(timeout))
+            logger.info("[ADK MCP] GA4: ready (analytics-mcp, timeout=%ds, tools=%s)", int(timeout), GA4_TOOL_FILTER)
             return toolset
         except Exception as e:
             logger.warning(f"[ADK MCP] GA4: failed to create toolset: {e}")
@@ -147,8 +172,11 @@ class ADKMCPManager:
                     ),
                     timeout=timeout,  # Override default 5s timeout
                 ),
+                # Filter to essential tools only (9→6) to reduce input tokens
+                # Excluded: list_properties, get_site_details, batch_url_inspection
+                tool_filter=GSC_TOOL_FILTER,
             )
-            logger.info("[ADK MCP] GSC: ready (gsc_server.py, timeout=%ds)", int(timeout))
+            logger.info("[ADK MCP] GSC: ready (gsc_server.py, timeout=%ds, tools=%s)", int(timeout), GSC_TOOL_FILTER)
             return toolset
         except Exception as e:
             logger.warning(f"[ADK MCP] GSC: failed to create toolset: {e}")

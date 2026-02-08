@@ -190,16 +190,6 @@ export default function Dashboard() {
               
               <Button variant="outline" disabled className="h-auto p-4 opacity-50">
                 <div className="flex flex-col items-center gap-2">
-                  <Search className="w-6 h-6" />
-                  <div className="text-center">
-                    <div className="font-medium">候補者検索</div>
-                    <div className="text-xs text-muted-foreground">準備中</div>
-                  </div>
-                </div>
-              </Button>
-              
-              <Button variant="outline" disabled className="h-auto p-4 opacity-50">
-                <div className="flex flex-col items-center gap-2">
                   <TrendingUp className="w-6 h-6" />
                   <div className="text-center">
                     <div className="font-medium">分析</div>

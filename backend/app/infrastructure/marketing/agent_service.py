@@ -514,6 +514,11 @@ def get_marketing_agent_service() -> "MarketingAgentService | ADKAgentService":
     if settings.use_adk:
         global _adk_service_instance
         if _adk_service_instance is None:
+            # Initialize telemetry before creating the agent service
+            if settings.adk_telemetry_enabled:
+                from app.infrastructure.adk.telemetry.setup import setup_adk_telemetry
+                setup_adk_telemetry(settings)
+
             from app.infrastructure.adk.agent_service import ADKAgentService
             _adk_service_instance = ADKAgentService(settings)
             logger.info("[ADK] Agent service initialized (model=%s)", settings.adk_orchestrator_model)

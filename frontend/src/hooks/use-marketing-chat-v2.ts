@@ -462,6 +462,17 @@ export function useMarketingChat(
               setPendingConversationId(event.conversation_id);
             }
 
+            // Update message IDs from server-assigned UUIDs (required for feedback/annotations)
+            if (event.user_msg_id && updated.length >= 2) {
+              const userIdx = updated.length - 2;
+              if (updated[userIdx].role === "user") {
+                updated[userIdx] = { ...updated[userIdx], id: event.user_msg_id };
+              }
+            }
+            if (event.assistant_msg_id) {
+              assistant.id = event.assistant_msg_id;
+            }
+
             // Safety net: Mark any unfinished tools and sub-agents as complete
             // This handles cases where tool_result events are missing
             for (let i = 0; i < items.length; i++) {

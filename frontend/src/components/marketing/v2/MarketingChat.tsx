@@ -7,8 +7,11 @@
  * Full-stack mode with all agents enabled by default.
  */
 
-import { useCallback, forwardRef, useImperativeHandle, useState } from "react";
+import { useCallback, forwardRef, useImperativeHandle, useState, useEffect, useRef } from "react";
 import { useMarketingChat } from "@/hooks/use-marketing-chat-v2";
+import { useFeedback } from "@/hooks/use-feedback";
+import { FeedbackModeToggle } from "@/components/feedback/FeedbackModeToggle";
+import { AnnotationPanel } from "@/components/feedback/AnnotationPanel";
 import { MessageList } from "./MessageList";
 import { Composer } from "./Composer";
 import { SuggestionCarousel } from "./SuggestionCarousel";
@@ -76,6 +79,7 @@ export interface MarketingChatProps {
   attachments?: Attachment[];
   isReadOnly?: boolean;
   className?: string;
+  getClientSecret?: () => string | null;
 }
 
 export interface MarketingChatRef {
@@ -312,6 +316,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       attachments = [],
       isReadOnly = false,
       className = "",
+      getClientSecret: getClientSecretProp,
     },
     ref
   ) {
@@ -330,6 +335,54 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
       initialConversationId,
       onConversationChange,
     });
+
+    // Feedback system
+    const getClientSecretFn = useCallback(() => getClientSecretProp?.() || null, [getClientSecretProp]);
+    const feedback = useFeedback(getClientSecretFn);
+    const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
+
+    // Load feedback master data — retry until successful
+    useEffect(() => {
+      if (!getClientSecretProp) return;
+      if (feedback.tags.length > 0) return; // already loaded
+      const tryLoad = () => feedback.loadMasterData();
+      tryLoad();
+      // Retry after 2s if token wasn't ready on first call
+      const timer = setTimeout(tryLoad, 2000);
+      return () => clearTimeout(timer);
+    }, [getClientSecretProp, feedback.tags.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Handle sidebar annotation click — scroll to message + flash highlight
+    const handleSelectAnnotation = useCallback((annotationId: string, messageId: string) => {
+      setActiveAnnotationId(annotationId);
+      // Scroll the message into view
+      const msgEl = document.querySelector(`[data-message-id="${messageId}"]`);
+      if (msgEl) {
+        msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }, []);
+
+    // Load feedback when conversation changes — with retry for token readiness
+    useEffect(() => {
+      if (!conversationId || !getClientSecretProp) {
+        feedback.clearFeedback();
+        return;
+      }
+
+      let cancelled = false;
+      const tryLoad = (attempt: number) => {
+        if (cancelled || attempt > 3) return;
+        const secret = getClientSecretProp();
+        if (!secret) {
+          // Token not ready yet — retry with increasing delay
+          setTimeout(() => tryLoad(attempt + 1), 1500 * (attempt + 1));
+          return;
+        }
+        feedback.loadConversationFeedback(conversationId);
+      };
+      tryLoad(0);
+      return () => { cancelled = true; };
+    }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Expose clearMessages and loadConversation via ref
     useImperativeHandle(ref, () => ({
@@ -421,6 +474,14 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
                 </Tooltip>
               )}
 
+              {/* FB Mode Toggle */}
+              {!isReadOnly && (
+                <FeedbackModeToggle
+                  isActive={feedback.isFeedbackMode}
+                  onToggle={feedback.setIsFeedbackMode}
+                />
+              )}
+
               {/* More menu (attachments only now) */}
               {attachments.length > 0 && (
                 <DropdownMenu>
@@ -440,29 +501,58 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
             </div>
           </header>
 
-          {/* Messages area */}
-          <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-            {messages.length === 0 ? (
-              <div className="flex-1 overflow-y-auto">
-                <EmptyState onSend={handleSend} />
-              </div>
-            ) : (
-              <MessageList messages={messages} isStreaming={isStreaming} />
-            )}
+          {/* Messages area + Annotation Panel */}
+          <div className="flex-1 overflow-hidden flex min-h-0">
+            {/* Main message column */}
+            <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+              {messages.length === 0 ? (
+                <div className="flex-1 overflow-y-auto">
+                  <EmptyState onSend={handleSend} />
+                </div>
+              ) : (
+                <MessageList
+                  messages={messages}
+                  isStreaming={isStreaming}
+                  feedbackByMessage={feedback.feedbackByMessage}
+                  annotationsByMessage={feedback.annotationsByMessage}
+                  feedbackTags={feedback.tags}
+                  isFeedbackMode={feedback.isFeedbackMode}
+                  conversationId={conversationId}
+                  activeAnnotationId={activeAnnotationId}
+                  onSubmitFeedback={feedback.submitFeedback}
+                  onCreateAnnotation={feedback.createAnnotation}
+                  onDeleteAnnotation={feedback.deleteAnnotation}
+                  onSetActiveAnnotation={setActiveAnnotationId}
+                />
+              )}
 
-            {/* Error display (U-5: user-friendly messages with retry) */}
-            {error && (
-              <div className="mx-4 mb-2 p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20 text-sm flex items-center justify-between gap-2">
-                <span>{error.includes("fetch") || error.includes("network") ? "ネットワークエラーが発生しました" : error.length > 100 ? "エラーが発生しました。もう一度お試しください。" : error}</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => { /* clear error by sending empty */ }}
-                  className="shrink-0 text-xs text-destructive hover:text-destructive"
-                >
-                  閉じる
-                </Button>
-              </div>
+              {/* Error display (U-5: user-friendly messages with retry) */}
+              {error && (
+                <div className="mx-4 mb-2 p-3 bg-destructive/10 text-destructive rounded-lg border border-destructive/20 text-sm flex items-center justify-between gap-2">
+                  <span>{error.includes("fetch") || error.includes("network") ? "ネットワークエラーが発生しました" : error.length > 100 ? "エラーが発生しました。もう一度お試しください。" : error}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => { /* clear error by sending empty */ }}
+                    className="shrink-0 text-xs text-destructive hover:text-destructive"
+                  >
+                    閉じる
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Annotation sidebar — visible in FB mode */}
+            {feedback.isFeedbackMode && messages.length > 0 && (
+              <AnnotationPanel
+                messages={messages}
+                feedbackByMessage={feedback.feedbackByMessage}
+                annotationsByMessage={feedback.annotationsByMessage}
+                activeAnnotationId={activeAnnotationId}
+                onSelectAnnotation={handleSelectAnnotation}
+                onDeleteAnnotation={feedback.deleteAnnotation}
+                onClose={() => feedback.setIsFeedbackMode(false)}
+              />
             )}
           </div>
 

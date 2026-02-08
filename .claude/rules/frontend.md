@@ -11,5 +11,8 @@
 | `/marketing/[threadId]` | チャットスレッド詳細 |
 | `/marketing/dashboard` | 会話一覧 |
 | `/marketing/image-gen` | 画像生成UI |
+| `/marketing-v2` | b&q エージェント (ADK + Gemini) |
+| `/marketing-v2/[threadId]` | エージェントスレッド詳細 |
+| `/feedback` | FBレビューダッシュボード (KPI, 一覧, エクスポート) |
 | `/sign-in`, `/sign-up` | Clerk認証 |
 | `/unauthorized` | アクセス拒否 |

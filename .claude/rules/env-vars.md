@@ -46,6 +46,17 @@ AHREFS_MCP_SERVER_URL=
 META_ADS_MCP_SERVER_URL=
 WORDPRESS_MCP_SERVER_URL=
 
+# ADK (Google Agent Development Kit)
+USE_ADK=false                           # ADK V2マーケティングAI有効化
+ADK_ORCHESTRATOR_MODEL=gemini-3-flash-preview
+ADK_SUB_AGENT_MODEL=gemini-3-flash-preview
+ADK_MAX_LLM_CALLS=0                    # 0=無制限
+ADK_MAX_OUTPUT_TOKENS=65536
+ADK_CONTEXT_CACHE_ENABLED=true          # Gemini Explicit Cache (90%コスト削減)
+ADK_CACHE_TTL_SECONDS=1800              # キャッシュ有効期間 (30分)
+ADK_CACHE_MIN_TOKENS=2048               # キャッシュ作成の最小トークン数
+ADK_CACHE_INTERVALS=10                  # 再作成までの呼び出し回数
+
 # Server
 ENV=local  # local / production
 CORS_ALLOW_ORIGINS=

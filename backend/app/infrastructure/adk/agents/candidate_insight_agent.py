@@ -127,6 +127,7 @@ analyze_transfer_patterns(group_by="reason") → 転職理由の傾向
 - 優先順位付けを行い、上位から対応提案
 - 具体的なアクション（電話/メール/面談設定）を提案
 - データは表形式で整理
+- 分析の根拠を添える（例: 「対象: 直近3ヶ月 paid_meta経由 50件分析」「Zoho ID:xxx ブリーフィング」等）
 """
 
     def build_agent(

@@ -21,6 +21,7 @@ import {
   Settings,
   BarChart3,
   Building2,
+  Briefcase,
   Award,
   User,
   LogOut,
@@ -34,6 +35,7 @@ import {
   MessageSquare,
   PieChart,
   ImageIcon,
+  ClipboardCheck,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -84,6 +86,10 @@ export function AppSidebar() {
 
   // 現在のパスに基づいてアクティブなチームを決定
   const getCurrentTeam = useCallback(() => {
+    // /feedback はマーケティングチームに属する
+    if (pathname?.startsWith("/feedback")) {
+      return teamItems.find(team => team.id === "marketing") || teamItems[0];
+    }
     return teamItems.find(team => pathname?.startsWith(team.href)) || teamItems[0];
   }, [pathname, teamItems]);
 
@@ -213,6 +219,14 @@ export function AppSidebar() {
             id: "marketing-dashboard",
             enabled: true,
             description: "Ahrefs・GSC・GA4・社内CRMの主要指標を俯瞰",
+          },
+          {
+            title: "FB レビュー",
+            icon: ClipboardCheck,
+            href: "/feedback",
+            id: "feedback-review",
+            enabled: true,
+            description: "エージェント応答のフィードバック・アノテーション管理",
           },
         ];
       case 'monotech':

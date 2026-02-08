@@ -36,6 +36,7 @@
     "google-auth-library": "^9.15.1",
     "html-to-image": "^1.11.13",
     "lucide-react": "latest",
+    "mark.js": "^8.11.1",
     "marked": "^15.0.12",
     "next": "16.0.7",
     "react": "19.2.1",
