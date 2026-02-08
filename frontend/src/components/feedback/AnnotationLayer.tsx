@@ -7,11 +7,12 @@
  * - contentRef wraps ONLY the message content (no UI elements inside)
  * - mark.js applies <mark> highlights to the content DOM
  * - UI overlays (form, popover) use createPortal to document.body
+ * - Offset calculations use DOM textContent (NOT markdown source)
  *
  * Flow: text selection → full annotation form opens directly (no intermediate toolbar)
  */
 
-import { useRef, useState, useCallback, useLayoutEffect, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import Mark from "mark.js";
 import { X, Trash2 } from "lucide-react";
@@ -34,11 +35,12 @@ import type {
 interface AnnotationLayerProps {
   messageId: string;
   conversationId: string;
-  plainText: string;
   annotations: MessageAnnotation[];
   tags: FeedbackTag[];
+  activeAnnotationId?: string | null;
   onCreateAnnotation: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation: (annotationId: string, messageId: string) => Promise<void>;
+  onSetActiveAnnotation?: (annotationId: string | null) => void;
   children: React.ReactNode;
 }
 
@@ -73,11 +75,12 @@ const SEVERITY_LABEL: Record<AnnotationSeverity, string> = {
 export function AnnotationLayer({
   messageId,
   conversationId,
-  plainText,
   annotations,
   tags,
+  activeAnnotationId,
   onCreateAnnotation,
   onDeleteAnnotation,
+  onSetActiveAnnotation,
   children,
 }: AnnotationLayerProps) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -101,17 +104,25 @@ export function AnnotationLayer({
   } | null>(null);
 
   // Filter text_span annotations
-  const textAnnotations = annotations.filter(
-    a => (a.selector as TextSpanSelector).type === "text_span"
+  const textAnnotations = useMemo(
+    () => annotations.filter(a => (a.selector as TextSpanSelector).type === "text_span"),
+    [annotations],
+  );
+
+  // Stable key for re-triggering highlight effect
+  const annotationKey = useMemo(
+    () => textAnnotations.map(a => `${a.id}:${a.severity}`).join(","),
+    [textAnnotations],
   );
 
   // =========================================================================
-  // mark.js: Apply inline highlights
+  // mark.js: Apply inline highlights using DOM textContent for offset resolution
   // =========================================================================
-  useLayoutEffect(() => {
+  useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
 
+    // Unmark previous highlights
     if (markRef.current) {
       markRef.current.unmark();
     }
@@ -119,12 +130,15 @@ export function AnnotationLayer({
 
     if (textAnnotations.length === 0) return;
 
+    // Use DOM textContent for offset resolution (NOT markdown source)
+    const domText = el.textContent || "";
+
     const rangeMap = new Map<object, { id: string; severity: AnnotationSeverity }>();
     const ranges: { start: number; length: number }[] = [];
 
     for (const ann of textAnnotations) {
       const sel = ann.selector as TextSpanSelector;
-      const resolved = resolveSelector(plainText, sel);
+      const resolved = resolveSelector(domText, sel);
       if (!resolved) continue;
       const range = { start: resolved.start, length: resolved.end - resolved.start };
       rangeMap.set(range, { id: ann.id, severity: ann.severity });
@@ -148,6 +162,7 @@ export function AnnotationLayer({
               rect: (e.target as HTMLElement).getBoundingClientRect(),
             });
             setForm(null);
+            onSetActiveAnnotation?.(ann.id);
           }
         });
       },
@@ -156,16 +171,53 @@ export function AnnotationLayer({
     return () => {
       markRef.current?.unmark();
     };
+    // Re-apply when annotations change (ID or severity)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textAnnotations.length, plainText]);
+  }, [annotationKey]);
+
+  // =========================================================================
+  // Active highlight state — add/remove annotation-hl-active class
+  // =========================================================================
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+
+    // Remove previous active class from all marks
+    el.querySelectorAll("mark.annotation-hl-active").forEach(m => {
+      m.classList.remove("annotation-hl-active");
+    });
+
+    if (!activeAnnotationId) return;
+
+    // Add active class to matching marks
+    const marks = el.querySelectorAll(
+      `mark[data-annotation-id="${activeAnnotationId}"]`
+    );
+    marks.forEach(m => m.classList.add("annotation-hl-active"));
+
+    // Scroll first mark into view
+    if (marks.length > 0) {
+      marks[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
+    // Flash animation on selection change
+    marks.forEach(m => m.classList.add("annotation-hl-flash"));
+    const timer = setTimeout(() => {
+      marks.forEach(m => m.classList.remove("annotation-hl-flash"));
+    }, 1400);
+    return () => clearTimeout(timer);
+  }, [activeAnnotationId]);
 
   // =========================================================================
   // Text selection → directly open form
   // =========================================================================
+  const formRef = useRef(form);
+  formRef.current = form;
+
   const handleMouseUp = useCallback(() => {
     const el = contentRef.current;
     if (!el) return;
-    if (form) return; // Don't capture while form is open
+    if (formRef.current) return; // Don't capture while form is open
 
     requestAnimationFrame(() => {
       const selection = window.getSelection();
@@ -190,7 +242,7 @@ export function AnnotationLayer({
         selection.removeAllRanges();
       }
     });
-  }, [form]);
+  }, []); // Stable callback — uses refs for mutable state
 
   // Dismiss overlays on click outside
   useEffect(() => {
@@ -224,6 +276,8 @@ export function AnnotationLayer({
     if (!form) return;
     setFormSubmitting(true);
     try {
+      // Use DOM textContent for content hash (consistent with capture)
+      const domText = contentRef.current?.textContent || "";
       await onCreateAnnotation({
         message_id: messageId,
         conversation_id: conversationId,
@@ -232,13 +286,13 @@ export function AnnotationLayer({
         comment: formComment || null,
         tags: formTags.length > 0 ? formTags : null,
         correction: formCorrection || null,
-        content_hash: simpleHash(plainText),
+        content_hash: simpleHash(domText),
       });
       setForm(null);
     } finally {
       setFormSubmitting(false);
     }
-  }, [form, messageId, conversationId, formComment, formTags, formCorrection, plainText, onCreateAnnotation]);
+  }, [form, messageId, conversationId, formComment, formTags, formCorrection, onCreateAnnotation]);
 
   // =========================================================================
   // Render

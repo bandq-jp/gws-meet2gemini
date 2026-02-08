@@ -605,6 +605,26 @@
   - **prop chain整理**: `feedbackDimensions` を `ChatMessage`, `MessageList`, `MarketingChat`, `ChatMessageProps`, `MessageListProps`, `AssistantMessageProps` から全削除
   - **重要度別ハイライトCSS**: critical(赤), major(橙), minor(黄), info(青), positive(緑) の5色
 
+- **フィードバックUX: mark.js統合 + AnnotationPanel + 3重大バグ修正（2026-02-08）**
+  - **mark.jsによるインラインハイライト**: `AnnotationLayer.tsx`を全面書き換え、mark.jsでDOM上に`<mark>`ハイライト適用
+  - **AnnotationPanel**: 右サイドバー新規実装 (`AnnotationPanel.tsx`) — メッセージ別グループ、重要度カード、双方向同期
+  - **重大バグ修正3件**:
+    1. **plainText不一致**: `plainText={message.content}`はmarkdown原文を渡していたが、mark.jsはDOM textContentで動作。`resolveSelector`が常にnull返却。**修正: DOM textContentを直接使用**（`contentRef.current.textContent`）
+    2. **FB永続化失敗**: `getClientSecret()`がページロード時にnullを返すため、`loadConversationFeedback`が無言で失敗。**修正: リトライロジック追加**（最大3回、1.5s×attempt間隔）
+    3. **`<button>`ネスト**: AnnotationPanelのカード（`<button>`）内に削除ボタン（`<button>`）をネスト→HTML仕様違反・hydrationエラー。**修正: 外側を`<div role="button">`に変更**
+  - **追加改善**:
+    - `activeAnnotationId`共有状態で左右双方向同期（サイドバークリック→ハイライトスクロール＆フラッシュ、ハイライトクリック→サイドバーフォーカス）
+    - `annotation-hl-active` CSSクラス管理の実装（activeAnnotationId変更時に追加/削除）
+    - `handleMouseUp`のcallback依存をrefベースに最適化（安定したコールバック）
+    - `useLayoutEffect` → `useEffect`に変更（DOM textContent取得のため）
+    - annotationKey（ID+severity）ベースの依存配列で正確な再トリガー
+    - `onDeleteAnnotation` propをMarketingChat.tsx→AnnotationPanelに配線
+    - タグ読み込みバグ修正: `masterLoaded.current`を成功後にのみ設定、2sリトライ
+  - **自己改善**:
+    - **mark.jsのoffsetはDOM textContentベース**: markdown原文とDOM textContentは全く異なる（マークダウン記法・改行・HTMLタグが消える）。mark.jsの`markRanges`はDOM上のtextNodeを走査するため、offsetもDOM textContentで計算する必要がある
+    - **テキスト選択の`captureTextSelection`は正しくDOMベース**: `container.textContent`からオフセットを計算しているので、`resolveSelector`に渡すテキストも同じソースにすべき
+    - **トークン可用性のタイミング**: `getClientSecret()`は同期関数だがトークンは非同期フェッチ。ページロード直後は必ずnullになるため、リトライが必須
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

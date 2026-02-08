@@ -1228,9 +1228,11 @@ interface AssistantMessageProps {
   feedbackTags?: FeedbackTag[];
   isFeedbackMode?: boolean;
   conversationId?: string;
+  activeAnnotationId?: string | null;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
+  onSetActiveAnnotation?: (annotationId: string | null) => void;
 }
 
 function AssistantMessage({
@@ -1240,9 +1242,11 @@ function AssistantMessage({
   feedbackTags = [],
   isFeedbackMode = false,
   conversationId,
+  activeAnnotationId,
   onSubmitFeedback,
   onCreateAnnotation,
   onDeleteAnnotation,
+  onSetActiveAnnotation,
 }: AssistantMessageProps) {
   const items = message.activityItems || [];
   const hasItems = items.length > 0;
@@ -1279,11 +1283,12 @@ function AssistantMessage({
         <AnnotationLayer
           messageId={message.id}
           conversationId={conversationId}
-          plainText={message.content || ""}
           annotations={annotations}
           tags={feedbackTags}
+          activeAnnotationId={activeAnnotationId}
           onCreateAnnotation={onCreateAnnotation}
           onDeleteAnnotation={onDeleteAnnotation}
+          onSetActiveAnnotation={onSetActiveAnnotation}
         >
           {messageContent}
         </AnnotationLayer>
@@ -1316,9 +1321,11 @@ export interface ChatMessageProps {
   feedbackTags?: FeedbackTag[];
   isFeedbackMode?: boolean;
   conversationId?: string;
+  activeAnnotationId?: string | null;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
+  onSetActiveAnnotation?: (annotationId: string | null) => void;
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -1328,24 +1335,30 @@ export const ChatMessage = memo(function ChatMessage({
   feedbackTags,
   isFeedbackMode,
   conversationId,
+  activeAnnotationId,
   onSubmitFeedback,
   onCreateAnnotation,
   onDeleteAnnotation,
+  onSetActiveAnnotation,
 }: ChatMessageProps) {
   if (message.role === "user") {
     return <UserMessage message={message} />;
   }
   return (
-    <AssistantMessage
-      message={message}
-      feedback={feedback}
-      annotations={annotations}
-      feedbackTags={feedbackTags}
-      isFeedbackMode={isFeedbackMode}
-      conversationId={conversationId}
-      onSubmitFeedback={onSubmitFeedback}
-      onCreateAnnotation={onCreateAnnotation}
-      onDeleteAnnotation={onDeleteAnnotation}
-    />
+    <div data-message-id={message.id}>
+      <AssistantMessage
+        message={message}
+        feedback={feedback}
+        annotations={annotations}
+        feedbackTags={feedbackTags}
+        isFeedbackMode={isFeedbackMode}
+        conversationId={conversationId}
+        activeAnnotationId={activeAnnotationId}
+        onSubmitFeedback={onSubmitFeedback}
+        onCreateAnnotation={onCreateAnnotation}
+        onDeleteAnnotation={onDeleteAnnotation}
+        onSetActiveAnnotation={onSetActiveAnnotation}
+      />
+    </div>
   );
 });

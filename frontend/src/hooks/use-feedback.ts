@@ -50,8 +50,7 @@ export function useFeedback(getClientSecret: () => string | null) {
   const loadMasterData = useCallback(async () => {
     if (masterLoaded.current) return;
     const h = getHeadersSafe();
-    if (!h) return; // token not ready yet — will retry later
-    masterLoaded.current = true;
+    if (!h) return; // token not ready yet — caller should retry
     try {
       const [tagsRes, dimRes] = await Promise.all([
         fetch("/api/feedback/tags", { headers: h }),
@@ -59,8 +58,9 @@ export function useFeedback(getClientSecret: () => string | null) {
       ]);
       if (tagsRes.ok) setTags(await tagsRes.json());
       if (dimRes.ok) setDimensions(await dimRes.json());
+      masterLoaded.current = true; // only set on success
     } catch {
-      masterLoaded.current = false;
+      // leave masterLoaded false so next call retries
     }
   }, [getHeadersSafe]);
 

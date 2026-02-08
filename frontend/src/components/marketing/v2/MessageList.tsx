@@ -33,9 +33,11 @@ export interface MessageListProps {
   feedbackTags?: FeedbackTag[];
   isFeedbackMode?: boolean;
   conversationId?: string | null;
+  activeAnnotationId?: string | null;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
+  onSetActiveAnnotation?: (annotationId: string | null) => void;
 }
 
 export function MessageList({
@@ -46,9 +48,11 @@ export function MessageList({
   feedbackTags,
   isFeedbackMode,
   conversationId,
+  activeAnnotationId,
   onSubmitFeedback,
   onCreateAnnotation,
   onDeleteAnnotation,
+  onSetActiveAnnotation,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastMessageCountRef = useRef(0);
@@ -155,9 +159,11 @@ export function MessageList({
               feedbackTags={feedbackTags}
               isFeedbackMode={isFeedbackMode}
               conversationId={conversationId || undefined}
+              activeAnnotationId={activeAnnotationId}
               onSubmitFeedback={onSubmitFeedback}
               onCreateAnnotation={onCreateAnnotation}
               onDeleteAnnotation={onDeleteAnnotation}
+              onSetActiveAnnotation={onSetActiveAnnotation}
             />
           ))}
         </div>
