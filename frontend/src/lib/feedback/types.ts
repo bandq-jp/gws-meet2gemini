@@ -156,6 +156,32 @@ export interface FeedbackListResponse {
 }
 
 // =============================================================================
+// Conversation Summary (for review dashboard)
+// =============================================================================
+
+export interface ConversationFeedbackSummary {
+  conversation_id: string;
+  title: string;
+  owner_email: string;
+  created_at: string;
+  total_feedback: number;
+  good_count: number;
+  bad_count: number;
+  annotation_count: number;
+  unreviewed_count: number;
+  unique_users: number;
+  latest_feedback_at: string;
+}
+
+export interface ConversationListResponse {
+  items: ConversationFeedbackSummary[];
+  total: number;
+  page: number;
+  per_page: number;
+  total_pages: number;
+}
+
+// =============================================================================
 // UI State
 // =============================================================================
 

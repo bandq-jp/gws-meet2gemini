@@ -17,6 +17,8 @@ import type {
   FeedbackDimension,
   FeedbackOverview,
   FeedbackListResponse,
+  ConversationFeedbackSummary,
+  ConversationListResponse,
 } from "@/lib/feedback/types";
 
 const CLIENT_SECRET_HEADER = "x-marketing-client-secret";
@@ -172,7 +174,14 @@ export function useFeedback(getClientSecret: () => string | null) {
 export function useFeedbackDashboard(getClientSecret: () => string | null) {
   const [overview, setOverview] = useState<FeedbackOverview | null>(null);
   const [listData, setListData] = useState<FeedbackListResponse | null>(null);
+  const [conversations, setConversations] = useState<ConversationListResponse | null>(null);
+  const [conversationDetail, setConversationDetail] = useState<{
+    feedback: MessageFeedback[];
+    annotations: MessageAnnotation[];
+  } | null>(null);
+  const [conversationUsers, setConversationUsers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [tags, setTags] = useState<FeedbackTag[]>([]);
 
   const getHeadersSafe = useCallback((): Record<string, string> | null => {
@@ -194,6 +203,51 @@ export function useFeedbackDashboard(getClientSecret: () => string | null) {
       if (tagsRes.ok) setTags(await tagsRes.json());
     } finally {
       setLoading(false);
+    }
+  }, [getHeadersSafe]);
+
+  const loadConversations = useCallback(async (params: {
+    page?: number;
+    rating?: string;
+    user_email?: string;
+  } = {}) => {
+    const h = getHeadersSafe();
+    if (!h) return;
+    setLoading(true);
+    try {
+      const sp = new URLSearchParams();
+      if (params.page) sp.set("page", String(params.page));
+      if (params.rating) sp.set("rating", params.rating);
+      if (params.user_email) sp.set("user_email", params.user_email);
+      const res = await fetch(`/api/feedback/conversations?${sp}`, { headers: h });
+      if (res.ok) setConversations(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, [getHeadersSafe]);
+
+  const loadConversationDetail = useCallback(async (conversationId: string, userEmail?: string) => {
+    const h = getHeadersSafe();
+    if (!h) return;
+    setDetailLoading(true);
+    try {
+      const sp = new URLSearchParams();
+      if (userEmail) sp.set("user_email", userEmail);
+      const res = await fetch(`/api/feedback/conversation/${conversationId}?${sp}`, { headers: h });
+      if (res.ok) setConversationDetail(await res.json());
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [getHeadersSafe]);
+
+  const loadConversationUsers = useCallback(async (conversationId: string) => {
+    const h = getHeadersSafe();
+    if (!h) return;
+    try {
+      const res = await fetch(`/api/feedback/conversations/${conversationId}/users`, { headers: h });
+      if (res.ok) setConversationUsers(await res.json());
+    } catch {
+      setConversationUsers([]);
     }
   }, [getHeadersSafe]);
 
@@ -259,9 +313,16 @@ export function useFeedbackDashboard(getClientSecret: () => string | null) {
   return {
     overview,
     listData,
+    conversations,
+    conversationDetail,
+    conversationUsers,
     loading,
+    detailLoading,
     tags,
     loadOverview,
+    loadConversations,
+    loadConversationDetail,
+    loadConversationUsers,
     loadList,
     updateReview,
     exportFeedback,

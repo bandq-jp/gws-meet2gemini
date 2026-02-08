@@ -481,29 +481,169 @@ async def export_feedback(
 
 
 # ============================================================
-# Conversation feedback summary (for chat page)
+# Conversations list (for feedback review dashboard)
+# ============================================================
+
+@router.get("/conversations")
+async def list_conversations_with_feedback(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    rating: str | None = None,
+    user_email: str | None = None,
+    ctx: MarketingRequestContext = Depends(require_feedback_context),
+):
+    """List conversations that have feedback, with summary stats."""
+    sb = get_supabase()
+
+    # 1. Get conversation IDs that have feedback (with optional filters)
+    fb_q = sb.table("message_feedback").select("conversation_id, rating, review_status, user_email, created_at")
+    if rating:
+        fb_q = fb_q.eq("rating", rating)
+    if user_email:
+        fb_q = fb_q.eq("user_email", user_email)
+    fb_result = fb_q.execute()
+    fb_rows = fb_result.data or []
+
+    # 2. Get conversations that have annotations
+    ann_q = sb.table("message_annotations").select("conversation_id, severity, review_status, user_email, created_at")
+    if user_email:
+        ann_q = ann_q.eq("user_email", user_email)
+    ann_result = ann_q.execute()
+    ann_rows = ann_result.data or []
+
+    # 3. Aggregate per conversation
+    conv_ids: set[str] = set()
+    conv_stats: dict[str, dict] = {}
+
+    for r in fb_rows:
+        cid = r["conversation_id"]
+        conv_ids.add(cid)
+        if cid not in conv_stats:
+            conv_stats[cid] = {
+                "total_feedback": 0, "good_count": 0, "bad_count": 0,
+                "unreviewed_count": 0, "annotation_count": 0,
+                "unique_users": set(), "latest_at": "",
+            }
+        s = conv_stats[cid]
+        s["total_feedback"] += 1
+        if r.get("rating") == "good":
+            s["good_count"] += 1
+        elif r.get("rating") == "bad":
+            s["bad_count"] += 1
+        if r.get("review_status") == "new":
+            s["unreviewed_count"] += 1
+        s["unique_users"].add(r.get("user_email", ""))
+        ts = r.get("created_at", "")
+        if ts > s["latest_at"]:
+            s["latest_at"] = ts
+
+    for r in ann_rows:
+        cid = r["conversation_id"]
+        conv_ids.add(cid)
+        if cid not in conv_stats:
+            conv_stats[cid] = {
+                "total_feedback": 0, "good_count": 0, "bad_count": 0,
+                "unreviewed_count": 0, "annotation_count": 0,
+                "unique_users": set(), "latest_at": "",
+            }
+        s = conv_stats[cid]
+        s["annotation_count"] += 1
+        if r.get("review_status") == "new":
+            s["unreviewed_count"] += 1
+        s["unique_users"].add(r.get("user_email", ""))
+        ts = r.get("created_at", "")
+        if ts > s["latest_at"]:
+            s["latest_at"] = ts
+
+    if not conv_ids:
+        return {"items": [], "total": 0, "page": page, "per_page": per_page, "total_pages": 0}
+
+    # 4. Sort by latest_at descending
+    sorted_ids = sorted(conv_ids, key=lambda cid: conv_stats[cid]["latest_at"], reverse=True)
+    total_count = len(sorted_ids)
+    total_pages = (total_count + per_page - 1) // per_page
+    offset = (page - 1) * per_page
+    page_ids = sorted_ids[offset:offset + per_page]
+
+    # 5. Fetch conversation metadata
+    conv_meta: dict[str, dict] = {}
+    if page_ids:
+        for batch_start in range(0, len(page_ids), 50):
+            batch = page_ids[batch_start:batch_start + 50]
+            meta_result = (
+                sb.table("marketing_conversations")
+                .select("id, title, owner_email, created_at")
+                .in_("id", batch)
+                .execute()
+            )
+            for m in meta_result.data or []:
+                conv_meta[m["id"]] = m
+
+    # 6. Build response
+    items = []
+    for cid in page_ids:
+        s = conv_stats[cid]
+        meta = conv_meta.get(cid, {})
+        items.append({
+            "conversation_id": cid,
+            "title": meta.get("title", ""),
+            "owner_email": meta.get("owner_email", ""),
+            "created_at": meta.get("created_at", ""),
+            "total_feedback": s["total_feedback"],
+            "good_count": s["good_count"],
+            "bad_count": s["bad_count"],
+            "annotation_count": s["annotation_count"],
+            "unreviewed_count": s["unreviewed_count"],
+            "unique_users": len(s["unique_users"] - {""}),
+            "latest_feedback_at": s["latest_at"],
+        })
+
+    return {
+        "items": items,
+        "total": total_count,
+        "page": page,
+        "per_page": per_page,
+        "total_pages": total_pages,
+    }
+
+
+@router.get("/conversations/{conversation_id}/users")
+async def get_conversation_feedback_users(
+    conversation_id: str,
+    ctx: MarketingRequestContext = Depends(require_feedback_context),
+):
+    """Get unique users who gave feedback/annotations on a conversation."""
+    sb = get_supabase()
+    fb = sb.table("message_feedback").select("user_email").eq("conversation_id", conversation_id).execute()
+    ann = sb.table("message_annotations").select("user_email").eq("conversation_id", conversation_id).execute()
+    users = set()
+    for r in (fb.data or []):
+        if r.get("user_email"):
+            users.add(r["user_email"])
+    for r in (ann.data or []):
+        if r.get("user_email"):
+            users.add(r["user_email"])
+    return sorted(users)
+
+
+# ============================================================
+# Conversation feedback detail (for chat page & review page)
 # ============================================================
 
 @router.get("/conversation/{conversation_id}")
 async def get_conversation_feedback(
     conversation_id: str,
+    user_email: str | None = None,
     ctx: MarketingRequestContext = Depends(require_feedback_context),
 ):
     sb = get_supabase()
-    fb = (
-        sb.table("message_feedback")
-        .select("*")
-        .eq("conversation_id", conversation_id)
-        .order("created_at")
-        .execute()
-    )
-    ann = (
-        sb.table("message_annotations")
-        .select("*")
-        .eq("conversation_id", conversation_id)
-        .order("created_at")
-        .execute()
-    )
+    fb_q = sb.table("message_feedback").select("*").eq("conversation_id", conversation_id)
+    ann_q = sb.table("message_annotations").select("*").eq("conversation_id", conversation_id)
+    if user_email:
+        fb_q = fb_q.eq("user_email", user_email)
+        ann_q = ann_q.eq("user_email", user_email)
+    fb = fb_q.order("created_at").execute()
+    ann = ann_q.order("created_at").execute()
     return {
         "feedback": fb.data or [],
         "annotations": ann.data or [],

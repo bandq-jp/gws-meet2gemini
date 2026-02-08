@@ -625,6 +625,30 @@
     - **テキスト選択の`captureTextSelection`は正しくDOMベース**: `container.textContent`からオフセットを計算しているので、`resolveSelector`に渡すテキストも同じソースにすべき
     - **トークン可用性のタイミング**: `getClientSecret()`は同期関数だがトークンは非同期フェッチ。ページロード直後は必ずnullになるため、リトライが必須
 
+- **FBレビューダッシュボード完全リライト（2026-02-08）**
+  - **目的**: `/feedback`ページを会話ごとのFBレビュー＋ユーザー別フィルタリング対応のマスター・ディテールUIにリデザイン
+  - **バックエンドAPI追加**:
+    - `GET /api/v1/feedback/conversations` - FB付き会話一覧（集計統計付き）、rating/user_emailフィルタ対応
+    - `GET /api/v1/feedback/conversations/{id}/users` - 会話にFBしたユニークユーザー一覧
+    - `GET /api/v1/feedback/conversation/{id}` - user_emailクエリパラメータ追加（ユーザー別フィルタ）
+  - **フロントエンド型定義追加**:
+    - `ConversationFeedbackSummary` - 会話ごとのFBサマリー型
+    - `ConversationListResponse` - ページネーション付きレスポンス型
+  - **フック拡張（useFeedbackDashboard）**:
+    - `loadConversations`, `loadConversationDetail`, `loadConversationUsers` メソッド追加
+    - `conversations`, `conversationDetail`, `conversationUsers`, `detailLoading` state追加
+  - **ページ完全リライト（feedback/page.tsx）**:
+    - 旧: 単一テーブル+Sheet詳細（504行）→ 新: 二パネルマスター・ディテール
+    - 左パネル: 会話リスト（検索、評価フィルタ、ユーザーフィルタ、ページネーション、未レビュー数バッジ）
+    - 右パネル: 選択会話の詳細（FB一覧+アノテーション一覧、ユーザー別フィルタ、レビューアクション）
+    - KPIカード: 合計FB / Good / Bad / 未レビュー
+    - 全UI日本語化、severity色分け、ブランドカラー統一
+  - 変更ファイル:
+    - `backend/app/presentation/api/v1/feedback.py` - 2エンドポイント追加 + user_emailフィルタ
+    - `frontend/src/lib/feedback/types.ts` - 2型追加
+    - `frontend/src/hooks/use-feedback.ts` - 3メソッド+4 state追加
+    - `frontend/src/app/feedback/page.tsx` - 全面リライト
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
