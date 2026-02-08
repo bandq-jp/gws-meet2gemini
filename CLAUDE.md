@@ -679,6 +679,60 @@
     - `frontend/src/hooks/use-feedback.ts` - exportFeedbackに`user_email`, `conversation_id`追加
     - `frontend/src/app/feedback/page.tsx` - handleExportにフィルタ状態を全て渡す
 
+- **Meta Ads (AdPlatformAgent) 大規模改善（2026-02-08）**
+  - **目的**: Meta広告分析の精度・深さ・トークン効率を大幅向上。プロの運用知識をエージェントに注入
+  - **調査**: 5並列調査（コードベース全量、Meta Ads MCP全ツール仕様、Meta Marketing API構造、プロの運用知見、分析フレームワーク）
+  - **変更1: MCPツールフィルタ追加** (`mcp_manager.py`):
+    - `META_ADS_TOOL_FILTER` 定義（20 read-onlyツール）
+    - write系ツール（create_campaign, update_*, upload_*, create_budget_schedule, get_login_link）を除外
+    - `create_meta_ads_toolset()` に `tool_filter=META_ADS_TOOL_FILTER` 適用
+  - **変更2: AdPlatformAgent指示文全面書き換え** (`ad_platform_agent.py`):
+    - 旧: 50行（存在しないツール名を参照、基本KPIのみ）
+    - 新: 200+行のプロレベル指示文
+    - `get_insights` 完全仕様: パラメータ、返却メトリクス（ベンチマーク付き）、breakdown一覧（行数目安付き）
+    - 分析フレームワーク7つ: パフォーマンス概要、CPC要因分解（CPM vs CTR）、クリエイティブ疲弊検知、フリークエンシー管理（閾値テーブル）、配置別分析（Feed/Stories/Reels特性）、ファネル分析（Imp→Click→LP→CV）、動画分析（Hook Rate/Hold Rate）
+    - 効率的クエリパターン5例
+    - エラー対応ルール
+    - ツール一覧20個の正確な名称・パラメータ・出力
+  - **変更3: MCPResponseOptimizerPlugin Meta Ads対応** (`mcp_response_optimizer.py`):
+    - `_COMPRESSED_DESCRIPTIONS` に Meta Ads 20ツールの圧縮説明を追加
+    - `META_ADS_VERBOSE_TOOLS` (get_insights, get_campaigns, get_adsets, get_ads) 定義
+    - `_compress_meta_ads_response()` 新規メソッド: レスポンスJSONをcompact format変換
+    - `_compress_insights_data()`: get_insightsレスポンスをpipe-separated table化（actionsとcost_per_action_typeもフラット化）
+    - `_compress_list_data()`: キャンペーン/広告セット/広告一覧の冗長フィールド除去
+    - `after_tool_callback` にMeta Ads分岐追加
+  - **変更4: オーケストレーター強化** (`orchestrator.py`):
+    - キーワードマトリクスに7行追加（CPM, CPC, ROAS, フリークエンシー, 広告セット, 配置別, 広告疲弊）
+    - AdPlatformAgentサブエージェント説明を大幅拡充（★20ツール表記、breakdown分析、CPC要因分解、疲弊検知等）
+    - 並列呼び出しパターンに「広告+サイトCV分析」追加
+  - **Meta Ads MCP知見**:
+    - パッケージ: `meta-ads-mcp` v1.0.22 by Pipeboard (PyPI)
+    - 全~30ツール提供（read + write）、ADK環境では20 read-onlyにフィルタすべき
+    - `get_insights`の`breakdown`は1つずつ指定（複数同時不可）
+    - `action_attribution_windows`: 7d_view, 28d_viewは2026年1月に廃止
+    - budget値はcurrency cents（$100 = 10000）
+    - campaign objectiveはOUTCOME_*形式のみ（legacy非推奨）
+  - **変更5: 広告画像マルチモーダル対応** (`mcp_response_optimizer.py` + `ad_platform_agent.py`):
+    - **問題**: ADKの`mcp_tool.py`はMCP Imageレスポンスを`model_dump(mode="json")`でJSON dictにシリアライズ。Geminiはbase64テキストとして受信し、画像として認識できない
+    - **解決**: after_tool_callback→before_model_callbackの2段階パイプライン
+      1. `after_tool_callback`: `get_ad_image`レスポンスからbase64抽出→PILで最大1920pxにリサイズ→JPEG Q85エンコード→`types.Part.from_bytes()`として`_pending_images[invocation_id]`に保存→テキストのみ結果を返却
+      2. `before_model_callback`: `_pending_images`からPartを取得→`llm_request.contents[-1].parts`に注入→Geminiがマルチモーダルで実画像を認識
+    - 新メソッド: `_handle_ad_image()`, `_extract_image_from_mcp_result()`, `_resize_ad_image()`
+    - 定数: `_IMAGE_MAX_DIM=1920`, `_IMAGE_JPEG_QUALITY=85`
+    - クラス変数: `_pending_images: dict[str, list] = defaultdict(list)` (invocation_id → Part list)
+    - `ad_platform_agent.py` 指示文に「クリエイティブ画像分析」セクション追加（構図・色使い・テキスト量・CTA・モバイル視認性・アスペクト比）
+    - PILリサイズ検証: 2048x2048→1920x1920 (66KB→22KB), 1152x2048→1080x1920 (37KB→13KB), 800x600→リサイズなし
+  - **ADK知見**:
+    - `mcp_tool.py` L217-218: `response.model_dump(exclude_none=True, mode="json")` がImage→JSON dictのシリアライズ原因
+    - `functions.py` L791-819: `__build_response_event()`は常にdictに変換。`FunctionResponse.parts`は存在するがADKは使用しない
+    - ツールから`types.Part`を返しても`{'result': <Part obj>}`にラップされてシリアライズで壊れる
+    - **解決策**: Pluginの`before_model_callback`で`llm_request.contents`にPartを直接注入するのが唯一の方法
+  - **プロの運用知見**:
+    - CPC = CPM / (CTR × 1000) — 上昇原因をオークション vs クリエイティブに分離
+    - Hook Rate目標25%+、Hold Rate目標40-50%
+    - Frequency閾値: 認知3-5、検討2-4、CV4-7、リタゲ~10
+    - 品質ランキング3指標: quality_ranking, engagement_rate_ranking, conversion_rate_ranking
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

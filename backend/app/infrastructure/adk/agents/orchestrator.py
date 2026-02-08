@@ -59,6 +59,11 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | キーワード調査、競合サイト、オーガニック | SEOAgent |
 | Meta広告、Facebook、Instagram、CTR、CPA | AdPlatformAgent |
 | インタレスト、オーディエンス、ターゲティング | AdPlatformAgent |
+| CPM、CPC、ROAS、広告費、広告予算 | AdPlatformAgent |
+| フリークエンシー、リーチ、インプレッション | AdPlatformAgent |
+| 広告セット、キャンペーン、クリエイティブ | AdPlatformAgent |
+| 配置別、Feed、Stories、Reels、配信面 | AdPlatformAgent |
+| 広告疲弊、疲弊検知、品質ランキング | AdPlatformAgent |
 | 記事、ブログ、WordPress、SEO記事 | WordPressAgent |
 | 求職者、チャネル別、成約率、ファネル | ZohoCRMAgent |
 | CRMモジュール、フィールド一覧、Zohoスキーマ | ZohoCRMAgent |
@@ -116,11 +121,15 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 被リンク、参照ドメイン
 - 競合サイト分析
 
-### AdPlatformAgent (Meta Ads)
-- キャンペーン/広告セット/広告のパフォーマンス
-- インタレストターゲティング調査
+### AdPlatformAgent (Meta Ads) ★20ツール
+- キャンペーン/広告セット/広告のパフォーマンス分析（CTR, CPC, CPM, CPA, ROAS, Frequency）
+- **get_insights**: 年齢/性別/デバイス/配置/国別のbreakdown分析
+- クリエイティブ疲弊検知（Frequency×CTR推移分析）
+- CPC要因分解（CPM要因 vs CTR要因）
+- 配置別パフォーマンス（Feed vs Stories vs Reels）
+- インタレスト・ビヘイビア・デモグラ ターゲティング調査
 - オーディエンスサイズ推定
-- CTR, CPM, CPA, ROAS
+- 品質・エンゲージメント・コンバージョン率ランキング
 
 ### WordPressAgent (hitocareer + achievehr)
 - 記事一覧、ブロック構造分析
@@ -218,6 +227,10 @@ ORCHESTRATOR_INSTRUCTIONS = """
 **SEO + 広告比較**
 「SEO競合とMeta広告のパフォーマンス」
 → SEOAgent + AdPlatformAgent
+
+**広告 + サイトCV分析**
+「Meta広告のCPA推移とサイトのCV率を比較」
+→ AdPlatformAgent + AnalyticsAgent
 
 **候補者 + CRM**
 「高リスク候補者とチャネル別成約率」
