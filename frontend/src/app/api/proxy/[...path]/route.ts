@@ -208,25 +208,43 @@ async function handleRequest(
       if (xFilename) requestHeaders['X-Filename'] = xFilename;
     }
 
+    // Detect if this is a binary-serving endpoint (images, file downloads)
+    const isBinaryPath = path.includes('image-gen/images/') || path.includes('/download');
+
     const requestConfig = {
       url: targetUrl,
       method: method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
       headers: requestHeaders,
       validateStatus: () => true, // すべてのステータスコードを有効とする
       data: body || undefined,
+      ...(isBinaryPath ? { responseType: 'arraybuffer' as const } : {}),
     };
 
     const response = await client.request(requestConfig);
-    
+
     console.log(`[Proxy] Cloud Run Response: ${response.status} ${response.statusText}`);
 
     // レスポンス処理
+    const responseContentType = (response.headers?.['content-type'] as string) || '';
+
     if (response.status >= 400) {
-      console.error(`[Proxy] Error response:`, response.data);
+      console.error(`[Proxy] Error response: ${response.status}`);
+      // Binary responses can't be JSON-serialized
+      if (isBinaryPath) {
+        return new NextResponse(null, { status: response.status, statusText: response.statusText });
+      }
       return NextResponse.json(
-        response.data || { detail: response.statusText }, 
+        response.data || { detail: response.statusText },
         { status: response.status }
       );
+    }
+
+    // Binary responses (images, files) should be returned as-is
+    if (responseContentType.startsWith('image/') || responseContentType.startsWith('application/octet-stream')) {
+      return new NextResponse(response.data as ArrayBuffer, {
+        status: response.status,
+        headers: { 'Content-Type': responseContentType },
+      });
     }
 
     return NextResponse.json(response.data);
