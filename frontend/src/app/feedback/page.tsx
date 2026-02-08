@@ -162,6 +162,8 @@ export default function FeedbackPage() {
     await ensureClientSecret();
     await exportFeedback(format, {
       rating: ratingFilter || undefined,
+      user_email: userFilter || undefined,
+      conversation_id: selectedConvId || undefined,
     });
   };
 
@@ -196,6 +198,11 @@ export default function FeedbackPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {(ratingFilter || userFilter || selectedConvId) && (
+              <span className="text-[10px] text-muted-foreground/60">
+                フィルタ適用中
+              </span>
+            )}
             <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => handleExport("csv")}>
               <Download className="w-3 h-3" /> CSV
             </Button>

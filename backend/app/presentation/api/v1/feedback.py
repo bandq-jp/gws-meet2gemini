@@ -390,9 +390,13 @@ async def export_feedback(
     rating: str | None = None,
     review_status: str | None = None,
     tag: str | None = None,
+    user_email: str | None = None,
+    conversation_id: str | None = None,
     ctx: MarketingRequestContext = Depends(require_feedback_context),
 ):
     sb = get_supabase()
+
+    # ── Feedback query ──
     q = sb.table("message_feedback").select(
         "*, marketing_messages!inner(id, role, content, plain_text, created_at), "
         "marketing_conversations!inner(id, title, owner_email)"
@@ -403,32 +407,39 @@ async def export_feedback(
         q = q.eq("review_status", review_status)
     if tag:
         q = q.contains("tags", [tag])
+    if user_email:
+        q = q.eq("user_email", user_email)
+    if conversation_id:
+        q = q.eq("conversation_id", conversation_id)
     q = q.order("created_at", desc=True)
     result = q.execute()
-    items = result.data or []
+    fb_items = result.data or []
 
-    # attach annotations
-    message_ids = list({r["message_id"] for r in items})
+    # ── Annotations query (included in JSONL, separate section in CSV) ──
+    ann_q = sb.table("message_annotations").select("*")
+    if user_email:
+        ann_q = ann_q.eq("user_email", user_email)
+    if conversation_id:
+        ann_q = ann_q.eq("conversation_id", conversation_id)
+    ann_q = ann_q.order("created_at", desc=True)
+    ann_result = ann_q.execute()
+    all_annotations = ann_result.data or []
+
+    # Group annotations by message_id for JSONL embedding
     annotations_map: dict[str, list] = {}
-    if message_ids:
-        for batch_start in range(0, len(message_ids), 50):
-            batch = message_ids[batch_start : batch_start + 50]
-            ann_result = (
-                sb.table("message_annotations")
-                .select("*")
-                .in_("message_id", batch)
-                .execute()
-            )
-            for a in ann_result.data or []:
-                annotations_map.setdefault(a["message_id"], []).append(a)
+    for a in all_annotations:
+        annotations_map.setdefault(a["message_id"], []).append(a)
 
     if format == "jsonl":
         def generate():
-            for item in items:
+            # Feedback rows with embedded annotations
+            for item in fb_items:
                 row = {
+                    "type": "feedback",
                     "feedback_id": item["id"],
                     "conversation_id": item["conversation_id"],
                     "message_id": item["message_id"],
+                    "user_email": item.get("user_email"),
                     "rating": item["rating"],
                     "comment": item.get("comment"),
                     "correction": item.get("correction"),
@@ -442,6 +453,26 @@ async def export_feedback(
                 }
                 yield json.dumps(row, ensure_ascii=False, default=str) + "\n"
 
+            # Standalone annotations (not attached to any feedback row)
+            fb_message_ids = {item["message_id"] for item in fb_items}
+            for ann in all_annotations:
+                if ann["message_id"] not in fb_message_ids:
+                    row = {
+                        "type": "annotation",
+                        "annotation_id": ann["id"],
+                        "conversation_id": ann["conversation_id"],
+                        "message_id": ann["message_id"],
+                        "user_email": ann.get("user_email"),
+                        "severity": ann.get("severity"),
+                        "comment": ann.get("comment"),
+                        "correction": ann.get("correction"),
+                        "tags": ann.get("tags"),
+                        "selector": ann.get("selector"),
+                        "review_status": ann.get("review_status"),
+                        "created_at": ann.get("created_at"),
+                    }
+                    yield json.dumps(row, ensure_ascii=False, default=str) + "\n"
+
         return StreamingResponse(
             generate(),
             media_type="application/x-ndjson",
@@ -450,19 +481,24 @@ async def export_feedback(
     else:
         buf = io.StringIO()
         writer = csv.writer(buf)
+
+        # Feedback sheet
         writer.writerow([
-            "feedback_id", "conversation_id", "message_id", "rating", "tags",
-            "comment", "correction", "review_status", "created_at",
-            "message_text", "conversation_title",
+            "type", "id", "conversation_id", "message_id", "user_email",
+            "rating", "severity", "tags", "comment", "correction",
+            "review_status", "created_at", "message_text", "conversation_title",
         ])
-        for item in items:
+        for item in fb_items:
             msg = item.get("marketing_messages") or {}
             conv = item.get("marketing_conversations") or {}
             writer.writerow([
+                "feedback",
                 item["id"],
                 item["conversation_id"],
                 item["message_id"],
+                item.get("user_email", ""),
                 item.get("rating", ""),
+                "",  # severity (feedback doesn't have it)
                 ", ".join(item.get("tags") or []),
                 item.get("comment", ""),
                 item.get("correction", ""),
@@ -470,6 +506,27 @@ async def export_feedback(
                 item.get("created_at", ""),
                 (msg.get("plain_text") or "")[:300],
                 conv.get("title", ""),
+            ])
+
+        # Annotation rows in same CSV
+        for ann in all_annotations:
+            sel = ann.get("selector") or {}
+            quote = sel.get("quote", {}).get("exact", "")[:200] if isinstance(sel, dict) else ""
+            writer.writerow([
+                "annotation",
+                ann["id"],
+                ann["conversation_id"],
+                ann["message_id"],
+                ann.get("user_email", ""),
+                "",  # rating (annotation doesn't have it)
+                ann.get("severity", ""),
+                ", ".join(ann.get("tags") or []),
+                ann.get("comment", ""),
+                ann.get("correction", ""),
+                ann.get("review_status", ""),
+                ann.get("created_at", ""),
+                quote,
+                "",  # conversation_title (not joined for annotations)
             ])
 
         buf.seek(0)

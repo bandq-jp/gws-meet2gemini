@@ -292,6 +292,8 @@ export function useFeedbackDashboard(getClientSecret: () => string | null) {
     rating?: string;
     review_status?: string;
     tag?: string;
+    user_email?: string;
+    conversation_id?: string;
   }) => {
     const h = getHeadersSafe();
     if (!h) throw new Error("No client secret");
@@ -299,6 +301,8 @@ export function useFeedbackDashboard(getClientSecret: () => string | null) {
     if (filters?.rating) sp.set("rating", filters.rating);
     if (filters?.review_status) sp.set("review_status", filters.review_status);
     if (filters?.tag) sp.set("tag", filters.tag);
+    if (filters?.user_email) sp.set("user_email", filters.user_email);
+    if (filters?.conversation_id) sp.set("conversation_id", filters.conversation_id);
     const res = await fetch(`/api/feedback/export?${sp}`, { headers: h });
     if (!res.ok) throw new Error("Export failed");
     const blob = await res.blob();
