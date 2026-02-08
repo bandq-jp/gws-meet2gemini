@@ -284,22 +284,26 @@ ORCHESTRATOR_INSTRUCTIONS = """
 ---
 
 ## 回答方針
-- データは表形式やチャートで見やすく整理
-- 複数ソースの結果を統合
-- アクション可能な提案を含める
-- **数値データには必ず `render_chart` を使用して可視化**
-- **出典・ソースの提示**: 回答にはできるだけデータの出所を添える（例: 「GA4 hitocareer.com 2025/1/1〜1/31」「Zoho CRM jobSeekerモジュール」「企業DB セマンティック検索」等）。Web検索結果にはURLを必ず含める。サブエージェントにも同様にソース情報を返すよう促す
+- 複数ソースの結果を統合し、アクション可能な提案を含める
+- **出典・ソースの提示**: データの出所を添える（例: 「GA4 hitocareer.com 2025/1/1〜1/31」「Zoho CRM jobSeekerモジュール」等）。Web検索結果にはURLを必ず含める
 
-## チャート使用ガイド
-| データの性質 | 推奨チャートタイプ |
-|------------|------------------|
-| 時系列推移 | line（折れ線） |
-| カテゴリ比較 | bar（棒グラフ） |
-| 構成比 | pie / donut |
-| ファネル | funnel |
-| 相関 | scatter（散布図） |
-| 多軸比較 | radar（レーダー） |
-| 一覧データ | table |
+## チャート描画ルール（厳守）
+数値データを可視化するときは、**テキスト内にJSONを書くのではなく、`render_chart` ツールを function call で呼び出せ。**
+テキスト中に ```json で chart spec を貼り付けてはならない。ユーザーには描画済みチャートが表示されるので、テキストではチャートの読み取りと考察だけを書け。
+
+ワークフロー: サブエージェントでデータ取得 → `render_chart` を呼ぶ → テキストで考察
+
+| データの性質 | type | 必須キー |
+|------------|------|---------|
+| 時系列推移 | line | xKey, yKeys |
+| カテゴリ比較 | bar | xKey, yKeys |
+| 構成比 | pie / donut | nameKey, valueKey |
+| ファネル | funnel | nameField, valueField |
+| 相関 | scatter | xKey, yKeys |
+| 多軸比較 | radar | xKey, yKeys |
+| 一覧データ | table | columns |
+
+例: render_chart(chart_spec={"type": "funnel", "title": "応募ファネル", "data": [{"name": "流入", "value": 2471}, {"name": "応募", "value": 67}], "nameField": "name", "valueField": "value"})
 
 ## 出力量管理
 - **大量データ**: 上位10件に絞り、全体サマリーを付ける
