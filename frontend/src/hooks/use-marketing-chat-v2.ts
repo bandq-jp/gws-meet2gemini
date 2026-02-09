@@ -488,6 +488,11 @@ export function useMarketingChat(
               assistant.id = event.assistant_msg_id;
             }
 
+            // Mark streaming as complete — must be done HERE because
+            // the ID may have changed above, making the post-loop
+            // findIndex(m => m.id === assistantMessage.id) fail.
+            assistant.isStreaming = false;
+
             // Safety net: Mark any unfinished tools and sub-agents as complete
             // This handles cases where tool_result events are missing
             for (let i = 0; i < items.length; i++) {
