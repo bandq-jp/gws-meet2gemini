@@ -30,7 +30,7 @@ export function FeedbackModeToggle({ isActive, onToggle }: FeedbackModeTogglePro
             onClick={() => onToggle(!isActive)}
           >
             <MessageSquareText className="w-3.5 h-3.5" />
-            {isActive ? "FBモード ON" : "FB"}
+            {isActive ? <><span className="hidden sm:inline">FBモード ON</span><span className="sm:hidden">FB</span></> : "FB"}
           </Button>
         </TooltipTrigger>
         <TooltipContent>

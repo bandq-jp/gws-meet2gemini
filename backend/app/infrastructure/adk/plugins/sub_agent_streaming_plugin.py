@@ -302,6 +302,9 @@ class SubAgentStreamingPlugin(BasePlugin):
 
         return None  # Don't override response
 
+    # Transient error codes that should be gracefully handled instead of crashing
+    _TRANSIENT_ERROR_CODES = {"503", "429", "500", "UNAVAILABLE", "RESOURCE_EXHAUSTED"}
+
     async def on_tool_error_callback(
         self,
         *,
@@ -310,24 +313,46 @@ class SubAgentStreamingPlugin(BasePlugin):
         tool_context: ToolContext,
         error: Exception,
     ) -> Optional[dict]:
-        """Emit error events from sub-agent tool failures."""
-        if not self._is_sub_agent_context():
-            return None
+        """Emit error events from sub-agent tool failures.
 
-        agent_name = self._get_current_agent()
+        For transient errors (503, 429, etc.), returns an error dict so the
+        orchestrator can continue instead of the entire stream crashing.
+        """
+        agent_name = self._get_current_agent() if self._is_sub_agent_context() else "orchestrator"
         tool_name = tool.name
+        error_str = str(error)
 
         logger.warning(f"[Plugin] Sub-agent {agent_name} tool error: {tool_name} - {error}")
 
-        await self._emit({
-            "type": "sub_agent_event",
-            "agent": agent_name,
-            "event_type": "tool_error",
-            "is_running": True,
-            "data": {
-                "tool_name": tool_name,
-                "error": str(error)[:300],
-            },
-        })
+        if self._is_sub_agent_context():
+            await self._emit({
+                "type": "sub_agent_event",
+                "agent": agent_name,
+                "event_type": "tool_error",
+                "is_running": True,
+                "data": {
+                    "tool_name": tool_name,
+                    "error": error_str[:300],
+                },
+            })
 
-        return None  # Don't override error handling
+        # For transient API errors, return a graceful error response
+        # so the orchestrator can continue with other sub-agents
+        if self._is_transient_error(error_str):
+            logger.info(
+                f"[Plugin] Gracefully handling transient error for {agent_name}/{tool_name}"
+            )
+            return {
+                "status": "error",
+                "error_type": "transient",
+                "message": f"{agent_name}は一時的なAPIエラーにより利用できません。他の方法で対応してください。",
+                "detail": error_str[:200],
+            }
+
+        return None  # Non-transient errors propagate normally
+
+    @classmethod
+    def _is_transient_error(cls, error_str: str) -> bool:
+        """Check if the error is a transient/retryable API error."""
+        error_upper = error_str.upper()
+        return any(code in error_upper for code in cls._TRANSIENT_ERROR_CODES)

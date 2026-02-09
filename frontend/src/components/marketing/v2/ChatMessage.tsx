@@ -815,12 +815,12 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
             <>
               <Loader2 className="w-3 h-3 animate-spin text-[#6b7280]" />
               {/* Progress label - shows what the agent is doing */}
-              <span className="text-[10px] text-[#9ca3af] ml-0.5 hidden sm:inline transition-opacity duration-300">
+              <span className="text-[10px] text-[#9ca3af] ml-0.5 transition-opacity duration-300">
                 {progressLabel}
               </span>
               {/* Running tool count indicator */}
               {runningToolCount > 0 && (
-                <span className="text-[10px] text-[#3b82f6] ml-0.5 hidden sm:inline">
+                <span className="text-[10px] text-[#3b82f6] ml-0.5">
                   [{runningToolCount}実行中]
                 </span>
               )}
@@ -914,10 +914,10 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
                     `}
                   >
                     <ToolIcon className="w-2.5 h-2.5 shrink-0" />
-                    <span className="truncate max-w-[120px]">{toolLabel}</span>
+                    <span className="truncate max-w-[100px] sm:max-w-[120px]">{toolLabel}</span>
                     {/* Contextual detail from tool arguments */}
                     {contextLabel && (
-                      <span className="text-[9px] text-[#9ca3af] truncate max-w-[150px] hidden sm:inline">
+                      <span className="text-[9px] text-[#9ca3af] truncate max-w-[80px] sm:max-w-[150px]">
                         {contextLabel}
                       </span>
                     )}
@@ -930,7 +930,7 @@ function SubAgentBadge({ item }: { item: SubAgentActivityItem }) {
                     )}
                   </div>
                   {hasError && (
-                    <div className="text-[9px] text-[#dc2626] truncate max-w-[250px]">
+                    <div className="text-[9px] text-[#dc2626] truncate max-w-[200px] sm:max-w-[250px]">
                       {tc.error}
                     </div>
                   )}

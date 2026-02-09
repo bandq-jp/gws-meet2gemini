@@ -65,27 +65,27 @@ const SANDBOX_URL_PATTERN = /sandbox:\/[^\s\)\]"'<>]+/;
 // Custom components for rich markdown/HTML rendering
 const markdownComponents: Components = {
   h1: ({ children, ...props }) => (
-    <h1 className="text-4xl font-bold mb-6 mt-8 pb-3 border-b-2 border-slate-200" {...props}>
+    <h1 className="text-2xl sm:text-4xl font-bold mb-4 sm:mb-6 mt-6 sm:mt-8 pb-3 border-b-2 border-slate-200" {...props}>
       {children}
     </h1>
   ),
   h2: ({ children, ...props }) => (
-    <h2 className="text-3xl font-bold mb-4 mt-7 pb-2 border-b border-slate-200" {...props}>
+    <h2 className="text-xl sm:text-3xl font-bold mb-3 sm:mb-4 mt-5 sm:mt-7 pb-2 border-b border-slate-200" {...props}>
       {children}
     </h2>
   ),
   h3: ({ children, ...props }) => (
-    <h3 className="text-2xl font-bold mb-3 mt-6" {...props}>
+    <h3 className="text-lg sm:text-2xl font-bold mb-2 sm:mb-3 mt-4 sm:mt-6" {...props}>
       {children}
     </h3>
   ),
   h4: ({ children, ...props }) => (
-    <h4 className="text-xl font-semibold mb-2 mt-5" {...props}>
+    <h4 className="text-base sm:text-xl font-semibold mb-2 mt-4 sm:mt-5" {...props}>
       {children}
     </h4>
   ),
   h5: ({ children, ...props }) => (
-    <h5 className="text-lg font-semibold mb-2 mt-4" {...props}>
+    <h5 className="text-base sm:text-lg font-semibold mb-2 mt-3 sm:mt-4" {...props}>
       {children}
     </h5>
   ),

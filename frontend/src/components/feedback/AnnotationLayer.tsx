@@ -320,7 +320,7 @@ export function AnnotationLayer({
       {/* ===== Annotation Form (Portal — opens directly on text selection) ===== */}
       {form && typeof document !== "undefined" && (() => {
         const gap = 8;
-        const formW = 336;
+        const formW = Math.min(336, window.innerWidth - 24);
         const spaceAbove = form.rect.top;
         const spaceBelow = window.innerHeight - form.rect.bottom;
         const placeBelow = spaceBelow >= 280 || spaceBelow > spaceAbove;
@@ -376,7 +376,7 @@ export function AnnotationLayer({
                           key={opt.value}
                           type="button"
                           onClick={() => setForm(f => f ? { ...f, severity: opt.value } : null)}
-                          className={`rounded-full px-3 py-1 text-[11px] font-medium transition-all border ${
+                          className={`rounded-full px-4 py-2 sm:px-3 sm:py-1 text-[11px] font-medium transition-all border ${
                             form.severity === opt.value
                               ? `${SEVERITY_BADGE[opt.value]} border-current shadow-sm`
                               : "bg-white text-muted-foreground border-border hover:border-foreground/30"
@@ -433,7 +433,7 @@ export function AnnotationLayer({
       {/* ===== Highlight Detail Popover (Portal) ===== */}
       {detail && typeof document !== "undefined" && (() => {
         const gap = 6;
-        const popW = 288;
+        const popW = Math.min(288, window.innerWidth - 24);
         const spaceBelow = window.innerHeight - detail.rect.bottom;
         const placeBelow = spaceBelow >= 180 || spaceBelow > detail.rect.top;
         const top = placeBelow

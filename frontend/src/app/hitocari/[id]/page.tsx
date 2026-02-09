@@ -403,7 +403,7 @@ export default function MeetingDetailPage() {
 
   if (loading) {
     return (
-      <div className="w-full px-6 py-6">
+      <div className="w-full px-3 py-4 sm:px-6 sm:py-6">
         <div className="flex items-center justify-center py-12">
           <div className="text-center">
             <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
@@ -416,7 +416,7 @@ export default function MeetingDetailPage() {
 
   if (!selectedMeeting) {
     return (
-      <div className="w-full px-6 py-6">
+      <div className="w-full px-3 py-4 sm:px-6 sm:py-6">
         <div className="text-center py-12">
           <p className="text-muted-foreground mb-4">議事録が見つかりませんでした</p>
           <Link href="/hitocari">
@@ -429,7 +429,7 @@ export default function MeetingDetailPage() {
 
   return (
     <>
-      <div className="w-full px-6 py-6">
+      <div className="w-full px-3 py-4 sm:px-6 sm:py-6">
         <div className="space-y-6">
           {/* Header with Back Button */}
           <div className="flex items-center space-x-4 min-w-0">
@@ -634,9 +634,9 @@ export default function MeetingDetailPage() {
                 AI による議事録の構造化データ抽出結果
               </CardDescription>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               {/* 手動Zoho同期ボタン（常に表示） */}
-              <Button 
+              <Button
                 onClick={handleSyncToZoho}
                 disabled={!selectedCandidate || zohoSyncProcessing}
                 variant={data.zoho_candidate ? "outline" : "default"}

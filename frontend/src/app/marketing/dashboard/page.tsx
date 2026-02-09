@@ -162,7 +162,7 @@ export default function MarketingDashboardPage() {
             <Card key={item.label}>
               <CardHeader className="pb-2">
                 <CardDescription>{item.label}</CardDescription>
-                <CardTitle className="text-3xl font-semibold">
+                <CardTitle className="text-2xl sm:text-3xl font-semibold">
                   {item.value}
                 </CardTitle>
               </CardHeader>

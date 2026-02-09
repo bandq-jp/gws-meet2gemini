@@ -954,6 +954,66 @@
     - 固定幅サイドバーのモバイル対応: `absolute` overlay + backdrop + `useIsMobile()` で初期非表示
     - ChatKit Web Componentのような外部UIコンポーネント上にSidebarTriggerを浮かせるにはabsolute positioning + z-index
 
+- **全コンポーネント完全レスポンシブ対応（2026-02-10）**
+  - **目的**: 前回のページレベル対応に加え、全UIコンポーネントを完全にモバイル対応
+  - **b&qエージェントUI（marketing-v2）**:
+    - `HistoryPanel.tsx`: 削除ボタン `sm:opacity-0 sm:group-hover:opacity-100`（モバイルは常時表示）
+    - `FeedbackBar.tsx`: サム `w-8 h-8 sm:w-7 sm:h-7`、Popover幅レスポンシブ
+    - `ChatMessage.tsx`: ツールラベル常時表示（`hidden sm:inline`除去）
+    - `Composer.tsx`: ボタン `w-10 h-10 sm:w-9 sm:h-9`、Shift+Enterヒント非表示
+    - `MessageList.tsx`: スクロールボタン `px-4 py-2.5 sm:px-3 sm:py-1.5`
+    - `SuggestionCarousel.tsx`: ドットインジケーター `min-h-[20px] sm:min-h-0`
+    - `AskUserPrompt.tsx`: 送信/スキップ `px-5 py-2.5 sm:px-4 sm:py-2`
+    - `AgentShowcase.tsx`: 閉じる `w-10 h-10 sm:w-8 sm:h-8`、フィルタピル・詳細トグル拡大
+  - **フィードバック系**:
+    - `AnnotationLayer.tsx`: Portal幅を `Math.min(336, window.innerWidth - 24)` で動的計算、severity `px-4 py-2 sm:px-3 sm:py-1`
+    - `FeedbackModeToggle.tsx`: アクティブ時テキスト `hidden sm:inline` / モバイルでは"FB"のみ
+  - **ひとキャリ**:
+    - `hitocari/settings/page.tsx`: パディング `px-3 py-4 sm:px-6 sm:py-6`、TabsList横スクロール+wrap対応、グリッド1列化
+    - `hitocari/[id]/page.tsx`: パディング `px-3 py-4 sm:px-6 sm:py-6`、アクションボタン `flex-wrap`
+  - **マーケティング系**:
+    - `marketing/page.tsx`: markdown見出し全てレスポンシブ（h1〜h5 テキスト・余白）
+    - `marketing/dashboard/page.tsx`: KPIカード `text-2xl sm:text-3xl`
+    - `marketing/image-gen/page.tsx`: `100vh` → `100dvh`
+  - 変更ファイル（15）:
+    - `frontend/src/components/marketing/v2/HistoryPanel.tsx`
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx`
+    - `frontend/src/components/marketing/v2/Composer.tsx`
+    - `frontend/src/components/marketing/v2/MessageList.tsx`
+    - `frontend/src/components/marketing/v2/SuggestionCarousel.tsx`
+    - `frontend/src/components/marketing/v2/AskUserPrompt.tsx`
+    - `frontend/src/components/marketing/v2/AgentShowcase.tsx`
+    - `frontend/src/components/feedback/FeedbackBar.tsx`
+    - `frontend/src/components/feedback/AnnotationLayer.tsx`
+    - `frontend/src/components/feedback/FeedbackModeToggle.tsx`
+    - `frontend/src/app/hitocari/settings/page.tsx`
+    - `frontend/src/app/hitocari/[id]/page.tsx`
+    - `frontend/src/app/marketing/page.tsx`
+    - `frontend/src/app/marketing/dashboard/page.tsx`
+    - `frontend/src/app/marketing/image-gen/page.tsx`
+  - **レスポンシブパターン知見（追加）**:
+    - `opacity-0 group-hover:opacity-100`はモバイルで要素が完全に消える→`sm:opacity-0 sm:group-hover:opacity-100`で修正
+    - Portal系オーバーレイの固定幅は`Math.min(desired, window.innerWidth - margin)`で動的計算
+    - TabsList 5+タブ: `grid grid-cols-5`→`flex overflow-x-auto no-scrollbar flex-wrap sm:flex-nowrap sm:grid sm:grid-cols-5`
+    - `100vh`→`100dvh`でモバイルブラウザの動的アドレスバーに対応
+
+- **サブエージェント503エラーのグレースフル処理（2026-02-10）**
+  - **問題**: サブエージェント（例: WordPressAgent）がGemini API 503エラーを受けると、ADKのfunctions.pyがエラーをre-raiseし、ストリーム全体がクラッシュ。他のサブエージェントが既に返した結果も失われる
+  - **根本原因**: `on_tool_error_callback`が`None`を返していたため、ADKがエラーをそのままre-raise
+  - **修正**: `sub_agent_streaming_plugin.py`の`on_tool_error_callback`で一時的エラー（503, 429, 500）を検知し、エラー情報dictを返却。ADKはこれをfunction_responseとして扱い、エラーを抑制してオーケストレーターが続行可能に
+  - **ADK知見**: `on_tool_error_callback`がdictを返すと`functions.py` L376-377で`function_response = error_response`となりre-raiseが回避される。Noneの場合のみre-raise
+  - 変更ファイル: `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py`
+  - **自己改善**: ADKのプラグインコールバックの戻り値の意味を正確に理解すべき。`None`=デフォルト動作、dict=オーバーライド
+
+- **オーケストレーターLLM呼び出し503リトライ（2026-02-10）**
+  - **問題**: オーケストレーター自体のLLM呼び出しが503で失敗すると`runner.run_async()`から直接例外が伝播し、ストリーム全体が即座に終了。`on_tool_error_callback`はツールエラー専用のためLLMエラーには無効
+  - **修正**: `agent_service.py`の`_pump_adk_events()`に指数バックオフリトライ（2s→4s→8s、最大3回）を追加
+    - 503/429/UNAVAILABLE/RESOURCE_EXHAUSTEDを一時的エラーとして検知
+    - リトライ中は`progress`イベント（「APIが混雑中です。N秒後にリトライします...」）をフロントエンドに送信
+    - 非一時的エラーまたはリトライ上限到達時は従来通りerrorイベントを送信
+  - **2つのエラーレベル**: サブエージェントツールエラー→Plugin（dict返却で抑制）、オーケストレーターLLMエラー→`_pump_adk_events()`リトライ
+  - 変更ファイル: `backend/app/infrastructure/adk/agent_service.py`
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

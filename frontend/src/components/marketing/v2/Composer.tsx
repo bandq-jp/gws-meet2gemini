@@ -197,7 +197,7 @@ export function Composer({
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isStreaming || disabled || files.length >= MAX_FILE_COUNT}
-            className="shrink-0 w-9 h-9 m-1.5 rounded-xl flex items-center justify-center hover:bg-[#f0f1f5] disabled:opacity-20 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            className="shrink-0 w-10 h-10 sm:w-9 sm:h-9 m-1 sm:m-1.5 rounded-xl flex items-center justify-center hover:bg-[#f0f1f5] disabled:opacity-20 disabled:cursor-not-allowed transition-colors cursor-pointer"
             aria-label="ファイルを添付"
           >
             <Paperclip className="w-4 h-4 text-[#9ca3af]" />
@@ -224,7 +224,7 @@ export function Composer({
           {isStreaming ? (
             <button
               onClick={handleStopClick}
-              className="shrink-0 w-9 h-9 m-1.5 rounded-xl flex items-center justify-center bg-[#f0f1f5] hover:bg-[#e5e7eb] transition-colors cursor-pointer"
+              className="shrink-0 w-10 h-10 sm:w-9 sm:h-9 m-1 sm:m-1.5 rounded-xl flex items-center justify-center bg-[#f0f1f5] hover:bg-[#e5e7eb] transition-colors cursor-pointer"
               aria-label="停止"
             >
               <Square className="w-4 h-4 text-[#e94560]" />
@@ -233,7 +233,7 @@ export function Composer({
             <button
               onClick={handleSubmit}
               disabled={!hasContent || disabled}
-              className="shrink-0 w-9 h-9 m-1.5 rounded-xl flex items-center justify-center bg-[#1a1a2e] hover:bg-[#2a2a4e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors cursor-pointer"
+              className="shrink-0 w-10 h-10 sm:w-9 sm:h-9 m-1 sm:m-1.5 rounded-xl flex items-center justify-center bg-[#1a1a2e] hover:bg-[#2a2a4e] disabled:opacity-20 disabled:cursor-not-allowed transition-colors cursor-pointer"
               aria-label="送信"
             >
               <Send className="w-4 h-4 text-white" />
@@ -241,7 +241,7 @@ export function Composer({
           )}
         </div>
         <p className="text-center text-[10px] sm:text-[11px] text-[#9ca3af] mt-2">
-          Shift+Enter で改行 / Enter で送信 / 画像・PDF・Officeファイル添付可
+          <span className="hidden sm:inline">Shift+Enter で改行 / </span>Enter で送信 / ファイル添付可
         </p>
       </div>
     </div>

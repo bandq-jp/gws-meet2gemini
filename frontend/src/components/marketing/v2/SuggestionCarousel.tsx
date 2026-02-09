@@ -147,10 +147,10 @@ export function SuggestionCarousel({
               onClick={() => goTo(idx)}
               aria-label={`Page ${idx + 1}`}
               className={cn(
-                "rounded-full transition-all duration-300 cursor-pointer",
+                "rounded-full transition-all duration-300 cursor-pointer min-h-[20px] sm:min-h-0 flex items-center justify-center",
                 idx === active
-                  ? "w-5 h-1.5 bg-[#1e8aa0]/40"
-                  : "w-1.5 h-1.5 bg-[#d1d5db]/60 hover:bg-[#9ca3af]/50"
+                  ? "w-6 h-2 sm:w-5 sm:h-1.5 bg-[#1e8aa0]/40"
+                  : "w-3 h-2 sm:w-1.5 sm:h-1.5 bg-[#d1d5db]/60 hover:bg-[#9ca3af]/50"
               )}
             />
           ))}

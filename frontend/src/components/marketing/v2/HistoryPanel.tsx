@@ -97,11 +97,11 @@ function ConversationItem({
         </span>
         <button
           onClick={onDelete}
-          className="opacity-0 group-hover:opacity-100 p-1 -m-1 rounded-md
+          className="sm:opacity-0 sm:group-hover:opacity-100 p-1.5 -m-1 rounded-md
             hover:bg-[#fee2e2] hover:text-[#dc2626] text-[#9ca3af]
             transition-all duration-150 cursor-pointer shrink-0"
         >
-          <Trash2 className="w-3 h-3" />
+          <Trash2 className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
         </button>
       </div>
       <span className="text-[10px] text-[#b0b3b8] ml-6">
@@ -196,7 +196,7 @@ export function HistoryPanel({
           </div>
           <button
             onClick={() => onOpenChange(false)}
-            className="w-8 h-8 flex items-center justify-center rounded-lg
+            className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg
               hover:bg-[#f0f1f5] text-[#9ca3af] hover:text-[#1a1a2e]
               transition-colors cursor-pointer"
           >

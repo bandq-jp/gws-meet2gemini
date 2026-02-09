@@ -122,14 +122,14 @@ export function FeedbackBar({
 
   return (
     <div
-      className="flex items-center gap-1 mt-1.5 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200"
+      className="flex items-center gap-1.5 sm:gap-1 mt-1.5 opacity-100 sm:opacity-0 sm:group-hover/msg:opacity-100 transition-opacity duration-200"
       style={isFeedbackMode ? { opacity: 1 } : undefined}
     >
       {/* Thumbs Up - toggleable */}
       <Button
         variant="ghost"
         size="icon"
-        className={`h-7 w-7 rounded-full transition-colors ${
+        className={`h-9 w-9 sm:h-7 sm:w-7 rounded-full transition-colors ${
           selectedRating === "good"
             ? "bg-emerald-100 text-emerald-600 hover:bg-emerald-200"
             : "text-muted-foreground/60 hover:text-emerald-600 hover:bg-emerald-50"
@@ -137,14 +137,14 @@ export function FeedbackBar({
         onClick={() => handleToggleRating("good")}
         disabled={submitting}
       >
-        <ThumbsUp className="w-3.5 h-3.5" />
+        <ThumbsUp className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
       </Button>
 
       {/* Thumbs Down - toggleable */}
       <Button
         variant="ghost"
         size="icon"
-        className={`h-7 w-7 rounded-full transition-colors ${
+        className={`h-9 w-9 sm:h-7 sm:w-7 rounded-full transition-colors ${
           selectedRating === "bad"
             ? "bg-red-100 text-red-600 hover:bg-red-200"
             : "text-muted-foreground/60 hover:text-red-500 hover:bg-red-50"
@@ -152,7 +152,7 @@ export function FeedbackBar({
         onClick={() => handleToggleRating("bad")}
         disabled={submitting}
       >
-        <ThumbsDown className="w-3.5 h-3.5" />
+        <ThumbsDown className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
       </Button>
 
       {/* Comment / Edit button - always visible */}
@@ -161,7 +161,7 @@ export function FeedbackBar({
           <Button
             variant="ghost"
             size="sm"
-            className={`h-7 px-2 text-xs transition-colors ${
+            className={`h-9 sm:h-7 px-3 sm:px-2 text-xs transition-colors ${
               hasDetails
                 ? "text-blue-600 hover:text-blue-700"
                 : "text-muted-foreground/60 hover:text-foreground"
@@ -172,7 +172,7 @@ export function FeedbackBar({
           </Button>
         </PopoverTrigger>
 
-        <PopoverContent align="start" className="w-80 p-0" sideOffset={8}>
+        <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-80 max-w-80 p-0" sideOffset={8}>
           <div className="p-3 space-y-3">
             <div className="flex items-center justify-between">
               <h4 className="text-sm font-medium">フィードバック</h4>

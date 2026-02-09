@@ -268,7 +268,7 @@ export function AskUserPrompt({
             disabled={!hasValidSelection}
             onClick={handleSubmit}
             className={`
-              inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-medium
+              inline-flex items-center gap-1.5 rounded-lg px-5 py-2.5 sm:px-4 sm:py-2 text-[13px] font-medium
               transition-all duration-150
               ${
                 hasValidSelection
@@ -283,7 +283,7 @@ export function AskUserPrompt({
           <button
             type="button"
             onClick={handleSkip}
-            className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-medium
+            className="inline-flex items-center gap-1.5 rounded-lg px-5 py-2.5 sm:px-4 sm:py-2 text-[13px] font-medium
               text-[#6b7280] border border-[#e5e7eb] bg-white hover:bg-[#f9fafb] hover:border-[#d1d5db]
               transition-all duration-150 cursor-pointer"
           >

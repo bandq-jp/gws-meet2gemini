@@ -171,7 +171,7 @@ function AgentCard({
 
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-[10px] font-medium text-[#9ca3af] hover:text-[#6b7280] transition-colors flex items-center gap-0.5 shrink-0 py-1 px-1.5 -mr-1.5 rounded-md hover:bg-[#f8f9fb]"
+            className="text-[11px] sm:text-[10px] font-medium text-[#9ca3af] hover:text-[#6b7280] transition-colors flex items-center gap-0.5 shrink-0 py-2 px-2.5 sm:py-1 sm:px-1.5 -mr-1.5 rounded-md hover:bg-[#f8f9fb]"
           >
             {expanded ? "閉じる" : "詳細"}
             <ChevronDown
@@ -301,7 +301,7 @@ export function AgentShowcase({
                 </div>
                 <button
                   onClick={() => onOpenChange(false)}
-                  className="w-8 h-8 rounded-lg flex items-center justify-center text-[#c5c8ce] hover:text-foreground hover:bg-[#f0f1f5] transition-colors ml-1"
+                  className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-[#c5c8ce] hover:text-foreground hover:bg-[#f0f1f5] transition-colors ml-1"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -322,7 +322,7 @@ export function AgentShowcase({
                   key={cat.key}
                   onClick={() => setActiveCategory(cat.key)}
                   className={cn(
-                    "px-3 py-1.5 rounded-full text-[11px] font-medium whitespace-nowrap transition-all duration-200",
+                    "px-3.5 py-2 sm:px-3 sm:py-1.5 rounded-full text-[11px] font-medium whitespace-nowrap transition-all duration-200",
                     activeCategory === cat.key
                       ? "bg-[#1e8aa0] text-white shadow-sm shadow-[#1e8aa0]/20"
                       : "bg-[#f0f1f5] text-[#6b7280] hover:bg-[#e5e7eb] hover:text-[#374151]",

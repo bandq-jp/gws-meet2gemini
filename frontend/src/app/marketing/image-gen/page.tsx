@@ -875,7 +875,7 @@ export default function ImageGenPage() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex flex-col h-[calc(100vh-2rem)] font-[family-name:var(--font-geist-sans)]">
+      <div className="flex flex-col h-[calc(100dvh-2rem)] font-[family-name:var(--font-geist-sans)]">
         {/* ── Header ── */}
         <header className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2.5 border-b border-border/50 bg-background">
           {/* Mobile sidebar trigger */}

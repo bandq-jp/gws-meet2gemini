@@ -174,13 +174,13 @@ export default function HitocariSettingsPage() {
   };
 
   return (
-    <div className="w-full px-6 py-6 space-y-6">
+    <div className="w-full px-3 py-4 sm:px-6 sm:py-6 space-y-6">
       {/* Header */}
       <div className="flex items-center space-x-4">
         <SidebarTrigger className="md:hidden" />
         <Settings className="h-8 w-8" />
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">ひとキャリ設定</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">ひとキャリ設定</h1>
           <p className="text-muted-foreground">
             システムの動作と外部サービス連携を設定します
           </p>
@@ -188,12 +188,12 @@ export default function HitocariSettingsPage() {
       </div>
 
       <Tabs defaultValue="ai" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="ai">AI処理</TabsTrigger>
-          <TabsTrigger value="schemas">スキーマ管理</TabsTrigger>
-          <TabsTrigger value="integrations">外部連携</TabsTrigger>
-          <TabsTrigger value="notifications">通知</TabsTrigger>
-          <TabsTrigger value="automation">自動化</TabsTrigger>
+        <TabsList className="flex w-full overflow-x-auto no-scrollbar h-auto flex-wrap sm:flex-nowrap sm:grid sm:grid-cols-5">
+          <TabsTrigger value="ai" className="flex-1 min-w-[80px]">AI処理</TabsTrigger>
+          <TabsTrigger value="schemas" className="flex-1 min-w-[80px]">スキーマ管理</TabsTrigger>
+          <TabsTrigger value="integrations" className="flex-1 min-w-[80px]">外部連携</TabsTrigger>
+          <TabsTrigger value="notifications" className="flex-1 min-w-[80px]">通知</TabsTrigger>
+          <TabsTrigger value="automation" className="flex-1 min-w-[80px]">自動化</TabsTrigger>
         </TabsList>
 
         {/* 外部連携設定 */}
@@ -278,7 +278,7 @@ export default function HitocariSettingsPage() {
               
               {settings.zohoEnabled && (
                 <>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="zoho-client-id" className="text-muted-foreground">クライアントID</Label>
                       <Input
@@ -313,7 +313,7 @@ export default function HitocariSettingsPage() {
                     />
                   </div>
                   
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="zoho-module">モジュール名</Label>
                       <Input
@@ -402,7 +402,7 @@ export default function HitocariSettingsPage() {
                     />
                   </div>
                   
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="gemini-max-tokens" className="text-muted-foreground">最大トークン数</Label>
                       <Input

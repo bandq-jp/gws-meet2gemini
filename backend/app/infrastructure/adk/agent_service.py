@@ -250,37 +250,62 @@ class ADKAgentService:
             sent_text_tracker: Dict[str, str] = {"text": ""}
 
             async def _pump_adk_events() -> None:
-                """Background task: read ADK stream events and put into queue."""
+                """Background task: read ADK stream events and put into queue.
+
+                Retries up to 3 times on transient errors (503, 429) with
+                exponential backoff before giving up.
+                """
                 nonlocal accumulated_text
-                try:
-                    # Enable SSE streaming mode with configurable max_llm_calls
-                    # 0 or negative = unlimited (for deep investigation)
-                    run_config = RunConfig(
-                        streaming_mode=StreamingMode.SSE,
-                        max_llm_calls=self._settings.adk_max_llm_calls,
-                    )
-                    async for event in runner.run_async(
-                        user_id=user_id,
-                        session_id=session_id,
-                        new_message=user_content,
-                        run_config=run_config,
-                    ):
-                        sse_events = self._process_adk_event(
-                            event, sub_agent_states, sent_text_tracker
+                max_retries = 3
+                retry_delays = [2.0, 4.0, 8.0]  # seconds
+
+                for attempt in range(max_retries + 1):
+                    try:
+                        run_config = RunConfig(
+                            streaming_mode=StreamingMode.SSE,
+                            max_llm_calls=self._settings.adk_max_llm_calls,
                         )
-                        if sse_events is not None:
-                            for sse_event in sse_events:
-                                # Track text for deduplication and context
-                                if sse_event.get("type") == "text_delta":
-                                    content = sse_event.get("content", "")
-                                    accumulated_text += content
-                                    sent_text_tracker["text"] += content
-                                await queue.put(sse_event)
-                except Exception as e:
-                    logger.exception(f"[ADK] Error during streaming: {e}")
-                    await queue.put({"type": "error", "message": sanitize_error(str(e))})
-                finally:
-                    await queue.put(_SENTINEL)
+                        async for event in runner.run_async(
+                            user_id=user_id,
+                            session_id=session_id,
+                            new_message=user_content,
+                            run_config=run_config,
+                        ):
+                            sse_events = self._process_adk_event(
+                                event, sub_agent_states, sent_text_tracker
+                            )
+                            if sse_events is not None:
+                                for sse_event in sse_events:
+                                    if sse_event.get("type") == "text_delta":
+                                        content = sse_event.get("content", "")
+                                        accumulated_text += content
+                                        sent_text_tracker["text"] += content
+                                    await queue.put(sse_event)
+                        break  # Success — exit retry loop
+                    except Exception as e:
+                        error_str = str(e).upper()
+                        is_transient = any(
+                            code in error_str
+                            for code in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED")
+                        )
+                        if is_transient and attempt < max_retries:
+                            delay = retry_delays[attempt]
+                            logger.warning(
+                                f"[ADK] Transient error (attempt {attempt + 1}/{max_retries}), "
+                                f"retrying in {delay}s: {e}"
+                            )
+                            await queue.put({
+                                "type": "progress",
+                                "text": f"APIが混雑中です。{delay:.0f}秒後にリトライします...",
+                            })
+                            await asyncio.sleep(delay)
+                            continue
+                        # Non-transient or retries exhausted
+                        logger.exception(f"[ADK] Error during streaming: {e}")
+                        await queue.put({"type": "error", "message": sanitize_error(str(e))})
+                        break
+
+                await queue.put(_SENTINEL)
 
             pump_task = asyncio.create_task(_pump_adk_events())
 

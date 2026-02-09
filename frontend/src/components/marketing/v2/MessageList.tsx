@@ -177,7 +177,7 @@ export function MessageList({
       {showScrollButton && isStreaming && (
         <button
           onClick={scrollToBottom}
-          className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-background/90 backdrop-blur-sm border border-border rounded-full px-3 py-1.5 shadow-lg hover:bg-background transition-colors text-xs text-muted-foreground"
+          className="absolute bottom-4 right-4 flex items-center gap-1.5 bg-background/90 backdrop-blur-sm border border-border rounded-full px-4 py-2.5 sm:px-3 sm:py-1.5 shadow-lg hover:bg-background transition-colors text-xs text-muted-foreground"
           aria-label="最下部へスクロール"
         >
           <ChevronDown className="h-3.5 w-3.5" />
