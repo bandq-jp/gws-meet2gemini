@@ -8,7 +8,6 @@ Matches OpenAI Agents SDK functionality:
 - Sub-agent event streaming with is_running tracking
 - Reasoning/thinking events
 - Translation of reasoning summaries to Japanese
-- Simple query fast path
 - Keepalive events
 """
 from __future__ import annotations
@@ -17,7 +16,6 @@ import asyncio
 import base64
 import json
 import logging
-import re
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict, List, Optional
@@ -44,24 +42,6 @@ logger = logging.getLogger(__name__)
 
 # Sentinel to signal end-of-stream
 _SENTINEL = object()
-
-# Simple query patterns - skip orchestrator for these
-_SIMPLE_QUERY_PATTERNS = [
-    r"^(こんにちは|こんばんは|おはよう|ありがとう|さようなら|はじめまして)(\s|$|！|。)",
-    r"^(hello|hey|thanks|bye)(\s|$|!|\.)",
-    r"^hi(\s|$|!)",
-    r"^(あなたは誰|あなたは何|何ができ|自己紹介|help|ヘルプ)",
-    r"^(テスト|test)(\s|$)",
-]
-_SIMPLE_QUERY_COMPILED = [re.compile(p, re.IGNORECASE) for p in _SIMPLE_QUERY_PATTERNS]
-
-# Simple query response agent instructions
-_SIMPLE_AGENT_INSTRUCTIONS = """b&qマーケティングAIです。短く応答してください。
-
-挨拶には「こんにちは！マーケティング分析をお手伝いします。」程度で。
-能力を聞かれたら「GA4分析、SEO分析、広告分析、CRMデータ分析ができます。」と1文で。
-
-【重要】必ず1-2文以内で回答すること。"""
 
 
 @dataclass
@@ -107,18 +87,6 @@ class ADKAgentService:
             logger.info("[ADK] Using InMemoryMemoryService (dev mode)")
             return InMemoryMemoryService()
 
-    def _is_simple_query(self, message: str) -> bool:
-        """Detect simple queries that don't need sub-agents."""
-        message_clean = message.strip().lower()
-        if len(message_clean) > 100:
-            return False
-
-        for pattern in _SIMPLE_QUERY_COMPILED:
-            if pattern.search(message_clean):
-                logger.info(f"[ADK SimpleQuery] Detected: {message[:30]}...")
-                return True
-        return False
-
     async def _save_session_to_memory(self, session: Any, user_email: str) -> None:
         """
         Save session to memory service (non-blocking background task).
@@ -137,78 +105,6 @@ class ADKAgentService:
             logger.info(f"[ADK Memory] Saved session {session.id} to memory")
         except Exception as e:
             logger.error(f"[ADK Memory] Failed to save session: {e}")
-
-    async def _stream_simple_response(
-        self,
-        message: str,
-        conversation_id: str,
-        user_id: str = "default",
-    ) -> AsyncGenerator[dict, None]:
-        """Fast path for simple queries using a lightweight ADK agent."""
-        logger.info("[ADK SimpleQuery] Using fast path (no sub-agents)")
-
-        try:
-            # Create a simple agent for quick responses
-            # Use the same model as the orchestrator
-            simple_agent = Agent(
-                name="SimpleResponder",
-                model=self._settings.adk_orchestrator_model or "gemini-3-flash-preview",
-                description="シンプルな応答用エージェント",
-                instruction=_SIMPLE_AGENT_INSTRUCTIONS,
-                tools=[],
-            )
-
-            # Create temporary session
-            session_id = f"simple_{conversation_id}"
-            session = await self._session_service.get_session(
-                app_name="marketing_ai",
-                user_id=user_id,
-                session_id=session_id,
-            )
-            if session is None:
-                session = await self._session_service.create_session(
-                    app_name="marketing_ai",
-                    user_id=user_id,
-                    session_id=session_id,
-                )
-
-            runner = Runner(
-                agent=simple_agent,
-                app_name="marketing_ai",
-                session_service=self._session_service,
-            )
-
-            user_content = types.Content(
-                role="user",
-                parts=[types.Part(text=message)],
-            )
-
-            # Enable SSE streaming mode with configurable max_llm_calls
-            # 0 or negative = unlimited (for deep investigation)
-            run_config = RunConfig(
-                streaming_mode=StreamingMode.SSE,
-                max_llm_calls=self._settings.adk_max_llm_calls,
-            )
-            async for event in runner.run_async(
-                user_id=user_id,
-                session_id=session_id,
-                new_message=user_content,
-                run_config=run_config,
-            ):
-                if hasattr(event, "content") and event.content:
-                    if hasattr(event.content, "parts"):
-                        for part in event.content.parts:
-                            if hasattr(part, "text") and part.text:
-                                yield {"type": "text_delta", "content": part.text}
-                    elif isinstance(event.content, str):
-                        yield {"type": "text_delta", "content": event.content}
-
-        except Exception as e:
-            logger.error(f"[ADK SimpleQuery] Error: {e}", exc_info=True)
-            yield {"type": "error", "message": sanitize_error(str(e))}
-
-        yield {"type": "_context_items", "items": []}
-        yield {"type": "done", "conversation_id": conversation_id}
 
     async def stream_chat(
         self,
@@ -235,12 +131,6 @@ class ADKAgentService:
         - {"type": "done", "conversation_id": "..."}
         """
         session_id = conversation_id or str(uuid.uuid4())
-
-        # FAST PATH: Simple queries bypass orchestrator entirely
-        if not context_items and self._is_simple_query(message):
-            async for event in self._stream_simple_response(message, session_id, user_id=user_id):
-                yield event
-            return
 
         # Queue for multiplexing SDK events and out-of-band events (chart, etc.)
         # maxsize=1000 prevents unbounded memory growth if consumer is slow
