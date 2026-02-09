@@ -54,6 +54,7 @@ class SubAgentStreamingPlugin(BasePlugin):
         "GoogleSearchAgent",
         "CodeExecutionAgent",
         "GoogleWorkspaceAgent",
+        "GoogleDriveAgent",
         "SlackAgent",
     }
 

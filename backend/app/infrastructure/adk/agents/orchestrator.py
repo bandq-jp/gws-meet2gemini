@@ -27,6 +27,7 @@ from .ca_support_agent import CASupportAgentFactory
 from .google_search_agent import GoogleSearchAgentFactory
 from .code_execution_agent import CodeExecutionAgentFactory
 from .workspace_agent import GoogleWorkspaceAgentFactory
+from .drive_agent import GoogleDriveAgentFactory
 from .slack_agent import SlackAgentFactory
 from app.infrastructure.adk.tools.chart_tools import ADK_CHART_TOOLS
 from app.infrastructure.adk.tools.ask_user_tools import ADK_ASK_USER_TOOLS
@@ -106,6 +107,11 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | 予定、カレンダー、スケジュール、会議予定 | GoogleWorkspaceAgent |
 | 今日の予定、来週の予定、空き時間 | GoogleWorkspaceAgent |
 | メールスレッド、やり取り、返信、添付 | GoogleWorkspaceAgent |
+| ドライブ、Drive、ファイル検索、マイドライブ | GoogleDriveAgent |
+| ドキュメント、Google Docs、資料、文書 | GoogleDriveAgent |
+| スプレッドシート、スプシ、Google Sheets | GoogleDriveAgent |
+| スライド、プレゼン、Google Slides | GoogleDriveAgent |
+| フォルダ、共有ドライブ、ファイル一覧 | GoogleDriveAgent |
 | Slack、チャネル、スレッド、メンション、投稿 | SlackAgent |
 | Slackで検索、Slack上のやり取り、Slack言及 | SlackAgent |
 | 企業のSlack情報、候補者のSlack状況 | SlackAgent |
@@ -204,6 +210,15 @@ ORCHESTRATOR_INSTRUCTIONS = """
 - 今日の予定、期間指定の予定確認
 - Gmail検索構文サポート（from:, subject:, after:, is:unread等）
 - **プライバシー保護**: メール全文は出力せず、要約・引用形式
+
+### GoogleDriveAgent (Drive + Docs + Sheets)
+- ユーザーのGoogle Driveファイル検索・閲覧（読み取り専用）
+- Google Docsテキスト取得
+- Google SheetsのCSVエクスポート（最初のシート）
+- Google Slidesテキスト取得
+- フォルダ一覧・ファイルメタデータ取得
+- テキスト系ファイル（.txt, .csv, .json, .md等）の直接読み取り
+- 共有ドライブ対応
 
 ### SlackAgent (Slack検索)
 - Slack全チャネル横断のフルテキスト検索（search.messages）
@@ -414,6 +429,7 @@ class OrchestratorAgentFactory:
             "google_search": GoogleSearchAgentFactory(settings),
             "code_execution": CodeExecutionAgentFactory(settings),
             "google_workspace": GoogleWorkspaceAgentFactory(settings),
+            "google_drive": GoogleDriveAgentFactory(settings),
             "slack": SlackAgentFactory(settings),
         }
 
@@ -460,6 +476,7 @@ class OrchestratorAgentFactory:
             "google_search": [],  # Uses built-in google_search, no MCP
             "code_execution": [],  # Uses BuiltInCodeExecutor, no MCP
             "google_workspace": [],  # Uses function tools (Gmail/Calendar API), no MCP
+            "google_drive": [],  # Uses function tools (Drive API), no MCP
             "slack": [],  # Uses function tools (Slack API), no MCP
         }
 

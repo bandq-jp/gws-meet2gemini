@@ -39,6 +39,8 @@ import {
   MessageSquare,
   Hash,
   User,
+  FolderOpen,
+  FileSpreadsheet,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -288,6 +290,24 @@ const SUB_AGENT_CONFIG: Record<string, AgentUIConfig> = {
     borderColor: "border-red-200",
     accentColor: "#ef4444",
   },
+  googledriveagent: {
+    label: "Drive",
+    icon: FolderOpen,
+    gradient: "from-emerald-500 to-teal-500",
+    bgLight: "bg-emerald-50",
+    textColor: "text-emerald-700",
+    borderColor: "border-emerald-200",
+    accentColor: "#10b981",
+  },
+  google_drive: {
+    label: "Drive",
+    icon: FolderOpen,
+    gradient: "from-emerald-500 to-teal-500",
+    bgLight: "bg-emerald-50",
+    textColor: "text-emerald-700",
+    borderColor: "border-emerald-200",
+    accentColor: "#10b981",
+  },
   slackagent: {
     label: "Slack",
     icon: MessageSquare,
@@ -383,6 +403,13 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   list_calendar_events: Calendar,
   search_calendar_events: Calendar,
   get_event_detail: Calendar,
+  // Google Drive
+  search_drive_files: Search,
+  list_folder_contents: FolderOpen,
+  get_file_metadata: FileText,
+  read_google_doc: FileText,
+  read_spreadsheet: FileSpreadsheet,
+  read_file_content: FileText,
   // Slack
   search_slack_messages: Search,
   get_channel_messages: Hash,
@@ -453,6 +480,13 @@ const TOOL_LABELS: Record<string, string> = {
   list_calendar_events: "予定一覧",
   search_calendar_events: "予定検索",
   get_event_detail: "予定詳細",
+  // Google Drive
+  search_drive_files: "Drive検索",
+  list_folder_contents: "フォルダ一覧",
+  get_file_metadata: "ファイル情報",
+  read_google_doc: "ドキュメント読取",
+  read_spreadsheet: "スプシ読取",
+  read_file_content: "ファイル読取",
   // Slack
   search_slack_messages: "Slack検索",
   get_channel_messages: "チャネル履歴",
@@ -496,6 +530,10 @@ function extractToolContext(toolName: string, argsJson?: string): string | null 
     if (args.channel_name_or_id) return `#${args.channel_name_or_id}`;
     if (args.thread_ts) return `Thread: ${String(args.thread_ts).slice(0, 15)}`;
     if (args.days_back) return `直近${args.days_back}日`;
+    // Drive file context
+    if (args.file_id && args.file_id !== "root") return `File: ${String(args.file_id).slice(0, 12)}...`;
+    if (args.folder_id && args.folder_id !== "root") return `Folder: ${String(args.folder_id).slice(0, 12)}...`;
+    if (args.file_type) return args.file_type;
     // Gmail/Calendar IDs
     if (args.message_id) return `ID: ${String(args.message_id).slice(0, 12)}...`;
     if (args.thread_id) return `Thread: ${String(args.thread_id).slice(0, 12)}...`;

@@ -908,6 +908,34 @@
     - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - priority_keys更新
   - **自己改善**: Meta広告の「clicks」はマーケターが日常的に見る「リンククリック」とは異なる。API側のデフォルト指標とマーケター側のデフォルト指標の乖離を常に意識し、**実務者が使う指標名でデフォルト報告**すべき
 
+- **GoogleDriveAgent実装（Drive読み取り専用、2026-02-09）**
+  - **目的**: ユーザーのGoogle Driveにサービスアカウントのドメイン全体委任でアクセスし、ファイル検索・内容取得を実現
+  - **認証**: 既存の `SERVICE_ACCOUNT_JSON` + `subject=user_email` パターン（workspace_service.py流用）
+  - **スコープ**: `drive.readonly` のみ（Admin Consoleで委任設定済み）。documents.readonly/spreadsheets.readonlyは不要
+  - **Drive APIエクスポート**: `files().export()` で Google Docs→text/plain、Sheets→text/csv、Slides→text/plain に変換（drive.readonlyスコープで可能）
+  - 新規ファイル:
+    - `backend/app/infrastructure/google/drive_service.py` - Per-user Drive APIサービス（TTL 50分キャッシュ、スレッドセーフシングルトン、workspace_service.pyと同パターン）
+    - `backend/app/infrastructure/adk/tools/drive_tools.py` - 6ツール
+    - `backend/app/infrastructure/adk/agents/drive_agent.py` - SubAgentFactory実装
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - サブエージェント登録、キーワードマトリクス追加
+    - `backend/app/infrastructure/adk/agents/__init__.py` - エクスポート追加
+    - `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py` - SUB_AGENT_NAMES追加
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - UI設定（emerald/teal、FolderOpen/FileSpreadsheetアイコン）
+  - ツール一覧:
+    - `search_drive_files`: Drive検索（名前・全文・種類フィルタ、Drive検索構文サポート）
+    - `list_folder_contents`: フォルダ内一覧（ルート or 指定folder_id）
+    - `get_file_metadata`: ファイル詳細情報（更新日、オーナー、共有状態、サイズ等）
+    - `read_google_doc`: Google Docsテキスト取得（export text/plain、max 20000文字）
+    - `read_spreadsheet`: Google SheetsのCSV取得（export text/csv、最初のシートのみ）
+    - `read_file_content`: 汎用ファイル読み取り（Google形式→テキストエクスポート、テキスト系→直接読み取り）
+  - **制限事項**:
+    - 読み取り専用（作成・編集・削除不可）
+    - Sheets: Drive APIのCSVエクスポートは最初のシートのみ（特定セル範囲指定は非対応）
+    - バイナリファイル（画像・動画・PDF）: メタデータのみ返却
+    - 将来的にSheets APIが必要な場合は `spreadsheets.readonly` をAdmin Consoleで追加委任
+  - **設計判断**: Per-userサービスインスタンス（subjectがユーザーごとに異なるため、SheetsServiceとは別パターン）
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
