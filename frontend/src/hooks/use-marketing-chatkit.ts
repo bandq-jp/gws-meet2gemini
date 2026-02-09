@@ -492,6 +492,10 @@ export function useMarketingChatKit(options: UseMarketingChatKitOptions) {
         maxSize: 20 * 1024 * 1024,
         maxCount: 5,
         accept: {
+          "image/png": [".png"],
+          "image/jpeg": [".jpg", ".jpeg"],
+          "image/gif": [".gif"],
+          "image/webp": [".webp"],
           "text/csv": [".csv"],
           "application/pdf": [".pdf"],
           "text/plain": [".txt", ".md"],

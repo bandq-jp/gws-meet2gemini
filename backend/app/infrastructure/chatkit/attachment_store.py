@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from chatkit.store import AttachmentStore
-from chatkit.types import AttachmentCreateParams, FileAttachment
+from chatkit.types import AttachmentCreateParams, AttachmentUploadDescriptor, FileAttachment
 
 from app.infrastructure.chatkit.context import MarketingRequestContext
 from app.infrastructure.security.marketing_token_service import MarketingTokenService
@@ -89,7 +89,11 @@ class SupabaseAttachmentStore(AttachmentStore[MarketingRequestContext]):
             id=attachment_id,
             name=input.name,
             mime_type=input.mime_type,
-            upload_url=upload_url,
+            upload_descriptor=AttachmentUploadDescriptor(
+                url=upload_url,
+                method="PUT",
+                headers={},
+            ),
         )
 
     async def delete_attachment(self, attachment_id: str, context: MarketingRequestContext) -> None:
