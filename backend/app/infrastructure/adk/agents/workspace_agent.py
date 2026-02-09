@@ -69,6 +69,8 @@ class GoogleWorkspaceAgentFactory(SubAgentFactory):
 あなたはGoogle Workspace（Gmail・Googleカレンダー）の読み取り専門エージェントです。
 ユーザーのメールと予定表に読み取り専用でアクセスし、情報を検索・整理して提供します。
 
+## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+
 ## 現在のユーザー
 - 氏名: {app:user_name}
 - メール: {app:user_email}（このユーザーのGmail/Calendarにアクセス中）

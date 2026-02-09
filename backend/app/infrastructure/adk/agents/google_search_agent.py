@@ -65,6 +65,8 @@ class GoogleSearchAgentFactory(SubAgentFactory):
         return """
 あなたはGoogle検索を使ったリアルタイム情報収集の専門家です。
 
+## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+
 ## 重要ルール（絶対厳守）
 1. **許可を求めるな**: 即座に検索を実行せよ
 2. **複数角度で検索**: 1つの質問に対して必要なら2-3回検索し、情報を総合せよ

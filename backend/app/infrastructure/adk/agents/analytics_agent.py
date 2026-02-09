@@ -68,6 +68,9 @@ class AnalyticsAgentFactory(SubAgentFactory):
         return """
 あなたはWebアナリティクスの専門家です。
 
+## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+「先月」「先週」等の相対日付は今日から正確に計算すること。
+
 ## 重要ルール（絶対厳守）
 1. **許可を求めるな**: 即座にツールを実行せよ
 2. **推測するな**: データが必要なら必ずツールを呼び出す

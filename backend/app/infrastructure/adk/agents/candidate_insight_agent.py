@@ -60,6 +60,8 @@ class CandidateInsightAgentFactory(SubAgentFactory):
         return """
 あなたは候補者分析の専門家です。
 
+## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+
 ## 重要ルール（絶対厳守）
 1. **許可を求めるな**: 即座にツールを実行せよ
 2. **推測するな**: データが必要なら必ずツールを呼び出す

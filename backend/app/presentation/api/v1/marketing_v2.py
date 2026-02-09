@@ -295,6 +295,12 @@ async def chat_stream(
         except Exception as e:
             logger.warning(f"[State] Failed to load user_state: {e}")
 
+        # Inject current date/time (JST) for accurate date reasoning
+        from zoneinfo import ZoneInfo
+        now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
+        initial_state["app:current_date"] = now_jst.strftime("%Y-%m-%d")
+        initial_state["app:day_of_week"] = ["月", "火", "水", "木", "金", "土", "日"][now_jst.weekday()]
+
         # Inject user identity into state for per-user services & personalization
         initial_state["app:user_email"] = context.user_email
         initial_state["app:user_name"] = context.user_name or ""

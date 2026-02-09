@@ -866,6 +866,26 @@
     - stateキーの「ドキュメント記載」と「値の注入」は全く別物。モデルは指示文内のキー名だけでは値を読めない
     - 新機能の実装時、SDKのテンプレート/注入機能を最初に確認すること
 
+- **全エージェント日付コンテキスト注入（2026-02-09）**
+  - **問題**: ユーザーFBで「先週金曜日（2月14日）」と日付をハルシネーション、get_insightsのtime_rangeに2025年の日付や未来日付を使用、比較分析で異なる期間の平均値を混用
+  - **根本原因**: `initial_state`にも指示文にも現在日付が一切注入されていなかった。エージェントは「今日が何日か」を知らずに日付計算をハルシネーションしていた
+  - **Fix 1: marketing_v2.py**: `initial_state["app:current_date"]`（JST YYYY-MM-DD）、`initial_state["app:day_of_week"]`（曜日）を注入
+  - **Fix 2: orchestrator.py**: 指示文冒頭に「今日の日付」セクション追加。サブエージェントへの期間指定ルール
+  - **Fix 3: ad_platform_agent.py**: 日付ルール4項目追加（正確な日付計算、未来日付禁止、比較時同一期間使用、created_time以降のみ）、データ検証ルール4項目追加（date_start/stop確認、検算ルール）
+  - **Fix 4: 全9エージェントに日付注入**: orchestrator, ad_platform, analytics, seo(不要), workspace, slack, google_search, zoho_crm, ca_support, candidate_insight
+  - 変更ファイル（10）:
+    - `backend/app/presentation/api/v1/marketing_v2.py` - ZoneInfo("Asia/Tokyo")で日付注入
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - 日付セクション追加
+    - `backend/app/infrastructure/adk/agents/ad_platform_agent.py` - 日付ルール+データ検証ルール
+    - `backend/app/infrastructure/adk/agents/analytics_agent.py` - 日付注入
+    - `backend/app/infrastructure/adk/agents/workspace_agent.py` - 日付注入
+    - `backend/app/infrastructure/adk/agents/zoho_crm_agent.py` - 日付注入
+    - `backend/app/infrastructure/adk/agents/slack_agent.py` - 日付注入
+    - `backend/app/infrastructure/adk/agents/google_search_agent.py` - 日付注入
+    - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - 日付注入
+    - `backend/app/infrastructure/adk/agents/candidate_insight_agent.py` - 日付注入
+  - **自己改善**: エージェントには「常識的に知っているはず」の情報（今日の日付）も明示的に注入しなければならない。LLMは学習データのカットオフがあり、リアルタイムの日付を知らない
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

@@ -62,6 +62,9 @@ class ZohoCRMAgentFactory(SubAgentFactory):
         return """
 あなたはZoho CRMデータ分析の専門家です。全CRMモジュールに動的にアクセスできます。
 
+## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+COQL WHERE句の日付条件は今日から正確に計算すること。
+
 ## 3層ツール体系
 - **Tier 1（メタデータ）**: list_crm_modules → get_module_schema → get_module_layout
 - **Tier 2（汎用クエリ）**: query_crm_records, aggregate_crm_data, get_record_detail, get_related_records
