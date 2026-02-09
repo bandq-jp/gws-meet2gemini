@@ -76,6 +76,7 @@ class AdPlatformAgentFactory(SubAgentFactory):
 4. **トークン節約**: get_insightsではbreakdownを絞り、不要な階層まで掘らない
 5. **日付を正確に計算**: 「先週金曜日」「先月」等の相対日付は、今日の日付（{app:current_date}）から正確に算出してYYYY-MM-DD形式で指定。**未来の日付をuntilに絶対使用しない**
 6. **比較分析時は同一期間**: 対象広告とキャンペーン平均の比較時、**必ず同じtime_range**を使用。全期間平均と直近数日を混ぜない
+7. **リンククリックベースで報告**: CTR/CPC/CVRは必ず「リンククリック（inline_link_clicks）」ベースで計算・報告。「すべてのクリック（clicks）」は参考値としてのみ使用
 
 ## 担当領域
 - キャンペーン/広告セット/広告のパフォーマンス分析
@@ -132,15 +133,35 @@ class AdPlatformAgentFactory(SubAgentFactory):
 - **action_attribution_windows**（任意）: 1d_click, 7d_click, 1d_view（デフォルト: 7d_click + 1d_view）
 
 ### 返却メトリクス
+
+#### ★ クリック指標の使い分け（最重要）
+Meta広告には「すべてのクリック」と「リンククリック」の2種類がある。**マーケターが見るのはリンククリック**。
+
+| メトリクス | 定義 | 用途 |
+|-----------|------|------|
+| **inline_link_clicks** | LP・外部URLへの実際のリンククリック数 | **★主指標として使用** |
+| **inline_link_click_ctr** | リンクCTR = inline_link_clicks / impressions | **★主指標として使用** |
+| **cost_per_inline_link_click** | リンクCPC = spend / inline_link_clicks | **★主指標として使用** |
+| clicks | 全クリック（いいね、コメント、シェア、プロフィール閲覧含む） | 参考値のみ |
+| ctr | 全クリックCTR | 参考値のみ |
+| cpc | 全クリックCPC | 参考値のみ |
+
+**報告ルール**:
+- CTR, CPC, CVRを報告する際は**必ずリンククリックベース**の値を使用
+- 表に記載する場合: 「CTR (リンク)」「CPC (リンク)」と明記
+- 「すべてのクリック」ベースの値は、特に求められない限り報告しない
+- CVR = コンバージョン数 / inline_link_clicks で計算
+
+#### 主要メトリクス一覧
 | メトリクス | 説明 | ベンチマーク目安 |
 |-----------|------|----------------|
 | impressions | 表示回数 | - |
 | reach | リーチ（ユニークユーザー） | - |
 | frequency | フリークエンシー（impressions/reach） | 最適2-5, >6で疲弊注意 |
-| clicks | クリック数 | - |
-| ctr | クリック率 | 中央値 1.9%, 良好 >2.5% |
+| inline_link_clicks | リンククリック数 | - |
+| inline_link_click_ctr | リンクCTR | 目標 0.8%+, 良好 >1.5% |
+| cost_per_inline_link_click | リンクCPC | 業界依存 |
 | cpm | 1000imp単価 | $20-25 (業界平均) |
-| cpc | クリック単価 | 中央値 $0.57 |
 | spend | 消化金額 | - |
 | actions | アクション配列（CV含む） | action_typeで分類 |
 | cost_per_action_type | アクション種別ごとの単価 | - |
@@ -169,18 +190,19 @@ class AdPlatformAgentFactory(SubAgentFactory):
 ### 1. パフォーマンス概要分析
 **手順**: get_insights(account_id, last_30d) → 主要KPI表示
 ```
-チェック項目:
-- CTR < 1.5% → クリエイティブ改善必要
+チェック項目（すべてリンククリックベース）:
+- リンクCTR < 0.8% → クリエイティブ改善必要
 - Frequency > 5 → オーディエンス拡大 or クリエイティブ刷新
-- CPC上昇傾向 → CPM要因かCTR要因かを分解
+- リンクCPC上昇傾向 → CPM要因かリンクCTR要因かを分解
 - ROAS < 2x → 入札戦略・ターゲティング見直し
 ```
 
 ### 2. CPC要因分解（★重要な分析手法）
-CPCが上昇した場合、原因はCPMかCTRのどちらか:
-- **CPC = CPM / (CTR × 1000)**
+リンクCPCが上昇した場合、原因はCPMかリンクCTRのどちらか:
+- **リンクCPC = CPM / (リンクCTR × 1000)**
+  - = cost_per_inline_link_click = cpm / (inline_link_click_ctr × 1000)
 - **CPM上昇（オークション要因）**: 競合増加、時期要因 → 入札戦略・ターゲティング変更
-- **CTR低下（クリエイティブ要因）**: 広告疲弊、メッセージ不適切 → クリエイティブ刷新
+- **リンクCTR低下（クリエイティブ要因）**: 広告疲弊、メッセージ不適切 → クリエイティブ刷新
 
 ### 3. クリエイティブ疲弊検知
 **兆候**:
@@ -206,11 +228,11 @@ CPCが上昇した場合、原因はCPMかCTRのどちらか:
 - **Audience Network**: スケール向き、品質はやや低
 
 ### 6. ファネル分析
-Impressions → Clicks → Landing Page Views → Conversions
-- **CTR** = Clicks / Impressions（広告の訴求力）
-- **LP完遂率** = LP Views / Clicks（ページ速度・UX）
+Impressions → Link Clicks → Landing Page Views → Conversions
+- **リンクCTR** = inline_link_clicks / Impressions（広告の訴求力）
+- **LP完遂率** = LP Views / inline_link_clicks（ページ速度・UX）
 - **サイト内CVR** = Conversions / LP Views（LP品質・オファー）
-- **E2E CVR** = Conversions / Clicks（全体効率）
+- **E2E CVR** = Conversions / inline_link_clicks（全体効率）
 
 ### 7. 動画広告分析（Hook Rate / Hold Rate）
 - **Hook Rate** = 3秒視聴 / Impressions × 100（目標: 25%+、優秀: 30%+）
@@ -261,17 +283,21 @@ search_interests("転職") → get_interest_suggestions(interest_list) → estim
 - `get_ad_creatives`のthumbnail_urlは64x64のサムネイルなので**使用しない**
 
 ## 回答方針
-- 主要KPIを表形式で整理（CTR, CPC, CPM, CPA, ROAS, Frequency）
+- 主要KPIを表形式で整理（**リンクCTR, リンクCPC, CPM, CPA, ROAS, Frequency**）
+- 表の見出しには「CTR (リンク)」「CPC (リンク)」と明記し、「すべてのクリック」との混同を防ぐ
 - 前期比・推移がある場合は変化率を計算して記載
 - **必ず具体的な改善提案を含める**（数値根拠付き）
 - **データ出所と対象期間を明記**（例: 「Meta Ads ad_id=XXX 2026-02-06〜2026-02-09」）
+- **計算根拠の開示**: IMP, COST, リンククリック数の生データと計算式を添えて報告（例: 「CPC (リンク) = ¥51,167 / 62回 = ¥825」）
 - チャート化が有効な場合はオーケストレーターの render_chart を使用するよう回答内で示唆
 
 ## データ検証ルール（数値報告前に必ず確認）
 1. get_insightsレスポンスのdate_start/date_stopが意図した期間と一致しているか確認
 2. 広告の作成日(created_time)より前のデータを報告しない
 3. 比較先（キャンペーン平均等）のtime_rangeが対象広告と同一であることを確認
-4. CTR = clicks / impressions × 100、CPC = spend / clicks で数値を検算可能。API値と乖離がある場合は言及する
+4. **リンクCTR = inline_link_clicks / impressions × 100** で検算。API値(inline_link_click_ctr)と乖離がある場合は言及する
+5. **リンクCPC = spend / inline_link_clicks** で検算。API値(cost_per_inline_link_click)と乖離がある場合は言及する
+6. **CVR = conversions / inline_link_clicks × 100** で計算（「すべてのクリック」ではなくリンククリックを分母に使う）
 """
 
     def build_agent(

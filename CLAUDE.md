@@ -886,6 +886,28 @@
     - `backend/app/infrastructure/adk/agents/candidate_insight_agent.py` - 日付注入
   - **自己改善**: エージェントには「常識的に知っているはず」の情報（今日の日付）も明示的に注入しなければならない。LLMは学習データのカットオフがあり、リアルタイムの日付を知らない
 
+- **Meta広告エージェント: リンククリックベース指標への修正（2026-02-09）**
+  - **問題**: ユーザーFBで「CPM以外の数値が管理画面と合わない」と指摘。原因はエージェントが「すべてのクリック（clicks）」ベースでCTR/CPCを計算していたが、マーケターが実際に見るのは「リンククリック（inline_link_clicks）」ベースの指標
+  - **Meta Ads クリック指標の区別**:
+    - `clicks` / `ctr` / `cpc`: いいね、コメント、シェア、プロフィール閲覧を含む「すべてのクリック」
+    - `inline_link_clicks` / `inline_link_click_ctr` / `cost_per_inline_link_click`: LP・外部URLへの実際の遷移クリックのみ
+    - マーケターの管理画面で見るCTR/CPCはリンククリックベース
+  - **修正内容**:
+    - `ad_platform_agent.py` 指示文:
+      - 重要ルール7番に「リンククリックベースで報告」を追加
+      - メトリクス一覧に「クリック指標の使い分け」セクションを新設（inline_link_clicks/inline_link_click_ctr/cost_per_inline_link_clickを★主指標として明記）
+      - 報告ルール: 「CTR (リンク)」「CPC (リンク)」と明記する指示
+      - CPC要因分解・ファネル分析の公式をリンククリックベースに更新
+      - 回答方針に「計算根拠の開示」を追加（IMP/COST/リンククリック数の生データ＋計算式）
+      - データ検証ルールにリンクCTR/リンクCPC/CVRの検算式を追加
+    - `mcp_response_optimizer.py`:
+      - `_compress_insights_data()`のpriority_keysにリンククリック指標（inline_link_clicks, inline_link_click_ctr, cost_per_inline_link_click）を優先配置
+      - 従来のclicks/ctr/cpcは二次的な位置に移動
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agents/ad_platform_agent.py` - 指示文大幅更新
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - priority_keys更新
+  - **自己改善**: Meta広告の「clicks」はマーケターが日常的に見る「リンククリック」とは異なる。API側のデフォルト指標とマーケター側のデフォルト指標の乖離を常に意識し、**実務者が使う指標名でデフォルト報告**すべき
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

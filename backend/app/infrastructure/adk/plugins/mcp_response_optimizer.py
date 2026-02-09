@@ -702,12 +702,16 @@ class MCPResponseOptimizerPlugin(BasePlugin):
         seen_keys: set[str] = set()
 
         # Priority keys to show first
+        # Link-click metrics first (what marketers actually use),
+        # then all-clicks as secondary reference
         priority_keys = [
             "campaign_name", "adset_name", "ad_name",
             "date_start", "date_stop",
             "impressions", "reach", "frequency",
-            "clicks", "ctr", "cpc", "cpm",
-            "spend", "conversions", "cost_per_conversion",
+            "inline_link_clicks", "inline_link_click_ctr", "cost_per_inline_link_click",
+            "cpm", "spend",
+            "clicks", "ctr", "cpc",
+            "conversions", "cost_per_conversion",
             "purchase_roas",
             "quality_ranking", "engagement_rate_ranking", "conversion_rate_ranking",
         ]
