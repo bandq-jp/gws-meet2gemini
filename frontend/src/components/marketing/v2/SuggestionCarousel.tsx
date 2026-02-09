@@ -96,23 +96,23 @@ export function SuggestionCarousel({
     >
       {/* Slide area with side arrows */}
       <div className="relative group/carousel">
-        {/* Left arrow */}
+        {/* Left arrow (hidden on mobile — swipe instead) */}
         {total > 1 && (
           <button
             onClick={prev}
             aria-label="Previous"
-            className="absolute -left-10 sm:-left-12 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-background border border-[#e8eaed] shadow-sm flex items-center justify-center text-[#9ca3af] hover:text-[#1e8aa0] hover:border-[#1e8aa0]/30 hover:shadow-md transition-all duration-200 cursor-pointer"
+            className="hidden sm:flex absolute -left-12 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-background border border-[#e8eaed] shadow-sm items-center justify-center text-[#9ca3af] hover:text-[#1e8aa0] hover:border-[#1e8aa0]/30 hover:shadow-md transition-all duration-200 cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
         )}
 
-        {/* Right arrow */}
+        {/* Right arrow (hidden on mobile — swipe instead) */}
         {total > 1 && (
           <button
             onClick={next}
             aria-label="Next"
-            className="absolute -right-10 sm:-right-12 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-background border border-[#e8eaed] shadow-sm flex items-center justify-center text-[#9ca3af] hover:text-[#1e8aa0] hover:border-[#1e8aa0]/30 hover:shadow-md transition-all duration-200 cursor-pointer"
+            className="hidden sm:flex absolute -right-12 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-background border border-[#e8eaed] shadow-sm items-center justify-center text-[#9ca3af] hover:text-[#1e8aa0] hover:border-[#1e8aa0]/30 hover:shadow-md transition-all duration-200 cursor-pointer"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

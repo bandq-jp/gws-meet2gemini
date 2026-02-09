@@ -37,7 +37,9 @@ import {
   Code2,
   Megaphone,
   FileText,
+  Menu,
 } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -415,10 +417,11 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
           )}
 
           {/* Clean Header */}
-          <header className="shrink-0 flex items-center justify-between h-14 px-4 border-b border-border bg-background">
+          <header className="shrink-0 flex items-center justify-between h-14 px-2 sm:px-4 border-b border-border bg-background">
             {/* Left side - Title */}
-            <div className="flex items-center gap-2">
-              <Layers className="w-4 h-4 text-[#1e8aa0]" strokeWidth={1.5} />
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <SidebarTrigger className="md:hidden" />
+              <Layers className="w-4 h-4 text-[#1e8aa0] hidden sm:block" strokeWidth={1.5} />
               <span className="text-sm font-medium text-foreground">b&q エージェント</span>
             </div>
 
@@ -482,22 +485,22 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
                 />
               )}
 
-              {/* More menu (attachments only now) */}
-              {attachments.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon-sm">
-                      <MoreHorizontal className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-48">
+              {/* More menu (attachments + overflow actions on mobile) */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm">
+                    <MoreHorizontal className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  {attachments.length > 0 && (
                     <DropdownMenuItem onClick={() => setShowAttachments(true)}>
                       <Download className="w-4 h-4 mr-2" />
                       添付ファイル ({attachments.length})
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </header>
 
@@ -543,7 +546,7 @@ export const MarketingChat = forwardRef<MarketingChatRef, MarketingChatProps>(
               )}
             </div>
 
-            {/* Annotation sidebar — visible in FB mode */}
+            {/* Annotation sidebar — desktop: inline panel, mobile: Sheet overlay */}
             {feedback.isFeedbackMode && messages.length > 0 && (
               <AnnotationPanel
                 messages={messages}

@@ -300,3 +300,21 @@ body {
   background: #e5e7eb;
   border-radius: 3px;
 }
+
+/* iOS safe area inset for bottom-positioned elements */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Mobile touch optimization */
+@media (max-width: 767px) {
+  /* Prevent horizontal overflow on mobile */
+  body {
+    overflow-x: hidden;
+  }
+
+  /* Larger touch targets on mobile */
+  button, [role="button"], a {
+    min-height: 36px;
+  }
+}

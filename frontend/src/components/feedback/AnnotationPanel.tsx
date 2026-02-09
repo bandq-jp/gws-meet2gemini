@@ -17,6 +17,13 @@ import {
   Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import type {
   MessageAnnotation,
   MessageFeedback,
@@ -65,6 +72,7 @@ export function AnnotationPanel({
   onClose,
 }: AnnotationPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
 
   // Messages with annotations or feedback
   const groups = useMemo(() => {
@@ -95,29 +103,29 @@ export function AnnotationPanel({
     [onSelectAnnotation],
   );
 
-  // ─── Render ───
-  return (
-    <div className="w-[300px] shrink-0 flex flex-col h-full border-l border-border/60 bg-gradient-to-b from-white to-slate-50/80">
-      {/* Header */}
-      <div className="shrink-0 px-4 py-3 flex items-center justify-between border-b border-border/50">
-        <div className="flex items-center gap-2.5">
-          <div className="w-6 h-6 rounded-md bg-[var(--brand-100)]/60 flex items-center justify-center">
-            <Pencil className="w-3 h-3 text-[var(--brand-400)]" />
-          </div>
-          <div>
-            <h3 className="text-[13px] font-semibold leading-tight tracking-tight">レビュー</h3>
-            <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
-              {totalAnnotations > 0 ? `${totalAnnotations}件のアノテーション` : "テキストを選択して追加"}
-            </p>
-          </div>
+  const panelHeader = (
+    <div className="shrink-0 px-4 py-3 flex items-center justify-between border-b border-border/50">
+      <div className="flex items-center gap-2.5">
+        <div className="w-6 h-6 rounded-md bg-[var(--brand-100)]/60 flex items-center justify-center">
+          <Pencil className="w-3 h-3 text-[var(--brand-400)]" />
         </div>
+        <div>
+          <h3 className="text-[13px] font-semibold leading-tight tracking-tight">レビュー</h3>
+          <p className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+            {totalAnnotations > 0 ? `${totalAnnotations}件のアノテーション` : "テキストを選択して追加"}
+          </p>
+        </div>
+      </div>
+      {!isMobile && (
         <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={onClose}>
           <X className="w-3.5 h-3.5" />
         </Button>
-      </div>
+      )}
+    </div>
+  );
 
-      {/* Body */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto annotation-sidebar">
+  const panelBody = (
+    <div ref={scrollRef} className="flex-1 overflow-y-auto annotation-sidebar">
         {groups.length === 0 ? (
           /* Empty state */
           <div className="flex flex-col items-center justify-center h-full px-6 py-12">
@@ -272,6 +280,28 @@ export function AnnotationPanel({
           </div>
         )}
       </div>
+  );
+
+  // Mobile: render as Sheet overlay
+  if (isMobile) {
+    return (
+      <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
+        <SheetContent side="right" className="w-[85vw] max-w-[340px] p-0 flex flex-col">
+          <SheetHeader className="sr-only">
+            <SheetTitle>レビュー</SheetTitle>
+          </SheetHeader>
+          {panelHeader}
+          {panelBody}
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  // Desktop: render as inline sidebar
+  return (
+    <div className="w-[300px] shrink-0 flex flex-col h-full border-l border-border/60 bg-gradient-to-b from-white to-slate-50/80">
+      {panelHeader}
+      {panelBody}
     </div>
   );
 }

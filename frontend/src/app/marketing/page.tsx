@@ -36,7 +36,9 @@ import {
   RefreshCw,
   Copy,
   Download,
+  X as XIcon,
 } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Dialog,
   DialogContent,
@@ -904,9 +906,14 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         }
       `}</style>
       <div className="h-full w-full overflow-hidden bg-background relative">
+        {/* Mobile sidebar trigger */}
+        <div className="absolute top-3 left-3 z-40 md:hidden">
+          <SidebarTrigger />
+        </div>
+
         {/* 閲覧専用バッジ（共有されたスレッドを閲覧中の場合） */}
         {isReadOnly && (
-          <div className="absolute top-4 right-4 z-40">
+          <div className="absolute top-3 right-3 z-40">
             <Badge variant="secondary" className="bg-amber-100 text-amber-800 border-amber-200">
               閲覧専用
             </Badge>
@@ -915,7 +922,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
 
         {/* 管理画面Dialog */}
         <Dialog open={showManageDialog} onOpenChange={setShowManageDialog}>
-          <DialogContent className="max-w-6xl max-h-[90vh] p-6">
+          <DialogContent className="max-w-6xl max-h-[90vh] p-3 sm:p-6 w-[95vw] sm:w-auto">
             <DialogHeader className="mb-4">
               <DialogTitle className="text-2xl font-bold">モデルアセット管理</DialogTitle>
               <p className="text-sm text-muted-foreground mt-2">
@@ -957,7 +964,7 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
         <div className={`h-full flex ${tokenError ? 'pt-16' : ''}`}>
           <div
             className={`relative h-full overflow-hidden transition-all duration-300 ${
-              showCanvasPane ? "w-[45%]" : "w-full"
+              showCanvasPane ? "hidden md:block md:w-[45%]" : "w-full"
             }`}
           >
             <ChatKit
@@ -1045,7 +1052,15 @@ export default function MarketingPage({ initialThreadId = null }: MarketingPageP
             )}
           </div>
           {showCanvasPane && (
-            <div className="h-full w-[55%] overflow-hidden border-l-2 animate-in slide-in-from-right duration-300">
+            <div className="h-full w-full md:w-[55%] overflow-hidden md:border-l-2 animate-in slide-in-from-right duration-300 relative">
+              {/* Mobile back button to return to chat */}
+              <button
+                className="absolute top-3 left-3 z-10 md:hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-background/90 border border-border shadow-sm text-xs font-medium"
+                onClick={() => setCanvas(prev => ({ ...prev, visible: false }))}
+              >
+                <XIcon className="h-3.5 w-3.5" />
+                チャットに戻る
+              </button>
               <SeoCanvas state={canvas} isResponding={isResponding} onApply={handleApplyLocal} />
             </div>
           )}

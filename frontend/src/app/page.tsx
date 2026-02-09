@@ -20,14 +20,14 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 export default function Dashboard() {
   return (
     <>
-      <div className="container mx-auto px-6 py-8">
+      <div className="container mx-auto px-4 sm:px-6 py-4 sm:py-8">
         {/* Welcome Section */}
-        <div className="mb-8">
-          <div className="flex items-center space-x-4 mb-2">
+        <div className="mb-6 sm:mb-8">
+          <div className="flex items-center gap-3 mb-2">
             <SidebarTrigger className="md:hidden" />
-            <h1 className="text-3xl font-bold">b&q Hub ダッシュボード</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold">b&q Hub ダッシュボード</h1>
           </div>
-          <p className="text-muted-foreground">
+          <p className="text-sm sm:text-base text-muted-foreground">
             統合管理システムへようこそ。各サービスにアクセスして業務を効率化しましょう。
           </p>
         </div>

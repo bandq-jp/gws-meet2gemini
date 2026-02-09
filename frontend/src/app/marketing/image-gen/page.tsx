@@ -62,7 +62,9 @@ import {
   Wand2,
   Info,
 } from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import toast from "react-hot-toast";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 // ── Constants ──
 
@@ -286,7 +288,7 @@ function TemplateDialog({
         <div className="flex-1 overflow-y-auto px-6 pb-2">
           {step === "info" ? (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-[11px] font-medium text-muted-foreground">
                     テンプレート名
@@ -329,7 +331,7 @@ function TemplateDialog({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-[11px] font-medium text-muted-foreground">
                     アスペクト比
@@ -560,7 +562,7 @@ function RefSection({
         } ${refs.length > 0 ? "p-2" : "p-6"}`}
       >
         {refs.length > 0 ? (
-          <div className="grid grid-cols-5 gap-1.5">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
             {refs.map((ref) => (
               <div
                 key={ref.id}
@@ -755,6 +757,7 @@ export default function ImageGenPage() {
     setError,
   } = useImageGen();
 
+  const isMobile = useIsMobile();
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("auto");
   const [imageSize, setImageSize] = useState("1K");
@@ -770,6 +773,14 @@ export default function ImageGenPage() {
   const [sidebarTab, setSidebarTab] = useState<string>("templates");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-hide panels on mobile
+  useEffect(() => {
+    if (isMobile) {
+      setShowLeftPanel(false);
+      setShowRightPanel(false);
+    }
+  }, [isMobile]);
 
   useEffect(() => {
     fetchTemplates();
@@ -866,9 +877,12 @@ export default function ImageGenPage() {
     <TooltipProvider delayDuration={200}>
       <div className="flex flex-col h-[calc(100vh-2rem)] font-[family-name:var(--font-geist-sans)]">
         {/* ── Header ── */}
-        <header className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-border/50 bg-background">
+        <header className="shrink-0 flex items-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2.5 border-b border-border/50 bg-background">
+          {/* Mobile sidebar trigger */}
+          <SidebarTrigger className="md:hidden shrink-0" />
+
           {/* Logo + title */}
-          <div className="flex items-center gap-2 mr-3">
+          <div className="flex items-center gap-2 mr-1 sm:mr-3">
             <div className="flex items-center justify-center w-7 h-7 rounded-md bg-[linear-gradient(135deg,var(--brand-300),var(--brand-400))] text-white">
               <Wand2 className="h-3.5 w-3.5" />
             </div>
@@ -877,7 +891,7 @@ export default function ImageGenPage() {
             </h1>
           </div>
 
-          <Separator orientation="vertical" className="h-4" />
+          <Separator orientation="vertical" className="h-4 hidden sm:block" />
 
           {/* Generation controls */}
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -912,9 +926,9 @@ export default function ImageGenPage() {
               ))}
             </div>
 
-            {/* Active template indicator */}
+            {/* Active template indicator - hidden on mobile */}
             {selectedTemplate && (
-              <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--brand-100)]/20 border border-[var(--brand-200)]/30 max-w-[180px]">
+              <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--brand-100)]/20 border border-[var(--brand-200)]/30 max-w-[180px]">
                 <Layers className="h-3 w-3 text-[var(--brand-400)] shrink-0" />
                 <span className="text-[11px] text-[var(--brand-400)] font-medium truncate">
                   {selectedTemplate.name}
@@ -998,10 +1012,18 @@ export default function ImageGenPage() {
         )}
 
         {/* ── Main 3-Column Layout ── */}
-        <div className="flex-1 flex min-h-0 overflow-hidden">
-          {/* LEFT SIDEBAR */}
+        <div className="flex-1 flex min-h-0 overflow-hidden relative">
+          {/* Mobile backdrop for sidebars */}
+          {isMobile && (showLeftPanel || showRightPanel) && (
+            <div
+              className="absolute inset-0 z-10 bg-black/30"
+              onClick={() => { setShowLeftPanel(false); setShowRightPanel(false); }}
+            />
+          )}
+
+          {/* LEFT SIDEBAR - overlay on mobile, inline on desktop */}
           {showLeftPanel && (
-            <aside className="w-[272px] shrink-0 border-r border-border/50 flex flex-col bg-muted/10">
+            <aside className={`${isMobile ? "absolute inset-y-0 left-0 z-20 w-[280px] max-w-[85vw] shadow-xl" : "w-[272px] shrink-0"} border-r border-border/50 flex flex-col bg-background`}>
               <Tabs
                 value={sidebarTab}
                 onValueChange={setSidebarTab}
@@ -1475,9 +1497,9 @@ export default function ImageGenPage() {
             </div>
           </main>
 
-          {/* RIGHT: Gallery */}
+          {/* RIGHT: Gallery - overlay on mobile, inline on desktop */}
           {showRightPanel && (
-            <aside className="w-[280px] shrink-0 border-l border-border/50 flex flex-col bg-muted/10">
+            <aside className={`${isMobile ? "absolute inset-y-0 right-0 z-20 w-[280px] max-w-[85vw] shadow-xl" : "w-[280px] shrink-0"} border-l border-border/50 flex flex-col bg-background`}>
               <div className="shrink-0 flex items-center justify-between px-3 py-2.5 border-b border-border/40">
                 <div className="flex items-center gap-2">
                   <GalleryHorizontalEnd className="h-3.5 w-3.5 text-muted-foreground" />

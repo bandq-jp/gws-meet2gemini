@@ -29,9 +29,11 @@ import {
   Users,
   Search,
   FileText,
+  ArrowLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import {
   Select,
   SelectContent,
@@ -186,28 +188,29 @@ export default function FeedbackPage() {
   return (
     <div className="h-full flex flex-col bg-gradient-to-b from-white to-slate-50/80">
       {/* ─── Header ─── */}
-      <div className="shrink-0 px-6 py-4 border-b border-border/50 bg-white/80 backdrop-blur-sm">
-        <div className="flex items-center justify-between max-w-[1400px] mx-auto">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-[var(--brand-100)]/50 flex items-center justify-center">
+      <div className="shrink-0 px-3 sm:px-6 py-3 sm:py-4 border-b border-border/50 bg-white/80 backdrop-blur-sm">
+        <div className="flex items-center justify-between max-w-[1400px] mx-auto gap-2">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <SidebarTrigger className="md:hidden shrink-0" />
+            <div className="w-8 h-8 rounded-lg bg-[var(--brand-100)]/50 flex items-center justify-center shrink-0 hidden sm:flex">
               <FileText className="w-4 h-4 text-[var(--brand-400)]" />
             </div>
-            <div>
-              <h1 className="text-[15px] font-semibold tracking-tight">FBレビュー</h1>
-              <p className="text-[11px] text-muted-foreground">会話ごとのフィードバック・アノテーション管理</p>
+            <div className="min-w-0">
+              <h1 className="text-[14px] sm:text-[15px] font-semibold tracking-tight">FBレビュー</h1>
+              <p className="text-[10px] sm:text-[11px] text-muted-foreground hidden sm:block">会話ごとのフィードバック・アノテーション管理</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {(ratingFilter || userFilter || selectedConvId) && (
-              <span className="text-[10px] text-muted-foreground/60">
+              <span className="text-[10px] text-muted-foreground/60 hidden sm:inline">
                 フィルタ適用中
               </span>
             )}
             <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => handleExport("csv")}>
-              <Download className="w-3 h-3" /> CSV
+              <Download className="w-3 h-3" /> <span className="hidden sm:inline">CSV</span>
             </Button>
             <Button variant="outline" size="sm" className="h-7 text-[11px] gap-1" onClick={() => handleExport("jsonl")}>
-              <Download className="w-3 h-3" /> JSONL
+              <Download className="w-3 h-3" /> <span className="hidden sm:inline">JSONL</span>
             </Button>
           </div>
         </div>
@@ -215,8 +218,8 @@ export default function FeedbackPage() {
 
       {/* ─── KPI Cards ─── */}
       {overview && (
-        <div className="shrink-0 px-6 py-3 border-b border-border/30">
-          <div className="max-w-[1400px] mx-auto grid grid-cols-4 gap-3">
+        <div className="shrink-0 px-3 sm:px-6 py-2 sm:py-3 border-b border-border/30">
+          <div className="max-w-[1400px] mx-auto grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
             <KPICard icon={MessageSquare} label="合計FB" value={overview.total} />
             <KPICard icon={ThumbsUp} label="Good" value={overview.good} sub={`${overview.good_pct}%`} color="emerald" />
             <KPICard icon={ThumbsDown} label="Bad" value={overview.bad} sub={`${overview.bad_pct}%`} color="red" />
@@ -226,9 +229,9 @@ export default function FeedbackPage() {
       )}
 
       {/* ─── Two-Panel Layout ─── */}
-      <div className="flex-1 flex overflow-hidden max-w-[1400px] mx-auto w-full">
+      <div className="flex-1 flex overflow-hidden max-w-[1400px] mx-auto w-full relative">
         {/* ── Left Panel: Conversation List ── */}
-        <div className="w-[380px] shrink-0 border-r border-border/40 flex flex-col bg-white/60">
+        <div className={`w-full md:w-[380px] shrink-0 md:border-r border-border/40 flex flex-col bg-white/60 ${selectedConvId ? "hidden md:flex" : "flex"}`}>
           {/* Search + Filters */}
           <div className="shrink-0 p-3 space-y-2 border-b border-border/30">
             <div className="relative">
@@ -304,7 +307,7 @@ export default function FeedbackPage() {
         </div>
 
         {/* ── Right Panel: Conversation Detail ── */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-white/40">
+        <div className={`flex-1 flex flex-col overflow-hidden bg-white/40 ${selectedConvId ? "absolute inset-0 md:relative md:inset-auto z-10 bg-white md:bg-white/40" : "hidden md:flex"}`}>
           {!selectedConvId ? (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/50">
               <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mb-4">
@@ -316,30 +319,41 @@ export default function FeedbackPage() {
           ) : (
             <>
               {/* Detail Header */}
-              <div className="shrink-0 px-5 py-3 border-b border-border/30 bg-white/80">
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0 flex-1">
-                    <h2 className="text-[13px] font-semibold truncate">
-                      {selectedConv?.title || selectedConvId.slice(0, 12)}
-                    </h2>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      <span className="text-[10px] text-muted-foreground">
-                        {selectedConv?.owner_email?.split("@")[0]}
-                      </span>
-                      {selectedConv && (
-                        <div className="flex items-center gap-2 text-[10px]">
-                          <span className="text-emerald-600">{selectedConv.good_count} Good</span>
-                          <span className="text-red-500">{selectedConv.bad_count} Bad</span>
-                          <span className="text-blue-500">{selectedConv.annotation_count} 注釈</span>
-                        </div>
-                      )}
+              <div className="shrink-0 px-3 sm:px-5 py-3 border-b border-border/30 bg-white/80">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {/* Mobile back button */}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="md:hidden shrink-0 h-8 w-8"
+                      onClick={() => setSelectedConvId(null)}
+                    >
+                      <ArrowLeft className="w-4 h-4" />
+                    </Button>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-[13px] font-semibold truncate">
+                        {selectedConv?.title || selectedConvId.slice(0, 12)}
+                      </h2>
+                      <div className="flex items-center gap-2 sm:gap-3 mt-0.5 flex-wrap">
+                        <span className="text-[10px] text-muted-foreground">
+                          {selectedConv?.owner_email?.split("@")[0]}
+                        </span>
+                        {selectedConv && (
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <span className="text-emerald-600">{selectedConv.good_count} Good</span>
+                            <span className="text-red-500">{selectedConv.bad_count} Bad</span>
+                            <span className="text-blue-500">{selectedConv.annotation_count} 注釈</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                     {/* User filter for this conversation */}
                     {conversationUsers.length > 1 && (
                       <Select value={selectedUserFilter || "all"} onValueChange={v => setSelectedUserFilter(v === "all" ? "" : v)}>
-                        <SelectTrigger className="h-7 w-36 text-[11px]">
+                        <SelectTrigger className="h-7 w-24 sm:w-36 text-[11px]">
                           <User className="w-3 h-3 mr-1" />
                           <SelectValue placeholder="ユーザー" />
                         </SelectTrigger>
@@ -358,14 +372,14 @@ export default function FeedbackPage() {
                       className="inline-flex items-center gap-1 text-[11px] text-[var(--brand-400)] hover:text-[var(--brand-300)] transition-colors"
                     >
                       <ExternalLink className="w-3 h-3" />
-                      会話を開く
+                      <span className="hidden sm:inline">会話を開く</span>
                     </a>
                   </div>
                 </div>
               </div>
 
               {/* Detail Content */}
-              <div className="flex-1 overflow-y-auto custom-scrollbar px-5 py-4 space-y-4">
+              <div className="flex-1 overflow-y-auto custom-scrollbar px-3 sm:px-5 py-3 sm:py-4 space-y-4">
                 {detailLoading && (
                   <div className="flex items-center justify-center h-20 text-[12px] text-muted-foreground">読み込み中...</div>
                 )}
@@ -544,7 +558,7 @@ function ConversationDetailView({ feedback, annotations, onUpdateReview }: {
                 `}
               >
                 {/* Header: rating + status + user */}
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex flex-wrap items-center justify-between gap-1.5 mb-2">
                   <div className="flex items-center gap-2">
                     {fb.rating === "good" ? (
                       <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center">
@@ -566,7 +580,7 @@ function ConversationDetailView({ feedback, annotations, onUpdateReview }: {
                   </div>
                   <div className="flex items-center gap-2 text-[10px] text-muted-foreground/50">
                     <span>{fb.user_email?.split("@")[0]}</span>
-                    <span>
+                    <span className="hidden sm:inline">
                       {new Date(fb.created_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}
                       {" "}
                       {new Date(fb.created_at).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
@@ -608,17 +622,17 @@ function ConversationDetailView({ feedback, annotations, onUpdateReview }: {
                       onChange={e => setReviewNotes(e.target.value)}
                       className="text-[11px] min-h-[50px] resize-none"
                     />
-                    <div className="flex gap-1.5">
-                      <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1" onClick={() => handleReview(fb.id, "reviewed")}>
+                    <div className="flex flex-wrap gap-1.5">
+                      <Button size="sm" variant="outline" className="h-7 sm:h-6 text-[10px] gap-1" onClick={() => handleReview(fb.id, "reviewed")}>
                         <Eye className="w-2.5 h-2.5" /> レビュー済
                       </Button>
-                      <Button size="sm" className="h-6 text-[10px] gap-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleReview(fb.id, "actioned")}>
+                      <Button size="sm" className="h-7 sm:h-6 text-[10px] gap-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => handleReview(fb.id, "actioned")}>
                         <CheckCircle2 className="w-2.5 h-2.5" /> 対応済
                       </Button>
-                      <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 text-muted-foreground" onClick={() => handleReview(fb.id, "dismissed")}>
+                      <Button size="sm" variant="outline" className="h-7 sm:h-6 text-[10px] gap-1 text-muted-foreground" onClick={() => handleReview(fb.id, "dismissed")}>
                         <XCircle className="w-2.5 h-2.5" /> 却下
                       </Button>
-                      <Button size="sm" variant="ghost" className="h-6 text-[10px] ml-auto" onClick={() => { setReviewingId(null); setReviewNotes(""); }}>
+                      <Button size="sm" variant="ghost" className="h-7 sm:h-6 text-[10px] ml-auto" onClick={() => { setReviewingId(null); setReviewNotes(""); }}>
                         キャンセル
                       </Button>
                     </div>
@@ -677,8 +691,8 @@ function ConversationDetailView({ feedback, annotations, onUpdateReview }: {
                   }}
                 >
                   {/* Header */}
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-1 mb-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className={`inline-flex text-[10px] font-semibold rounded px-1.5 py-0.5 leading-none ${sev.bg} ${sev.text}`}>
                         {sev.label}
                       </span>
@@ -691,7 +705,7 @@ function ConversationDetailView({ feedback, annotations, onUpdateReview }: {
                     </div>
                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground/50">
                       <span>{ann.user_email?.split("@")[0]}</span>
-                      <span>
+                      <span className="hidden sm:inline">
                         {new Date(ann.created_at).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}
                       </span>
                     </div>

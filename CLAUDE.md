@@ -908,6 +908,52 @@
     - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - priority_keys更新
   - **自己改善**: Meta広告の「clicks」はマーケターが日常的に見る「リンククリック」とは異なる。API側のデフォルト指標とマーケター側のデフォルト指標の乖離を常に意識し、**実務者が使う指標名でデフォルト報告**すべき
 
+- **全ページモバイルレスポンシブ対応（2026-02-09）**
+  - **目的**: 全ページでスマホ用レスポンシブデザインを実装。特にサイドバーがモバイルで開けない致命的問題を修正
+  - **SidebarTrigger追加**（全ページにハンバーガーメニュー設置）:
+    - shadcn/ui Sidebarは既にSheet-based mobile実装を持っていた（`useIsMobile()` hook, 768pxブレークポイント）
+    - 問題は複数ページでSidebarTriggerボタンが未配置だった
+    - 追加対象: MarketingChat.tsx, feedback/page.tsx, marketing/page.tsx, marketing/dashboard/page.tsx, marketing/image-gen/page.tsx
+    - 既に配置済み: page.tsx(ダッシュボード), hitocari/page.tsx, hitocari/mypage, hitocari/settings
+  - **globals.css**: iOS safe-area対応（`safe-bottom`クラス追加）、モバイルoverflow-x:hidden、最小タッチターゲット36px
+  - **MarketingChat.tsx**: SidebarTrigger追加（md:hidden）、ヘッダーパディング`px-2 sm:px-4`、Layersアイコン`hidden sm:block`
+  - **feedback/page.tsx**: 完全レスポンシブ化（最も壊れていたページ）
+    - KPIカード: `grid-cols-4` → `grid-cols-2 sm:grid-cols-4`
+    - 左パネル: `w-[380px]`固定 → `w-full md:w-[380px]`、モバイルでdetail選択時に非表示
+    - 右パネル: モバイルで`absolute inset-0`フルスクリーンオーバーレイ + ArrowLeft戻るボタン
+    - エクスポートボタン: テキストをモバイルで非表示
+    - レビューアクションボタン: `flex-wrap`、大きなタッチターゲット`h-7 sm:h-6`
+  - **AnnotationPanel.tsx**: モバイルでSheet overlay化（`useIsMobile()`使用、右サイド85vw max 340px）
+  - **SuggestionCarousel.tsx**: 矢印をモバイルで完全非表示（`hidden sm:flex`）、スワイプのみ
+  - **Dashboard (page.tsx)**: レスポンシブパディング・テキストサイズ
+  - **marketing/dashboard/page.tsx**: SidebarTrigger追加、レスポンシブパディング
+  - **marketing/page.tsx (ChatKit)**:
+    - フローティングSidebarTrigger追加（absolute top-3 left-3、ChatKit Web Component上に浮かせる）
+    - Canvas分割: モバイルでchat非表示+canvasフルスクリーン（`hidden md:block md:w-[45%]`）、戻るボタン付き
+    - 管理ダイアログ: `w-[95vw] sm:w-auto`でモバイル対応
+  - **marketing/image-gen/page.tsx**:
+    - SidebarTrigger追加
+    - `useIsMobile()`で初期パネル非表示（モバイル時）
+    - 左右サイドバー: モバイルではabsoluteオーバーレイ + 背景バックドロップ（タップで閉じ）
+    - テンプレートダイアログ: `grid-cols-1 sm:grid-cols-2`
+    - RefSection: `grid-cols-3 sm:grid-cols-5`
+    - テンプレートインジケーター: モバイルで非表示
+  - 変更ファイル（10）:
+    - `frontend/src/app/globals.css`
+    - `frontend/src/components/marketing/v2/MarketingChat.tsx`
+    - `frontend/src/app/feedback/page.tsx`
+    - `frontend/src/components/feedback/AnnotationPanel.tsx`
+    - `frontend/src/components/marketing/v2/SuggestionCarousel.tsx`
+    - `frontend/src/app/page.tsx`
+    - `frontend/src/app/marketing/dashboard/page.tsx`
+    - `frontend/src/app/marketing/page.tsx`
+    - `frontend/src/app/marketing/image-gen/page.tsx`
+  - **レスポンシブパターン知見**:
+    - shadcn/ui SidebarのSheet mobileサポートは`SidebarTrigger`配置だけで動作する
+    - 2パネルレイアウト（マスター・ディテール）のモバイル対応: stacked layout + `hidden md:flex` / `absolute inset-0 md:relative` + 戻るボタン
+    - 固定幅サイドバーのモバイル対応: `absolute` overlay + backdrop + `useIsMobile()` で初期非表示
+    - ChatKit Web Componentのような外部UIコンポーネント上にSidebarTriggerを浮かせるにはabsolute positioning + z-index
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**
