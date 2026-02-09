@@ -1,6 +1,6 @@
 # b&qHubモノレポ
 
-b&q 社内の業務をまとめる Hub です。ひとキャリの議事録収集・構造化（Meet/Docs → Supabase → Gemini）に加え、マーケティング分析アシスタント（ChatKit/SEO Canvas）など複数ドメインを同一基盤で運用します。FastAPI + Supabase + Next.js を DDD/オニオンで組み、Cloud Run 対応の拡張性・保守性を重視しています。
+b&q 社内の業務をまとめる Hub です。ひとキャリの議事録収集・構造化（Meet/Docs → Supabase → Gemini）に加え、マーケティング分析アシスタント（ChatKit/SEO Canvas）など複数ドメインを同一基盤で運用します。FastAPI + Supabase + Next.js を DDD/オニオンで組み、Cloud Run 対応の拡張性・保守性を重視しています
 
 ---
 
