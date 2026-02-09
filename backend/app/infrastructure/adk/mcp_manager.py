@@ -41,6 +41,35 @@ GSC_TOOL_FILTER = [
     "get_sitemaps",
 ]
 
+# Meta Ads (meta-ads-mcp): ~30→20 tools (read-only analysis only)
+# Keep: Account info, campaign/adset/ad retrieval, insights, targeting research
+# Drop: create_*, update_*, upload_*, create_budget_schedule, get_login_link
+META_ADS_TOOL_FILTER = [
+    # Account & Pages (4)
+    "get_ad_accounts",
+    "get_account_info",
+    "get_account_pages",
+    "search_pages_by_name",
+    # Campaigns & Ads - read only (9)
+    "get_campaigns",
+    "get_campaign_details",
+    "get_adsets",
+    "get_adset_details",
+    "get_ads",
+    "get_ad_details",
+    "get_ad_creatives",
+    "get_ad_image",
+    "get_insights",
+    # Targeting Research (7)
+    "search_interests",
+    "get_interest_suggestions",
+    "estimate_audience_size",
+    "validate_interests",
+    "search_behaviors",
+    "search_demographics",
+    "search_geo_locations",
+]
+
 
 @dataclass
 class ADKMCPToolsets:
@@ -203,8 +232,11 @@ class ADKMCPManager:
                     ),
                     timeout=timeout,  # Override default 5s timeout
                 ),
+                # Filter to read-only analysis tools (~30→20)
+                # Excludes: create_*, update_*, upload_*, budget_schedule, login
+                tool_filter=META_ADS_TOOL_FILTER,
             )
-            logger.info("[ADK MCP] Meta Ads: ready (meta-ads-mcp, timeout=%ds)", int(timeout))
+            logger.info("[ADK MCP] Meta Ads: ready (meta-ads-mcp, timeout=%ds, tools=%d)", int(timeout), len(META_ADS_TOOL_FILTER))
             return toolset
         except Exception as e:
             logger.warning(f"[ADK MCP] Meta Ads: failed to create toolset: {e}")

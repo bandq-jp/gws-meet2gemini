@@ -295,8 +295,24 @@ async def chat_stream(
         except Exception as e:
             logger.warning(f"[State] Failed to load user_state: {e}")
 
-        # Inject user email into state for per-user Google Workspace delegation
+        # Inject user identity into state for per-user services & personalization
         initial_state["app:user_email"] = context.user_email
+        initial_state["app:user_name"] = context.user_name or ""
+        initial_state["app:user_id"] = context.user_id
+
+        # Resolve Slack user ID from email (cached, non-blocking)
+        try:
+            from app.infrastructure.slack.slack_service import SlackService
+            from app.infrastructure.config.settings import get_settings
+            slack_svc = SlackService.get_instance(get_settings())
+            slack_info = slack_svc.lookup_user_by_email(context.user_email)
+            if slack_info:
+                initial_state["app:slack_user_id"] = slack_info["user_id"]
+                initial_state["app:slack_username"] = slack_info["username"]
+                initial_state["app:slack_display_name"] = slack_info["display_name"]
+                logger.info(f"[State] Slack user resolved: {slack_info['display_name']} ({slack_info['user_id']})")
+        except Exception as e:
+            logger.warning(f"[State] Failed to resolve Slack user: {e}")
 
         # --- Pre-generate assistant message ID for done event ---
         assistant_msg_id = str(uuid.uuid4())
@@ -426,6 +442,19 @@ async def chat_stream(
                         "sequence": seq,
                         "id": str(uuid.uuid4()),
                         "spec": event.get("spec"),
+                    })
+                    seq += 1
+
+                elif event_type == "ask_user":
+                    # User clarification choices from ask_user_clarification tool
+                    current_text_id = None
+                    activity_items.append({
+                        "kind": "ask_user",
+                        "sequence": seq,
+                        "id": str(uuid.uuid4()),
+                        "groupId": event.get("group_id", str(uuid.uuid4())),
+                        "questions": event.get("questions", []),
+                        "answered": False,
                     })
                     seq += 1
 

@@ -679,6 +679,193 @@
     - `frontend/src/hooks/use-feedback.ts` - exportFeedbackに`user_email`, `conversation_id`追加
     - `frontend/src/app/feedback/page.tsx` - handleExportにフィルタ状態を全て渡す
 
+- **Meta Ads (AdPlatformAgent) 大規模改善（2026-02-08）**
+  - **目的**: Meta広告分析の精度・深さ・トークン効率を大幅向上。プロの運用知識をエージェントに注入
+  - **調査**: 5並列調査（コードベース全量、Meta Ads MCP全ツール仕様、Meta Marketing API構造、プロの運用知見、分析フレームワーク）
+  - **変更1: MCPツールフィルタ追加** (`mcp_manager.py`):
+    - `META_ADS_TOOL_FILTER` 定義（20 read-onlyツール）
+    - write系ツール（create_campaign, update_*, upload_*, create_budget_schedule, get_login_link）を除外
+    - `create_meta_ads_toolset()` に `tool_filter=META_ADS_TOOL_FILTER` 適用
+  - **変更2: AdPlatformAgent指示文全面書き換え** (`ad_platform_agent.py`):
+    - 旧: 50行（存在しないツール名を参照、基本KPIのみ）
+    - 新: 200+行のプロレベル指示文
+    - `get_insights` 完全仕様: パラメータ、返却メトリクス（ベンチマーク付き）、breakdown一覧（行数目安付き）
+    - 分析フレームワーク7つ: パフォーマンス概要、CPC要因分解（CPM vs CTR）、クリエイティブ疲弊検知、フリークエンシー管理（閾値テーブル）、配置別分析（Feed/Stories/Reels特性）、ファネル分析（Imp→Click→LP→CV）、動画分析（Hook Rate/Hold Rate）
+    - 効率的クエリパターン5例
+    - エラー対応ルール
+    - ツール一覧20個の正確な名称・パラメータ・出力
+  - **変更3: MCPResponseOptimizerPlugin Meta Ads対応** (`mcp_response_optimizer.py`):
+    - `_COMPRESSED_DESCRIPTIONS` に Meta Ads 20ツールの圧縮説明を追加
+    - `META_ADS_VERBOSE_TOOLS` (get_insights, get_campaigns, get_adsets, get_ads) 定義
+    - `_compress_meta_ads_response()` 新規メソッド: レスポンスJSONをcompact format変換
+    - `_compress_insights_data()`: get_insightsレスポンスをpipe-separated table化（actionsとcost_per_action_typeもフラット化）
+    - `_compress_list_data()`: キャンペーン/広告セット/広告一覧の冗長フィールド除去
+    - `after_tool_callback` にMeta Ads分岐追加
+  - **変更4: オーケストレーター強化** (`orchestrator.py`):
+    - キーワードマトリクスに7行追加（CPM, CPC, ROAS, フリークエンシー, 広告セット, 配置別, 広告疲弊）
+    - AdPlatformAgentサブエージェント説明を大幅拡充（★20ツール表記、breakdown分析、CPC要因分解、疲弊検知等）
+    - 並列呼び出しパターンに「広告+サイトCV分析」追加
+  - **Meta Ads MCP知見**:
+    - パッケージ: `meta-ads-mcp` v1.0.22 by Pipeboard (PyPI)
+    - 全~30ツール提供（read + write）、ADK環境では20 read-onlyにフィルタすべき
+    - `get_insights`の`breakdown`は1つずつ指定（複数同時不可）
+    - `action_attribution_windows`: 7d_view, 28d_viewは2026年1月に廃止
+    - budget値はcurrency cents（$100 = 10000）
+    - campaign objectiveはOUTCOME_*形式のみ（legacy非推奨）
+  - **変更5: 広告画像マルチモーダル対応** (`mcp_response_optimizer.py` + `ad_platform_agent.py`):
+    - **問題**: ADKの`mcp_tool.py`はMCP Imageレスポンスを`model_dump(mode="json")`でJSON dictにシリアライズ。Geminiはbase64テキストとして受信し、画像として認識できない
+    - **解決**: after_tool_callback→before_model_callbackの2段階パイプライン
+      1. `after_tool_callback`: `get_ad_image`レスポンスからbase64抽出→PILで最大1920pxにリサイズ→JPEG Q85エンコード→`types.Part.from_bytes()`として`_pending_images[invocation_id]`に保存→テキストのみ結果を返却
+      2. `before_model_callback`: `_pending_images`からPartを取得→`llm_request.contents[-1].parts`に注入→Geminiがマルチモーダルで実画像を認識
+    - 新メソッド: `_handle_ad_image()`, `_extract_image_from_mcp_result()`, `_resize_ad_image()`
+    - 定数: `_IMAGE_MAX_DIM=1920`, `_IMAGE_JPEG_QUALITY=85`
+    - クラス変数: `_pending_images: dict[str, list] = defaultdict(list)` (invocation_id → Part list)
+    - `ad_platform_agent.py` 指示文に「クリエイティブ画像分析」セクション追加（構図・色使い・テキスト量・CTA・モバイル視認性・アスペクト比）
+    - PILリサイズ検証: 2048x2048→1920x1920 (66KB→22KB), 1152x2048→1080x1920 (37KB→13KB), 800x600→リサイズなし
+  - **ADK知見**:
+    - `mcp_tool.py` L217-218: `response.model_dump(exclude_none=True, mode="json")` がImage→JSON dictのシリアライズ原因
+    - `functions.py` L791-819: `__build_response_event()`は常にdictに変換。`FunctionResponse.parts`は存在するがADKは使用しない
+    - ツールから`types.Part`を返しても`{'result': <Part obj>}`にラップされてシリアライズで壊れる
+    - **解決策**: Pluginの`before_model_callback`で`llm_request.contents`にPartを直接注入するのが唯一の方法
+  - **プロの運用知見**:
+    - CPC = CPM / (CTR × 1000) — 上昇原因をオークション vs クリエイティブに分離
+    - Hook Rate目標25%+、Hold Rate目標40-50%
+    - Frequency閾値: 認知3-5、検討2-4、CV4-7、リタゲ~10
+    - 品質ランキング3指標: quality_ranking, engagement_rate_ranking, conversion_rate_ranking
+
+- **広告画像の表示・永続化修正（2026-02-08）**
+  - **問題**: 会話`6692c307`で確認。`get_ad_image`はbase64を返すが、エージェントは`get_ad_creatives`の64x64サムネイルURLをmarkdownに使用。画像が小さい＆一時URL＆フロントエンドに`img`スタイリングなし
+  - **修正1: Supabase Storageに画像を永続保存** (`mcp_response_optimizer.py`):
+    - `_handle_ad_image()`にSupabase Storageアップロード追加
+    - `_upload_ad_image_to_storage()` 新メソッド: `marketing-attachments/ad-images/ad_{ad_id}_{timestamp}.jpg`
+    - 返却テキストに永続公開URLを含め、エージェントが`![広告画像](URL)`でmarkdownに埋め込み可能に
+    - エラー時はURLなしで画像分析のみ続行（フォールバック安全）
+  - **修正2: Frontend `img` コンポーネント追加** (`ChatMessage.tsx`):
+    - `markdownComponents`に`img`を追加
+    - `max-w-full`, `max-h-[500px]`, `rounded-lg`, `shadow-sm`, `border`
+    - `onError`で壊れた画像のフォールバック（ImageIconプレースホルダー）
+    - クリックで原寸表示（`<a target="_blank">`ラップ）
+    - `loading="lazy"` でパフォーマンス最適化
+  - **修正3: Agent指示文にURL使用ガイダンス** (`ad_platform_agent.py`):
+    - `get_ad_image`結果のImage URLを`![広告画像](URL)`で回答に含める指示
+    - `get_ad_creatives`のthumbnail_url（64x64）は使用しない旨を明記
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/plugins/mcp_response_optimizer.py` - Storage upload追加
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - `img` component追加
+    - `backend/app/infrastructure/adk/agents/ad_platform_agent.py` - 指示文更新
+
+- **ユーザー確認・選択肢UI（ask_user_clarification）実装（2026-02-08）**
+  - **目的**: エージェントがユーザーの意図が曖昧な場合に、Claude Code風のインタラクティブ選択UIを表示して確認を取る機能
+  - **アーキテクチャ**: ADKネイティブ `LongRunningFunctionTool` + カスタムSSEイベント + フロントエンド選択UI
+  - **設計判断**: Approach A（カスタムツール+新メッセージ応答）を採用。ADK `ResumabilityConfig`（@experimental）への依存を避け、安定した実装を優先
+  - **フロー**:
+    1. オーケストレーターが`ask_user_clarification(questions=[...])`を呼び出し
+    2. ツールはNoneを返す（LongRunningFunctionTool: skip_summarization=True）
+    3. `_process_adk_event`がfunction_callを検知→`ask_user` SSEイベントを生成
+    4. フロントエンドが選択肢ボタンUIを表示
+    5. ユーザーがクリック→選択結果を新しいメッセージとして自動送信
+    6. エージェントが次のターンで選択結果を受け取り続行
+  - 新規ファイル:
+    - `backend/app/infrastructure/adk/tools/ask_user_tools.py` - `ask_user_clarification` LongRunningFunctionTool + ADK_ASK_USER_TOOLS
+    - `frontend/src/components/marketing/v2/AskUserPrompt.tsx` - 選択肢UIコンポーネント（シングル/マルチセレクト対応）
+  - 変更ファイル:
+    - `backend/app/infrastructure/adk/agent_service.py` - `_process_adk_event`と`_process_non_text_part`にask_user検知ロジック追加
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - ツール登録（ADK_ASK_USER_TOOLS）+ 指示文にガイドライン追加
+    - `frontend/src/hooks/use-marketing-chat-v2.ts` - `processEvent`に`ask_user`ケース追加、AskUserActivityItem import
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - ActivityTimelineに`ask_user`レンダリング追加、`onSendMessage` propチェーン追加
+    - `frontend/src/components/marketing/v2/MessageList.tsx` - `onSendMessage` prop追加・パススルー
+    - `frontend/src/components/marketing/v2/MarketingChat.tsx` - MessageListに`handleSend`を`onSendMessage`として渡す
+  - **UX**: シングルセレクト=クリック即送信、マルチセレクト=選択後「選択して続行」ボタン
+  - **型定義**: `AskUserQuestionItem`, `AskUserEvent`, `AskUserActivityItem`は既存（types.tsに定義済み）
+  - **ADK知見**:
+    - `LongRunningFunctionTool`はツール説明に自動で「NOTE: This is a long-running operation...」を付加
+    - `skip_summarization=True`でLLMがNone応答を要約しない
+    - ADKには`get_user_choice_tool`（組み込み）も存在するが、optionsがstring[]のみでdescription不可のため独自実装
+
+- **ask_user_clarification UX改善（2026-02-08）**
+  - ラジオ即送信廃止 → 全質問下部に「送信」「スキップ」ボタン
+  - ラジオボタンの選択解除（トグル式）対応
+  - 全質問にシステムが自動で「その他（自由入力）」を追加（LLMは生成しない）
+  - LLM指示文に「その他は含めないこと」を明記
+  - `AskUserPrompt.tsx` 全面書き換え
+  - `orchestrator.py`, `ask_user_tools.py` docstring更新
+
+- **ask_user永続化修正（2026-02-08）**
+  - `marketing_v2.py`: `ask_user`イベントを`activity_items`リストに蓄積（DB保存対応）
+  - `use-marketing-chat-v2.ts`: 復元時にask_userの`answered`フラグを後続userメッセージ有無で補正
+  - `use-marketing-chat-v2.ts`: ライブ送信時に直前assistantのask_userを`answered: true`に更新
+
+- **ask_user重複表示バグ修正（2026-02-08）**
+  - 原因: `agent_service.py`で`ask_user_clarification`のfunction_callが`partial=True`と`partial=False`の両パスで検知→2回イベント生成
+  - 修正: `_process_non_text_part()`（partial=Falseパス）の検知を`pass`に変更、partial=True/Noneパスのみで1回処理
+
+- **ユーザーパーソナライズ基盤実装（2026-02-08）**
+  - **目的**: Clerk認証情報を全エージェントに注入し、パーソナライズされた応答を実現
+  - **Phase 1: ユーザーコンテキスト拡充**
+    - `marketing_v2.py`: `initial_state`に`app:user_name`, `app:user_id`を追加注入（既存の`app:user_email`に加えて）
+    - Slack ID自動解決: `SlackService.lookup_user_by_email()`呼び出し→`app:slack_user_id`, `app:slack_username`, `app:slack_display_name`をstateに注入
+  - **Phase 2: Slack email→user ID解決**
+    - `slack_service.py`: `lookup_user_by_email(email)` 新メソッド追加
+    - Slack API `users.lookupByEmail` 使用（`users:read.email` scope必要）
+    - 24時間TTLキャッシュ（pipe-separated compact format）、未発見も`__not_found__`でネガティブキャッシュ
+    - user_id, username, display_name, real_name を返却
+  - **Phase 3: Slackエージェントパーソナライズ**
+    - `slack_tools.py`: `get_my_slack_activity` 新ツール追加（自分の投稿+メンション一括取得）
+      - `activity_type`: "all" / "my_posts" / "mentions"
+      - stateから`app:slack_user_id`を自動取得、`from:<@USER_ID>`/`<@USER_ID>`で検索
+      - ADK_SLACK_TOOLS: 6→7ツール
+    - `slack_agent.py`: 指示文全面更新
+      - 「現在のユーザー情報」セクション追加（state keyの参照方法を明記）
+      - `get_my_slack_activity`のツール説明・ワークフロー例追加
+      - 「自分の」「私の」リクエストの解釈ルール追加
+      - 回答方針: ユーザー名で呼びかけ、自分の投稿は「あなたの投稿」と表現
+    - `ChatMessage.tsx`: `get_my_slack_activity`のアイコン(User)・ラベル(自分のSlack活動)追加
+  - **Phase 4: 全エージェント横断パーソナライズ**
+    - `orchestrator.py`: 「現在のユーザー」セクション追加
+      - state keyの参照方法を明記（user_name, user_email, user_id, slack_*）
+      - パーソナライズルール: ユーザー名で呼びかけ、「自分の」表現の解釈マトリクス
+      - キーワードマトリクスに「自分のSlack/メール/予定/担当」ルーティング追加
+    - `workspace_agent.py`: 「現在のユーザー」セクション追加（氏名で呼びかけ指示）
+    - `ca_support_agent.py`: 「現在のユーザー（担当CA）」セクション追加
+      - 「自分の担当候補者」→ Zoho Owner/PICフィールドで検索する指示
+      - 「自分の面談」→ 議事録ツールでユーザー名検索する指示
+  - 変更ファイル（9）:
+    - `backend/app/presentation/api/v1/marketing_v2.py` - initial_state拡充 + Slack ID解決
+    - `backend/app/infrastructure/slack/slack_service.py` - lookup_user_by_email追加
+    - `backend/app/infrastructure/adk/tools/slack_tools.py` - get_my_slack_activity追加
+    - `backend/app/infrastructure/adk/agents/slack_agent.py` - 指示文パーソナライズ
+    - `backend/app/infrastructure/adk/agents/orchestrator.py` - ユーザー情報 + ルーティング
+    - `backend/app/infrastructure/adk/agents/workspace_agent.py` - ユーザー情報追加
+    - `backend/app/infrastructure/adk/agents/ca_support_agent.py` - 担当CA情報追加
+    - `frontend/src/components/marketing/v2/ChatMessage.tsx` - ツールUI設定追加
+    - `backend/app/infrastructure/adk/agent_service.py` - ask_user重複修正
+  - **Slack API知見**: `users.lookupByEmail`はBot Tokenで使用可能。`users:read.email` scopeが必要。email未登録ユーザーは`users_not_found`エラー
+  - **ローマ字名対応**: Clerk/Slackから送られるユーザー名はローマ字表記が多い。エージェント指示文では「そのままの表記で呼びかけること」と指示（「日本語名」表現は使わない）
+  - **ADK State検証知見（2026-02-08）**:
+    - `initial_state → create_session(state=) → extract_state_delta() → prefix分離保存 → _merge_state() → prefix再付与 → session.state → State wrapper → tool_context.state`
+    - `app:` prefix = アプリ全体共有、`user:` = ユーザー単位、`temp:` = 破棄、prefix無し = セッション単位
+    - サブエージェントは`AgentTool`経由で親stateの完全コピーを受け取り、変更は`event.actions.state_delta`で親に伝播
+    - **全state key**(`app:user_email`, `app:user_name`, `app:user_id`, `app:slack_user_id`, `app:slack_username`, `app:slack_display_name`)は全サブエージェント内ツールから`tool_context.state.get("app:...")`で正しくアクセス可能
+
+- **ADK State Injection重大バグ修正（2026-02-08）**
+  - **問題**: エージェントがユーザーを間違った名前で呼ぶ（例: Gaku Masudaなのに「yoshidaさん」）
+  - **根本原因**: 指示文で `` `app:user_name` `` とバッククォート記法で「stateキーの名前」を文書として記載していたが、ADKはこれを自動展開しない。モデルは実際のstate値にアクセスできず、名前を推測（捏造）していた
+  - **ADK State Injection仕様**: ADKは `{app:user_name}` 構文（波括弧）で指示文にstate値を自動注入する機能を持つ
+    - `instructions_utils.py` の `inject_session_state()` が正規表現 `r'{+[^{}]*}+'` でプレースホルダーを検出
+    - `session.state[var_name]` から値を取得して置換
+    - `{app:key?}` — `?` サフィックスでオプショナル（未設定時にKeyError回避）
+    - `instruction` が文字列の場合のみ自動注入。`InstructionProvider`（callable）の場合はバイパス
+    - ADKソース: `.venv/.../google/adk/utils/instructions_utils.py` L30-124
+  - **修正**: 4ファイルの指示文をバッククォート記法 → 波括弧state injection構文に変更
+    - `orchestrator.py`: `{app:user_name}`, `{app:user_email}`, `{app:slack_display_name?}`, `{app:slack_username?}`
+    - `workspace_agent.py`: `{app:user_name}`, `{app:user_email}`
+    - `slack_agent.py`: `{app:user_name}`, `{app:user_email}`, `{app:slack_user_id?}`, `{app:slack_username?}`, `{app:slack_display_name?}`
+    - `ca_support_agent.py`: `{app:user_name}`, `{app:user_email}`
+  - **自己改善**:
+    - ADKの指示文テンプレート機能を正確に理解してから実装すべきだった
+    - stateキーの「ドキュメント記載」と「値の注入」は全く別物。モデルは指示文内のキー名だけでは値を読めない
+    - 新機能の実装時、SDKのテンプレート/注入機能を最初に確認すること
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

@@ -383,6 +383,85 @@ class SlackService:
             return user_id
 
     # ------------------------------------------------------------------
+    # Email → Slack User Resolution
+    # ------------------------------------------------------------------
+
+    def lookup_user_by_email(self, email: str) -> Optional[Dict[str, str]]:
+        """Resolve email address to Slack user info.
+
+        Uses Slack's users.lookupByEmail API (requires users:read.email scope).
+        Results are cached for 24 hours.
+
+        Returns:
+            dict with user_id, username, display_name, real_name, or None if not found.
+        """
+        if not email or not self._bot_client:
+            return None
+
+        # Check cache (keyed by email, separate TTL: 24h)
+        cache_key = f"email:{email}"
+        now = time.time()
+        if cache_key in self._user_cache:
+            cached_val, cached_ts = self._user_cache[cache_key]
+            if now - cached_ts < 86400:  # 24h TTL for email lookups
+                if cached_val == "__not_found__":
+                    return None
+                # cached_val is "user_id|username|display_name|real_name"
+                parts = cached_val.split("|", 3)
+                if len(parts) == 4:
+                    return {
+                        "user_id": parts[0],
+                        "username": parts[1],
+                        "display_name": parts[2],
+                        "real_name": parts[3],
+                    }
+
+        try:
+            response = self._bot_client.users_lookupByEmail(email=email)
+            user = response.get("user", {})
+            profile = user.get("profile", {})
+
+            user_id = user.get("id", "")
+            username = user.get("name", "")  # Slack handle (login name)
+            display_name = (
+                profile.get("display_name")
+                or profile.get("real_name")
+                or user.get("real_name")
+                or username
+            )
+            real_name = (
+                profile.get("real_name")
+                or user.get("real_name")
+                or display_name
+            )
+
+            # Cache the result (pipe-separated for compact storage)
+            cache_val = f"{user_id}|{username}|{display_name}|{real_name}"
+            self._user_cache[cache_key] = (cache_val, now)
+
+            # Also cache the user_id → display_name mapping
+            self._user_cache[user_id] = (display_name, now)
+
+            return {
+                "user_id": user_id,
+                "username": username,
+                "display_name": display_name,
+                "real_name": real_name,
+            }
+
+        except SlackApiError as e:
+            err = e.response.get("error", str(e))
+            if err == "users_not_found":
+                logger.info(f"[SlackService] No Slack user for email: {email}")
+                self._user_cache[cache_key] = ("__not_found__", now)
+                return None
+            logger.warning(f"[SlackService.lookup_user_by_email] Error: {err}")
+            return None
+        except Exception as e:
+            logger.warning(f"[SlackService.lookup_user_by_email] Error: {e}")
+            return None
+
+    # ------------------------------------------------------------------
     # Internal Helpers
     # ------------------------------------------------------------------
 

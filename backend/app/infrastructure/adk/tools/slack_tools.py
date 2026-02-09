@@ -491,6 +491,113 @@ def search_candidate_in_slack(
 
 
 # ============================================================
+# My Slack Activity (Personalized)
+# ============================================================
+
+
+def get_my_slack_activity(
+    activity_type: str = "all",
+    days_back: int = 7,
+    max_results: int = 30,
+    tool_context=None,
+) -> Dict[str, Any]:
+    """現在のユーザー自身のSlack活動を取得する。自分の投稿・自分へのメンションを一括取得。
+
+    ユーザーのSlack IDはシステムが自動で取得するため、指定不要。
+
+    Args:
+        activity_type: 取得する活動の種類
+            - "all": 自分の投稿 + 自分へのメンション（デフォルト）
+            - "my_posts": 自分が投稿したメッセージのみ
+            - "mentions": 自分がメンションされたメッセージのみ
+        days_back: 遡る日数（1-30、デフォルト7）
+        max_results: 取得件数（1-50、デフォルト30）
+
+    Returns:
+        success: 成功/失敗
+        user_info: ユーザー情報（name, slack_id）
+        my_posts: 自分の投稿一覧（activity_typeが"all"または"my_posts"の場合）
+        mentions: 自分へのメンション一覧（activity_typeが"all"または"mentions"の場合）
+    """
+    days_back = max(1, min(30, days_back))
+    max_results = max(1, min(50, max_results))
+
+    # Get current user's Slack info from state
+    slack_user_id = None
+    slack_username = None
+    slack_display_name = None
+    if tool_context:
+        slack_user_id = tool_context.state.get("app:slack_user_id")
+        slack_username = tool_context.state.get("app:slack_username")
+        slack_display_name = tool_context.state.get("app:slack_display_name")
+
+    if not slack_user_id:
+        return {
+            "success": False,
+            "error": "ユーザーのSlack IDが特定できませんでした。メールアドレスがSlackに登録されていない可能性があります。",
+        }
+
+    date_from = _days_ago_date(days_back)
+    svc = _get_slack_service()
+    result: Dict[str, Any] = {
+        "success": True,
+        "user_info": {
+            "slack_id": slack_user_id,
+            "username": slack_username,
+            "display_name": slack_display_name,
+        },
+    }
+
+    try:
+        # My posts
+        if activity_type in ("all", "my_posts"):
+            query = f"from:<@{slack_user_id}> after:{date_from}"
+            posts_result = svc.search_messages(query=query, count=max_results)
+            if posts_result.get("success"):
+                posts = []
+                for msg in posts_result.get("messages", []):
+                    posts.append({
+                        "channel_name": msg.get("channel_name", ""),
+                        "text": _truncate(msg.get("text", ""), 500),
+                        "datetime_jst": msg.get("datetime_jst", ""),
+                        "permalink": msg.get("permalink", ""),
+                        "thread_ts": msg.get("thread_ts"),
+                    })
+                result["my_posts"] = {
+                    "total": posts_result.get("total", 0),
+                    "count": len(posts),
+                    "messages": posts,
+                }
+
+        # Mentions to me
+        if activity_type in ("all", "mentions"):
+            query = f"<@{slack_user_id}> after:{date_from}"
+            mentions_result = svc.search_messages(query=query, count=max_results)
+            if mentions_result.get("success"):
+                mentions = []
+                for msg in mentions_result.get("messages", []):
+                    mentions.append({
+                        "channel_name": msg.get("channel_name", ""),
+                        "user_name": msg.get("user_name", ""),
+                        "text": _truncate(msg.get("text", ""), 500),
+                        "datetime_jst": msg.get("datetime_jst", ""),
+                        "permalink": msg.get("permalink", ""),
+                        "thread_ts": msg.get("thread_ts"),
+                    })
+                result["mentions"] = {
+                    "total": mentions_result.get("total", 0),
+                    "count": len(mentions),
+                    "messages": mentions,
+                }
+
+        return result
+
+    except Exception as e:
+        logger.error("[get_my_slack_activity] Error: %s", e, exc_info=True)
+        return {"success": False, "error": f"自分のSlack活動の取得に失敗しました: {type(e).__name__}"}
+
+
+# ============================================================
 # Tool Export List
 # ============================================================
 
@@ -501,4 +608,5 @@ ADK_SLACK_TOOLS = [
     list_slack_channels,
     search_company_in_slack,
     search_candidate_in_slack,
+    get_my_slack_activity,
 ]

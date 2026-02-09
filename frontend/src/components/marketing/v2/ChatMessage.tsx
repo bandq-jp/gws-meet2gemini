@@ -38,6 +38,7 @@ import {
   Calendar,
   MessageSquare,
   Hash,
+  User,
 } from "lucide-react";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import type {
@@ -47,11 +48,13 @@ import type {
   ToolActivityItem,
   ReasoningActivityItem,
   SubAgentActivityItem,
+  AskUserActivityItem,
   ChartActivityItem,
   CodeExecutionActivityItem,
   CodeResultActivityItem,
 } from "@/lib/marketing/types";
 import { ChartRenderer } from "./charts";
+import { AskUserPrompt } from "./AskUserPrompt";
 import { FeedbackBar } from "@/components/feedback/FeedbackBar";
 import { AnnotationLayer } from "@/components/feedback/AnnotationLayer";
 import type {
@@ -387,6 +390,7 @@ const TOOL_ICONS: Record<string, typeof Wrench> = {
   list_slack_channels: Hash,
   search_company_in_slack: Database,
   search_candidate_in_slack: Users,
+  get_my_slack_activity: User,
   // General
   code_interpreter: Code2,
   web_search: Globe,
@@ -456,6 +460,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_slack_channels: "チャネル一覧",
   search_company_in_slack: "企業Slack検索",
   search_candidate_in_slack: "候補者Slack検索",
+  get_my_slack_activity: "自分のSlack活動",
   // General
   code_interpreter: "コード実行",
   web_search: "Web検索",
@@ -653,6 +658,29 @@ const markdownComponents: Components = {
       {children}
     </a>
   ),
+  img: ({ src, alt }) => {
+    const [hasError, setHasError] = useState(false);
+    const imgSrc = typeof src === "string" ? src : undefined;
+    if (hasError || !imgSrc) {
+      return (
+        <span className="inline-flex items-center gap-1.5 text-[11px] text-[#9ca3af] bg-[#f8f9fb] rounded-md px-3 py-2 border border-[#e5e7eb]">
+          <ImageIcon className="w-4 h-4" />
+          <span>{alt || "画像を読み込めませんでした"}</span>
+        </span>
+      );
+    }
+    return (
+      <a href={imgSrc} target="_blank" rel="noopener noreferrer" className="block my-3">
+        <img
+          src={imgSrc}
+          alt={alt || ""}
+          loading="lazy"
+          onError={() => setHasError(true)}
+          className="max-w-full max-h-[500px] w-auto rounded-lg shadow-sm border border-[#e5e7eb] hover:shadow-md transition-shadow cursor-pointer"
+        />
+      </a>
+    );
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1011,9 +1039,11 @@ function TextSegment({
 function ActivityTimeline({
   items,
   isStreaming,
+  onSendMessage,
 }: {
   items: ActivityItem[];
   isStreaming?: boolean;
+  onSendMessage?: (content: string) => void;
 }) {
   if (!items || items.length === 0) return null;
 
@@ -1118,6 +1148,27 @@ function ActivityTimeline({
                     >
                       {codeItem.code}
                     </CodeBlock>
+                  );
+                })}
+              </div>
+            );
+
+          case "ask_user":
+            return (
+              <div key={groupIdx} className="space-y-2">
+                {group.items.map((item) => {
+                  const askItem = item as AskUserActivityItem;
+                  return (
+                    <AskUserPrompt
+                      key={item.id}
+                      questions={askItem.questions}
+                      answered={askItem.answered ?? false}
+                      onRespond={(response) => {
+                        if (onSendMessage) {
+                          onSendMessage(response);
+                        }
+                      }}
+                    />
                   );
                 })}
               </div>
@@ -1229,6 +1280,7 @@ interface AssistantMessageProps {
   isFeedbackMode?: boolean;
   conversationId?: string;
   activeAnnotationId?: string | null;
+  onSendMessage?: (content: string) => void;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
@@ -1243,6 +1295,7 @@ function AssistantMessage({
   isFeedbackMode = false,
   conversationId,
   activeAnnotationId,
+  onSendMessage,
   onSubmitFeedback,
   onCreateAnnotation,
   onDeleteAnnotation,
@@ -1259,7 +1312,7 @@ function AssistantMessage({
       {showThinking ? (
         <ThinkingIndicator progressText={message.progressText} />
       ) : hasItems ? (
-        <ActivityTimeline items={items} isStreaming={message.isStreaming} />
+        <ActivityTimeline items={items} isStreaming={message.isStreaming} onSendMessage={onSendMessage} />
       ) : message.content ? (
         <div className="report-content overflow-hidden min-w-0">
           <ReactMarkdown
@@ -1322,6 +1375,7 @@ export interface ChatMessageProps {
   isFeedbackMode?: boolean;
   conversationId?: string;
   activeAnnotationId?: string | null;
+  onSendMessage?: (content: string) => void;
   onSubmitFeedback?: (messageId: string, payload: FeedbackCreatePayload) => Promise<unknown>;
   onCreateAnnotation?: (payload: AnnotationCreatePayload) => Promise<unknown>;
   onDeleteAnnotation?: (annotationId: string, messageId: string) => Promise<void>;
@@ -1336,6 +1390,7 @@ export const ChatMessage = memo(function ChatMessage({
   isFeedbackMode,
   conversationId,
   activeAnnotationId,
+  onSendMessage,
   onSubmitFeedback,
   onCreateAnnotation,
   onDeleteAnnotation,
@@ -1354,6 +1409,7 @@ export const ChatMessage = memo(function ChatMessage({
         isFeedbackMode={isFeedbackMode}
         conversationId={conversationId}
         activeAnnotationId={activeAnnotationId}
+        onSendMessage={onSendMessage}
         onSubmitFeedback={onSubmitFeedback}
         onCreateAnnotation={onCreateAnnotation}
         onDeleteAnnotation={onDeleteAnnotation}

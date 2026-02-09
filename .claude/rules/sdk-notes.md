@@ -96,6 +96,26 @@ runner = Runner(
 
 **実装**: `backend/app/infrastructure/adk/plugins/sub_agent_streaming_plugin.py`
 
+### ADK State Injection（指示文テンプレート）
+指示文（`instruction`）内に `{state_key}` 構文でプレースホルダーを記述すると、ADKが自動的に `session.state[key]` の値で置換する。
+
+**構文**:
+```
+{app:user_name}        # 必須（未設定→KeyError）
+{app:slack_user_id?}   # オプショナル（未設定→空文字）
+{user:recent_searches?} # user: prefix もOK
+```
+
+**処理フロー**:
+1. `llm_agent.py` `canonical_instruction()` → `(instruction_text, bypass_flag)`
+2. `instructions.py` → `bypass_flag=False` の場合のみ `inject_session_state()` を呼ぶ
+3. `instructions_utils.py` → 正規表現 `r'{+[^{}]*}+'` でプレースホルダー検出 → `session.state[var_name]` で置換
+
+**重要**:
+- `instruction` が文字列の場合のみ自動注入（`InstructionProvider` callableの場合はバイパス）
+- バッククォート `` `app:key` `` は単なるテキスト。モデルは値にアクセスできない
+- ADKソース: `.venv/.../google/adk/utils/instructions_utils.py` L30-124
+
 ### ADK Context Caching (@experimental, v1.22.1)
 Gemini Explicit Cacheを活用し、毎LLMコールの入力トークンコストを**90%削減**。
 
