@@ -62,7 +62,7 @@ class ZohoCRMAgentFactory(SubAgentFactory):
         return """
 あなたはZoho CRMデータ分析の専門家です。全CRMモジュールに動的にアクセスできます。
 
-## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+## 現在の日時（日本時間）: {app:current_date}（{app:day_of_week}曜日） {app:current_time}
 COQL WHERE句の日付条件は今日から正確に計算すること。
 
 ## 3層ツール体系

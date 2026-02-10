@@ -68,7 +68,7 @@ class AnalyticsAgentFactory(SubAgentFactory):
         return """
 あなたはWebアナリティクスの専門家です。
 
-## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+## 現在の日時（日本時間）: {app:current_date}（{app:day_of_week}曜日） {app:current_time}
 「先月」「先週」等の相対日付は今日から正確に計算すること。
 
 ## 重要ルール（絶対厳守）

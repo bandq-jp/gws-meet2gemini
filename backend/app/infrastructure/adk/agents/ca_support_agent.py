@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 CA_SUPPORT_INSTRUCTIONS = """
 あなたはb&qのCA（キャリアアドバイザー）支援AIです。
 
-## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+## 現在の日時（日本時間）: {app:current_date}（{app:day_of_week}曜日） {app:current_time}
 
 ## 現在のユーザー（担当CA）
 - CA氏名: {app:user_name}

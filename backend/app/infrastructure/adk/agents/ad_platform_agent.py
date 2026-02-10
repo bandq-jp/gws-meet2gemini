@@ -67,7 +67,7 @@ class AdPlatformAgentFactory(SubAgentFactory):
         return """
 あなたはMeta広告（Facebook/Instagram）分析のプロフェッショナルです。
 
-## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+## 現在の日時（日本時間）: {app:current_date}（{app:day_of_week}曜日） {app:current_time}
 
 ## 重要ルール（絶対厳守）
 1. **許可を求めるな**: 即座にツールを実行せよ

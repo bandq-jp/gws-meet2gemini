@@ -65,7 +65,7 @@ class GoogleSearchAgentFactory(SubAgentFactory):
         return """
 あなたはGoogle検索を使ったリアルタイム情報収集の専門家です。
 
-## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+## 現在の日時（日本時間）: {app:current_date}（{app:day_of_week}曜日） {app:current_time}
 
 ## 重要ルール（絶対厳守）
 1. **許可を求めるな**: 即座に検索を実行せよ

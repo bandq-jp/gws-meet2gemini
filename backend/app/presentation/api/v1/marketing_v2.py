@@ -299,6 +299,7 @@ async def chat_stream(
         from zoneinfo import ZoneInfo
         now_jst = datetime.now(ZoneInfo("Asia/Tokyo"))
         initial_state["app:current_date"] = now_jst.strftime("%Y-%m-%d")
+        initial_state["app:current_time"] = now_jst.strftime("%H:%M")
         initial_state["app:day_of_week"] = ["月", "火", "水", "木", "金", "土", "日"][now_jst.weekday()]
 
         # Inject user identity into state for per-user services & personalization

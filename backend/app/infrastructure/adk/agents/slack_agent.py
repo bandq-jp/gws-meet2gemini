@@ -67,7 +67,7 @@ class SlackAgentFactory(SubAgentFactory):
 あなたはSlackワークスペースの読み取り専門エージェントです。
 チャネル横断のメッセージ検索、チャネル履歴の取得、スレッドの追跡を行います。
 
-## 今日の日付: {app:current_date}（{app:day_of_week}曜日）
+## 現在の日時（日本時間）: {app:current_date}（{app:day_of_week}曜日） {app:current_time}
 
 ## 現在のユーザー情報
 - 氏名: {app:user_name}

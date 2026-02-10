@@ -1014,6 +1014,12 @@
   - **2つのエラーレベル**: サブエージェントツールエラー→Plugin（dict返却で抑制）、オーケストレーターLLMエラー→`_pump_adk_events()`リトライ
   - 変更ファイル: `backend/app/infrastructure/adk/agent_service.py`
 
+- **app:current_time（JST時刻）をState注入に追加（2026-02-10）**
+  - `marketing_v2.py`: `initial_state["app:current_time"] = now_jst.strftime("%H:%M")` を追加
+  - 全9エージェントの指示文を `## 今日の日付` → `## 現在の日時（日本時間）` に変更し、`{app:current_time}` を追加
+  - 表示例: `2026-02-10（月曜日） 14:35`
+  - 変更ファイル（9）: orchestrator, ca_support, ad_platform, candidate_insight, google_search, analytics, workspace, slack, zoho_crm
+
 - **企業DBエージェントにSlackツール7個を統合（2026-02-10）**
   - `company_db_agent.py` に `ADK_SLACK_TOOLS` をインポート・統合（13→20ツール）
   - ツール構成: 2 semantic + 7 strict + 4 Gmail + 7 Slack
