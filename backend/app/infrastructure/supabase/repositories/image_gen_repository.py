@@ -249,6 +249,29 @@ class ImageGenRepository:
             return data[0]
         return payload
 
+    # ── Usage / Quota ──
+
+    def count_monthly_generations(self, year: int, month: int) -> int:
+        """Count generated images (assistant messages with image_url) for the given month."""
+        sb = get_supabase()
+        # Build date range for the month
+        month_start = f"{year:04d}-{month:02d}-01T00:00:00+00:00"
+        if month == 12:
+            month_end = f"{year + 1:04d}-01-01T00:00:00+00:00"
+        else:
+            month_end = f"{year:04d}-{month + 1:02d}-01T00:00:00+00:00"
+
+        res = (
+            sb.table(MESSAGES_TABLE)
+            .select("id", count="exact")
+            .eq("role", "assistant")
+            .not_.is_("image_url", "null")
+            .gte("created_at", month_start)
+            .lt("created_at", month_end)
+            .execute()
+        )
+        return res.count if res.count is not None else 0
+
     # ── Storage helpers ──
 
     def upload_output_image(

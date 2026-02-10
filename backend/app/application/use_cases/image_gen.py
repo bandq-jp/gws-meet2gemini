@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from app.infrastructure.config.settings import get_settings
 from app.infrastructure.gemini.image_generator import GeminiImageGenerator
 from app.infrastructure.supabase.repositories.image_gen_repository import (
     ImageGenRepository,
@@ -156,6 +158,33 @@ def create_session(
     return _get_repo().create_session(payload)
 
 
+# ── Usage / Quota ──
+
+
+class QuotaExceededError(Exception):
+    """Raised when the monthly image generation quota is exceeded."""
+    pass
+
+
+def get_usage() -> Dict[str, Any]:
+    """Get current month's image generation usage and limit."""
+    settings = get_settings()
+    now_jst = datetime.now(timezone(timedelta(hours=9)))
+    year, month = now_jst.year, now_jst.month
+
+    repo = _get_repo()
+    used = repo.count_monthly_generations(year, month)
+    limit = settings.image_gen_monthly_limit
+
+    return {
+        "used": used,
+        "limit": limit,
+        "remaining": max(0, limit - used) if limit > 0 else None,
+        "is_unlimited": limit <= 0,
+        "period": f"{year}-{month:02d}",
+    }
+
+
 # ── Image Generation ──
 
 
@@ -168,12 +197,20 @@ def generate_image(
     """
     セッション内で画像を生成する。
 
-    1. セッション情報を取得
-    2. テンプレートのリファレンス画像を取得
-    3. Gemini API で画像生成
-    4. 生成画像をStorageに保存
-    5. メッセージとして記録
+    1. 月間クォータチェック
+    2. セッション情報を取得
+    3. テンプレートのリファレンス画像を取得
+    4. Gemini API で画像生成
+    5. 生成画像をStorageに保存
+    6. メッセージとして記録
     """
+    # Quota check
+    usage = get_usage()
+    if not usage["is_unlimited"] and usage["remaining"] <= 0:
+        raise QuotaExceededError(
+            f"月間画像生成上限（{usage['limit']}枚）に達しました。来月まで生成できません。"
+        )
+
     repo = _get_repo()
     session = repo.get_session(session_id)
     if not session:

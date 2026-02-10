@@ -755,6 +755,8 @@ export default function ImageGenPage() {
     setCurrentSession,
     generateImage,
     setError,
+    usage,
+    fetchUsage,
   } = useImageGen();
 
   const isMobile = useIsMobile();
@@ -785,6 +787,7 @@ export default function ImageGenPage() {
   useEffect(() => {
     fetchTemplates();
     fetchSessions();
+    fetchUsage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -822,8 +825,10 @@ export default function ImageGenPage() {
     user,
   ]);
 
+  const quotaReached = usage?.remaining !== null && usage?.remaining !== undefined && usage.remaining <= 0;
+
   const handleGenerate = useCallback(async () => {
-    if (!prompt.trim() || isGenerating) return;
+    if (!prompt.trim() || isGenerating || quotaReached) return;
 
     if (!currentSession) {
       await handleNewSession();
@@ -838,6 +843,7 @@ export default function ImageGenPage() {
   }, [
     prompt,
     isGenerating,
+    quotaReached,
     currentSession,
     handleNewSession,
     generateImage,
@@ -945,6 +951,32 @@ export default function ImageGenPage() {
 
           {/* Right actions */}
           <div className="flex items-center gap-1">
+            {/* Usage quota badge */}
+            {usage && !usage.is_unlimited && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    className={`flex items-center gap-1.5 px-2 py-1 rounded-md border text-[11px] font-medium ${
+                      usage.remaining !== null && usage.remaining <= 0
+                        ? "bg-destructive/10 border-destructive/30 text-destructive"
+                        : usage.remaining !== null && usage.remaining <= Math.ceil(usage.limit * 0.2)
+                        ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                        : "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                    }`}
+                  >
+                    <ImageIcon className="h-3 w-3" />
+                    <span>{usage.used} / {usage.limit}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  <p>月間画像生成: {usage.used} / {usage.limit}枚（{usage.period}）</p>
+                  {usage.remaining !== null && usage.remaining <= 0 && (
+                    <p className="text-destructive">上限に達しました。来月リセットされます。</p>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            )}
+
             <Button
               variant="outline"
               size="sm"
@@ -1459,6 +1491,13 @@ export default function ImageGenPage() {
             {/* Prompt Input */}
             <div className="shrink-0 border-t border-border/50 bg-background px-4 py-3">
               <div className="max-w-2xl mx-auto">
+                {/* Quota reached banner */}
+                {quotaReached && usage && (
+                  <div className="mb-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/8 border border-destructive/20 text-destructive text-xs">
+                    <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+                    <span>月間画像生成の上限（{usage.limit}枚）に達しました。来月1日にリセットされます。</span>
+                  </div>
+                )}
                 <div className="relative rounded-xl border border-border/60 bg-background focus-within:ring-1 focus-within:ring-[var(--brand-300)]/50 focus-within:border-[var(--brand-300)]/40 transition-all">
                   <Textarea
                     ref={textareaRef}
@@ -1466,18 +1505,20 @@ export default function ImageGenPage() {
                     onChange={(e) => setPrompt(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={
-                      selectedTemplate
+                      quotaReached
+                        ? "月間生成上限に達しています"
+                        : selectedTemplate
                         ? `「${selectedTemplate.name}」スタイルで生成...`
                         : "画像の説明を入力..."
                     }
                     className="min-h-[48px] max-h-28 pr-12 resize-none text-sm border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent"
-                    disabled={isGenerating}
+                    disabled={isGenerating || quotaReached}
                   />
                   <Button
                     size="sm"
                     className="absolute right-2 bottom-2 h-8 w-8 p-0 rounded-lg bg-[var(--brand-400)] hover:bg-[var(--brand-400)]/90"
                     onClick={handleGenerate}
-                    disabled={!prompt.trim() || isGenerating}
+                    disabled={!prompt.trim() || isGenerating || quotaReached}
                   >
                     {isGenerating ? (
                       <Loader2 className="h-4 w-4 animate-spin text-white" />

@@ -600,6 +600,16 @@ class ApiClient {
     });
   }
 
+  async getImageGenUsage(): Promise<{
+    used: number;
+    limit: number;
+    remaining: number | null;
+    is_unlimited: boolean;
+    period: string;
+  }> {
+    return this.request(`/image-gen/usage`);
+  }
+
 }
 
 export const apiClient = new ApiClient();

@@ -1029,6 +1029,24 @@
   - tool_descriptionに「Gmail・Slackから企業のFee・条件・内部議論も検索可能」を追加
   - フロントエンドの変更は不要（SlackツールのUI設定はChatMessage.tsxに登録済み）
 
+- **月間画像生成クォータシステム実装（2026-02-10）**
+  - **目的**: サービス全体（全ユーザー共有）で月間画像生成枚数を制限。デフォルト30枚/月
+  - **バックエンド**:
+    - `settings.py`: `image_gen_monthly_limit: int`（環境変数`IMAGE_GEN_MONTHLY_LIMIT`、デフォルト30）
+    - `image_gen_repository.py`: `count_monthly_generations(year, month)` — `image_gen_messages`テーブルで`role=assistant`かつ`image_url IS NOT NULL`の当月レコードをカウント
+    - `image_gen.py`（use case）: `QuotaExceededError`例外、`get_usage()`関数（used/limit/remaining/is_unlimited/period返却）、`generate_image()`冒頭でクォータチェック
+    - `image_gen.py`（router）: `GET /usage`エンドポイント追加、`QuotaExceededError`→429レスポンス
+  - **フロントエンド**:
+    - `api.ts`: `getImageGenUsage()`メソッド追加
+    - `use-image-gen.ts`: `ImageGenUsage`インターフェース、`usage`state、`fetchUsage()`、生成成功後に自動リフレッシュ
+    - `page.tsx`:
+      - ヘッダーに色分けクォータバッジ（緑: 残り80%超、黄: 残り20%未満、赤: 残り0）＋ツールチップ
+      - `quotaReached`変数で統一判定（`usage.remaining !== null && usage.remaining <= 0`）
+      - クォータ到達時: 生成ボタン無効化、Textarea無効化+プレースホルダー変更、プロンプトエリア上部に警告バナー表示
+      - handleGenerateにもクォータチェック追加（Enter送信の二重防御）
+  - 環境変数: `IMAGE_GEN_MONTHLY_LIMIT`（デフォルト: `30`、`0`以下で無制限）
+  - **設計判断**: ユーザー単位ではなくサービス全体の共有クォータ。JSTベースで月初リセット
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

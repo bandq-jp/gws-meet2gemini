@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.application.use_cases import image_gen as use_cases
+from app.application.use_cases.image_gen import QuotaExceededError
 from app.infrastructure.supabase.repositories.image_gen_repository import (
     OUTPUTS_BUCKET,
     REFERENCES_BUCKET,
@@ -169,6 +170,15 @@ def create_session(body: SessionCreate) -> Dict[str, Any]:
     return use_cases.create_session(**body.model_dump())
 
 
+# ── Usage / Quota ──
+
+
+@router.get("/usage")
+def get_usage() -> Dict[str, Any]:
+    """Get current month's image generation usage and quota."""
+    return use_cases.get_usage()
+
+
 # ── Image Generation ──
 
 
@@ -181,6 +191,8 @@ def generate_image(session_id: str, body: GenerateRequest) -> Dict[str, Any]:
             aspect_ratio=body.aspect_ratio,
             image_size=body.image_size,
         )
+    except QuotaExceededError as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

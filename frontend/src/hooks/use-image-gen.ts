@@ -8,6 +8,14 @@ import {
   type ImageGenMessage,
 } from "@/lib/api";
 
+export interface ImageGenUsage {
+  used: number;
+  limit: number;
+  remaining: number | null;
+  is_unlimited: boolean;
+  period: string;
+}
+
 export function useImageGen() {
   const [templates, setTemplates] = useState<ImageGenTemplate[]>([]);
   const [sessions, setSessions] = useState<ImageGenSession[]>([]);
@@ -16,6 +24,18 @@ export function useImageGen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<ImageGenUsage | null>(null);
+
+  // ── Usage / Quota ──
+
+  const fetchUsage = useCallback(async () => {
+    try {
+      const data = await apiClient.getImageGenUsage();
+      setUsage(data);
+    } catch {
+      // Non-critical, don't block UI
+    }
+  }, []);
 
   // ── Templates ──
 
@@ -176,6 +196,9 @@ export function useImageGen() {
           return [...filtered, { ...userMsg, id: `user-${Date.now()}` }, result];
         });
 
+        // Refresh usage after successful generation
+        fetchUsage();
+
         return result;
       } catch (e) {
         setError(e instanceof Error ? e.message : "画像生成に失敗しました");
@@ -186,7 +209,7 @@ export function useImageGen() {
         setIsGenerating(false);
       }
     },
-    [currentSession]
+    [currentSession, fetchUsage]
   );
 
   return {
@@ -198,6 +221,7 @@ export function useImageGen() {
     isLoading,
     isGenerating,
     error,
+    usage,
     // Template actions
     fetchTemplates,
     createTemplate,
@@ -213,6 +237,8 @@ export function useImageGen() {
     setCurrentSession,
     // Generation
     generateImage,
+    // Usage
+    fetchUsage,
     // Utility
     setError,
   };
