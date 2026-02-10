@@ -1014,6 +1014,15 @@
   - **2つのエラーレベル**: サブエージェントツールエラー→Plugin（dict返却で抑制）、オーケストレーターLLMエラー→`_pump_adk_events()`リトライ
   - 変更ファイル: `backend/app/infrastructure/adk/agent_service.py`
 
+- **企業DBエージェントにSlackツール7個を統合（2026-02-10）**
+  - `company_db_agent.py` に `ADK_SLACK_TOOLS` をインポート・統合（13→20ツール）
+  - ツール構成: 2 semantic + 7 strict + 4 Gmail + 7 Slack
+  - 指示文にSlackツール全7個のドキュメント・ワークフロー例を追加
+  - 優先度3（メール・Slack検索）にSlack系7ツールを追加
+  - ワークフロー例に「企業のSlack上の言及確認」「DB+メール+Slack統合分析」パターンを追加
+  - tool_descriptionに「Gmail・Slackから企業のFee・条件・内部議論も検索可能」を追加
+  - フロントエンドの変更は不要（SlackツールのUI設定はChatMessage.tsxに登録済み）
+
 ---
 
 > ## **【最重要・再掲】記憶の更新は絶対に忘れるな**

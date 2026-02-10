@@ -20,6 +20,7 @@ from .base import SubAgentFactory
 from app.infrastructure.adk.tools.company_db_tools import ADK_COMPANY_DB_TOOLS
 from app.infrastructure.adk.tools.semantic_company_tools import ADK_SEMANTIC_COMPANY_TOOLS
 from app.infrastructure.adk.tools.workspace_tools import ADK_GMAIL_TOOLS
+from app.infrastructure.adk.tools.slack_tools import ADK_SLACK_TOOLS
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -38,8 +39,9 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
     - Need-based appeal point retrieval
     - PIC (advisor) recommended companies
     - Gmail search for company-related emails
+    - Slack search for company-related messages
 
-    Total: 13 tools (2 semantic + 7 strict + 4 Gmail)
+    Total: 20 tools (2 semantic + 7 strict + 4 Gmail + 7 Slack)
     """
 
     @property
@@ -55,6 +57,7 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
         return (
             "企業情報のセマンティック検索・マッチング・訴求ポイント取得。"
             "ベクトル検索を優先し、候補者の転職理由から最適企業を高速推薦。"
+            "Gmail・Slackから企業のFee・条件・内部議論も検索可能。"
         )
 
     def _get_domain_tools(
@@ -79,6 +82,10 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
         # 3. Gmail tools - search company-related emails
         tools.extend(ADK_GMAIL_TOOLS)
         logger.info(f"[CompanyDatabaseAgent] Added {len(ADK_GMAIL_TOOLS)} Gmail tools")
+
+        # 4. Slack tools - search company-related Slack messages
+        tools.extend(ADK_SLACK_TOOLS)
+        logger.info(f"[CompanyDatabaseAgent] Added {len(ADK_SLACK_TOOLS)} Slack tools")
 
         logger.info(f"[CompanyDatabaseAgent] Total tools: {len(tools)}")
         return tools
@@ -111,17 +118,24 @@ class CompanyDatabaseAgentFactory(SubAgentFactory):
 - 回答にはデータの出所を添える（例: 「企業DB セマンティック検索 類似度0.82」「企業DB 厳密検索 東京都・年収600万以上」「Gmailスレッド 2025/5/15」等）
 - セマンティック検索結果には類似度スコア、厳密検索結果にはフィルタ条件を含めると、ユーザーが結果の信頼度を判断しやすくなる
 
-### 優先度3: メール検索（DB外の生情報補完）
+### 優先度3: メール・Slack検索（DB外の生情報補完）
 | やりたいこと | 使うべきツール |
 |------------|--------------|
 | 企業関連のメール検索 | `search_gmail` |
 | メール本文確認 | `get_email_detail` |
 | やり取りの流れ追跡 | `get_email_thread` |
 | 最新メール確認 | `get_recent_emails` |
+| 企業のSlack言及検索 | `search_company_in_slack` ★企業特化 |
+| Slack全文検索 | `search_slack_messages` |
+| チャネル履歴確認 | `get_channel_messages` |
+| スレッド返信取得 | `get_thread_replies` |
+| チャネル一覧 | `list_slack_channels` |
+| 候補者のSlack言及 | `search_candidate_in_slack` |
+| 自分のSlack活動 | `get_my_slack_activity` |
 
 ---
 
-## 利用可能なツール (13個)
+## 利用可能なツール (20個)
 
 ### 【セマンティック検索】★優先使用
 
@@ -212,6 +226,50 @@ Gmailを検索。企業名・担当者名・求人キーワードで絞り込み
 
 ---
 
+### 【Slack検索】企業・候補者のSlack上の言及を発掘
+
+Slackには企業のFee・条件、候補者の進捗状況、チーム内の議論など、メールやDBには載らないリアルタイムの情報がある。
+
+#### search_company_in_slack ⭐企業特化
+企業名でSlack横断検索。Fee・条件・最新状況を構造化して返す。
+- **company_name** (必須): 企業名（例: ラフロジック、株式会社MyVision）
+- **days_back** (任意): 遡る日数（1-90、デフォルト30）
+
+#### search_slack_messages
+Slack全体をフルテキスト検索。チャネル横断。
+- **query** (必須): 検索キーワード（in:#channel, from:@user, after:YYYY-MM-DD 構文対応）
+- **channel** (任意): チャネル名で絞り込み
+- **from_user** (任意): 送信者で絞り込み
+- **date_from/date_to** (任意): 日付範囲
+- **max_results** (任意): 取得件数（デフォルト20）
+
+#### get_channel_messages
+特定チャネルの直近メッセージ取得。
+- **channel_name_or_id** (必須): チャネル名またはID
+- **hours** (任意): 遡る時間数（デフォルト24h）
+- **max_results** (任意): 取得件数（デフォルト50）
+
+#### get_thread_replies
+スレッドの全返信を取得。
+- **channel_name_or_id** (必須): チャネル名またはID
+- **thread_ts** (必須): スレッドタイムスタンプ
+
+#### list_slack_channels
+アクセス可能なチャネル一覧（DM除外）。
+- **max_results** (任意): 取得件数（デフォルト100）
+
+#### search_candidate_in_slack
+候補者名でSlack横断検索。進捗・やりとりを構造化。
+- **candidate_name** (必須): 候補者名
+- **days_back** (任意): 遡る日数（デフォルト30）
+
+#### get_my_slack_activity
+自分の投稿・メンションを一括取得。
+- **activity_type** (任意): "all" / "my_posts" / "mentions"（デフォルト: all）
+- **days_back** (任意): 遡る日数（デフォルト7）
+
+---
+
 ## ワークフロー例
 
 ### 1. 候補者への企業提案（推奨パターン）
@@ -251,6 +309,23 @@ get_recent_emails(hours=72, max_results=20) → 直近3日のメール
 → 企業名でフィルタしてDB情報と照合
 ```
 
+### 6. 企業のSlack上の言及を確認
+```
+1. search_company_in_slack(company_name="株式会社○○", days_back=30)
+   → チャネル別言及数、Fee・条件に関する投稿を構造化取得
+2. get_thread_replies(channel_name_or_id, thread_ts)
+   → 気になるスレッドの詳細を確認
+→ DB情報 + メール + Slackの3ソースを統合して提案
+```
+
+### 7. DB + メール + Slack 統合分析（推奨）
+```
+1. find_companies_for_candidate(...) → DB上のマッチング
+2. search_gmail(query="subject:株式会社○○ newer_than:90d") → メールでの連絡履歴
+3. search_company_in_slack(company_name="株式会社○○") → Slackでの内部議論・Fee情報
+→ 3ソースの情報を統合して包括的な企業提案
+```
+
 ---
 
 ## ニーズタイプ定義
@@ -268,7 +343,7 @@ get_recent_emails(hours=72, max_results=20) → 直近3日のメール
 ## 回答方針
 - **まずセマンティック検索で候補を絞る**（高速・自然言語対応）
 - 詳細確認が必要な場合のみ厳密検索を併用
-- **DBにない情報はメールで補完**: 採用担当とのやり取り、条件交渉の経緯、非公開求人などはメール検索で取得
+- **DBにない情報はメール・Slackで補完**: 採用担当とのやり取り、条件交渉の経緯、非公開求人などはメール検索、Fee・内部議論・進捗はSlack検索で取得
 - 企業名・年収レンジを明確に提示
 - マッチスコアと理由を説明
 - 訴求ポイントは候補者への説明に使える形で出力
