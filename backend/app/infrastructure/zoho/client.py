@@ -561,8 +561,20 @@ class ZohoClient:
             logger.warning(f"[zoho] get_app_hc_records_batch failed: {e}, using fallback")
             return _legacy_batch()
 
-    def search_app_hc_by_exact_name(self, name: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search APP-hc by candidate name with strict equality (equals).
+    def search_app_hc_by_exact_name(self, name: str, limit: int = 5, *, name_variations: List[str] | None = None) -> List[Dict[str, Any]]:
+        """Search APP-hc by candidate name with multi-variation strategy.
+
+        Strategy (stops at first hit):
+        1. Try ``equals`` with each name variation (raw, normalized, spaceless)
+        2. Fallback to ``starts_with`` with spaceless name (catches partial matches)
+
+        The caller is still expected to verify matches (e.g. via ``is_exact_match``).
+
+        Args:
+            name: Primary search name.
+            limit: Max records per search call.
+            name_variations: Pre-computed variations to try. If None, tries
+                [name] only (backward-compatible).
 
         Returns records with minimal fields: id (Zoho record id), candidate name, candidate id (custom field).
         0 or multiple hits should be handled by the caller (we do not pick one heuristically).
@@ -577,24 +589,45 @@ class ZohoClient:
                 "APP-hc name field API not resolvable. Set ZOHO_APP_HC_MODULE/ZOHO_APP_HC_NAME_FIELD_API explicitly or use /api/v1/zoho/modules and /api/v1/zoho/fields to discover."
             )
 
-        def _search_api_equals() -> Dict[str, Any]:
-            crit = f"({name_field}:equals:{name})"
+        def _search_api(search_name: str, op: str) -> List[Dict[str, Any]]:
+            crit = f"({name_field}:{op}:{search_name})"
             params: Dict[str, Any] = {"criteria": crit, "per_page": limit}
             fields = ["id", name_field]
             if id_field:
                 fields.append(id_field)
             params["fields"] = ",".join(fields)
-            return self._get(f"/crm/v2/{module_api}/search", params) or {}
+            result = self._get(f"/crm/v2/{module_api}/search", params) or {}
+            return result.get("data", []) or []
 
-        logger.info("[zoho] search exact (search API): module=%s name=%s", module_api, name)
+        variations = name_variations or [name]
+        logger.info("[zoho] search exact: module=%s name=%s variations=%s", module_api, name, variations)
+
         data: List[Dict[str, Any]] = []
-        try:
-            legacy = _search_api_equals()
-            data = legacy.get("data", []) or []
-        except ZohoAuthError:
-            raise
-        except Exception as e:
-            logger.warning("[zoho] search exact failed: %s", e)
+
+        # Stage 1: equals with each variation
+        for variation in variations:
+            try:
+                data = _search_api(variation, "equals")
+                if data:
+                    logger.info("[zoho] search hit: op=equals variation='%s' count=%s", variation, len(data))
+                    break
+            except ZohoAuthError:
+                raise
+            except Exception as e:
+                logger.warning("[zoho] search equals failed: variation='%s' err=%s", variation, e)
+
+        # Stage 2: starts_with fallback (only if equals found nothing)
+        if not data:
+            for variation in variations:
+                try:
+                    data = _search_api(variation, "starts_with")
+                    if data:
+                        logger.info("[zoho] search hit: op=starts_with variation='%s' count=%s", variation, len(data))
+                        break
+                except ZohoAuthError:
+                    raise
+                except Exception as e:
+                    logger.warning("[zoho] search starts_with failed: variation='%s' err=%s", variation, e)
 
         records = []
         for r in data or []:

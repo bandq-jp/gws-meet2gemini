@@ -129,6 +129,7 @@ def mock_candidate_title_matcher():
     # Mock extraction methods
     matcher.extract_from_title.return_value = "テスト候補者"
     matcher.is_exact_match.return_value = True
+    matcher.get_search_variations.return_value = ["テスト候補者"]
     
     return matcher
 

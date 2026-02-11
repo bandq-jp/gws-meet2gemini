@@ -74,6 +74,26 @@
 - サブエージェント503: on_tool_error_callbackでdict返却→re-raise回避
 - オーケストレーター503: _pump_adk_events()で指数バックオフリトライ (2s→4s→8s, 最大3回)
 
+### 議事録一覧ページネーション
+- `meeting_documents_enriched` VIEW: `is_structured`, `zoho_sync_status` を計算列で持つ
+- 全タブ1クエリ: `count="exact"` + `.range()` でSQL側フィルタ+ページネーション
+- マイグレーション: `0023_add_meeting_documents_enriched_view.sql`
+- ブラウザバック対応: URL search params (`?tab=sync_failed&page=2`) + `replaceState`
+
+### Zoho自動同期 名前マッチング (2026-02-11改善)
+- **extract_from_title**: `_TIME_PREFIX_RE` でJP時間プレフィックス事前除去 (修正前56%→修正後74%正常抽出)
+- **`~`→`[~〜～]`**: 全角チルダ`〜`/`～`もlookbehind対象に追加
+- **ダブルスペース対応**: regex中の `[\s　]` → `[\s　]+` で複数スペース許容
+- **CandidateTitleMatcher**: `_normalize_spaceless()` で全スペース除去比較を追加
+- **is_exact_match**: 2段階比較 (1.標準正規化 → 2.スペース除去比較)
+- **get_search_variations**: 名前バリエーション生成 (raw, normalized, spaceless)
+- **search_app_hc_by_exact_name**: 多バリエーション×equals → starts_withフォールバック
+- **auto_process**: 複数Zohoヒット時は正規化マッチで1件に絞り込み
+- **実データ分析**: Zoho名はスペースあり/なし混在。`向井直也`(spaceless)で検索ヒット確認済み
+- **全角括弧対応**: `（仮）石岡様` → regex除外+`_NOISE_PREFIX_RE`で`（仮）`除去。Zoho API 400を回避
+- **残課題**: 姓のみタイトル (`田中様_初回面談`) は26%存在→データ制約で改善不可
+- **残課題**: Zoho重複レコード（同名別ID: 向井直也×2, 大石周×2）→正しくスキップするが手動対応必要
+
 ---
 
 ## 自己改善ログ（教訓集）
@@ -114,7 +134,9 @@
 ### API固有知見
 - **Slack**: `search.messages`はUser Token(`xoxp-`)のみ。Bot Token(`xoxb-`)では`not_allowed_token_type`
 - **Zoho COQL**: WHERE句必須、LIKE非サポート
+- **Zoho Search API**: `equals`はスペース含む完全一致。日本語名は`equals`+`starts_with`フォールバック+名前バリエーション(spaceless等)で検索精度向上
 - **Meta Ads**: `get_insights`のbreakdownは1つずつ、7d_view/28d_viewは2026年1月廃止、budgetはcents
+- **PostgREST NOT IN**: 大量UUIDのNOT INフィルタはURL長制限で400エラー。VIEWで計算列を使うのが正解
 
 ---
 

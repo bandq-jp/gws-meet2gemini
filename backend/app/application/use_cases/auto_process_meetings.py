@@ -274,9 +274,11 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    # Zoho検索もtext_content取得の前に実行（不要なDB取得を回避）
-                    matches = zoho.search_app_hc_by_exact_name(extracted, limit=5)
-                    if len(matches) != 1:
+                    # Zoho検索: 名前バリエーション（スペース有無等）で複数パターン検索
+                    variations = matcher.get_search_variations(extracted)
+                    matches = zoho.search_app_hc_by_exact_name(extracted, limit=5, name_variations=variations)
+
+                    if not matches:
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'zoho_not_exact',
                             'meeting_id': meeting_id,
@@ -285,16 +287,28 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    match = matches[0]
-
-                    if not matcher.is_exact_match(extracted, match.get("candidate_name", "")):
-                        mock_candidate = type('SkippedCandidate', (), {
-                            'skip_reason': 'zoho_not_exact',
-                            'meeting_id': meeting_id,
-                            'title': title
-                        })()
-                        candidates.append(mock_candidate)
-                        continue
+                    # 複数ヒット時: 正規化マッチで絞り込み
+                    if len(matches) > 1:
+                        verified = [m for m in matches if matcher.is_exact_match(extracted, m.get("candidate_name", ""), pre_extracted=True)]
+                        if len(verified) != 1:
+                            mock_candidate = type('SkippedCandidate', (), {
+                                'skip_reason': 'zoho_not_exact',
+                                'meeting_id': meeting_id,
+                                'title': title
+                            })()
+                            candidates.append(mock_candidate)
+                            continue
+                        match = verified[0]
+                    else:
+                        match = matches[0]
+                        if not matcher.is_exact_match(extracted, match.get("candidate_name", ""), pre_extracted=True):
+                            mock_candidate = type('SkippedCandidate', (), {
+                                'skip_reason': 'zoho_not_exact',
+                                'meeting_id': meeting_id,
+                                'title': title
+                            })()
+                            candidates.append(mock_candidate)
+                            continue
 
                     # Zohoマッチ確定後にのみtext_contentを取得
                     full = repo.get_meeting_core(meeting_id)
