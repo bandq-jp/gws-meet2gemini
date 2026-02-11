@@ -48,6 +48,10 @@ class WordPressAgentFactory(SubAgentFactory):
             "記事作成・編集を担当。"
         )
 
+    @property
+    def thinking_level(self) -> str:
+        return "low"
+
     def _get_domain_tools(
         self,
         mcp_servers: List[Any] | None = None,
@@ -128,7 +132,7 @@ class WordPressAgentFactory(SubAgentFactory):
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

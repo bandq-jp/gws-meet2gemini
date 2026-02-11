@@ -104,7 +104,7 @@ COQL WHERE句の日付条件は今日から正確に計算すること。
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

@@ -55,7 +55,8 @@
 
 ### ADKエージェント構成
 - **オーケストレーター**: Gemini 3 Flash Preview, Context Cache有効 (90%コスト削減)
-- **サブエージェント (10個)**: AnalyticsAgent(GA4), SEOAgent(GSC), AdPlatformAgent(Meta Ads 20ツール), ZohoCRMAgent(3層12ツール), CompanyDatabaseAgent(20ツール: semantic+strict+Gmail+Slack), CASupportAgent(31ツール), WorkspaceAgent(Gmail+Calendar 8ツール), SlackAgent(7ツール), GoogleSearchAgent, CodeExecutionAgent
+- **サブエージェント (12個)**: AnalyticsAgent(GA4), SEOAgent(GSC), AdPlatformAgent(Meta Ads 20ツール), ZohoCRMAgent(3層12ツール), CompanyDatabaseAgent(20ツール: semantic+strict+Gmail+Slack), CASupportAgent(33ツール), CandidateInsightAgent(5ツール), WorkspaceAgent(Gmail+Calendar 8ツール), SlackAgent(7ツール), GoogleSearchAgent, CodeExecutionAgent, WordPressAgent
+- **Thinking Level**: high(AdPlatform,CandidateInsight,CASupport), medium(Analytics,SEO,ZohoCRM,CompanyDB,CodeExecution,Orchestrator), low(WordPress,GoogleSearch,Slack,Workspace)
 - **共通機能**: ask_user_clarification, マルチモーダルアップロード, State永続化, OTelテレメトリ(Phoenix)
 - **State注入**: app:user_name/email/id, app:slack_*, app:current_date/time/day_of_week
 
@@ -64,11 +65,20 @@
 - FBレビューダッシュボード (/feedback), JSONL/CSVエクスポート
 - DB: feedback_dimensions, feedback_tags, message_feedback, message_annotations
 
-### トークン最適化
-- MCPResponseOptimizerPlugin: GA4/Zoho/Meta Adsレスポンス圧縮 (60-80%削減)
+### トークン最適化（2026-02-10 大幅強化）
+- **MCPResponseOptimizerPlugin** (5つの最適化):
+  1. before_model_callback: ツール説明文の自動圧縮 (75ツール分の `_COMPRESSED_DESCRIPTIONS`)
+  2. before_model_callback: 広告画像Partsの自動注入 (マルチモーダル)
+  3. after_tool_callback: GA4/Meta Adsレスポンス圧縮 (60-80%削減)
+  4. after_tool_callback: get_ad_image → resize → types.Part変換
+  5. **[NEW] before_tool_callback: セッション内キャッシュ** (23ツール対象、同一args重複呼び出しスキップ)
 - MCPツールフィルタ: GA4 6→2, GSC 9→7, Meta Ads 30→20
-- before_model_callback: ツール説明文の自動圧縮
-- 広告画像: after_tool→before_model 2段パイプラインでマルチモーダル注入
+- **[NEW] FunctionTool docstring全圧縮**: MCP 38ツール + FunctionTool 34ツール = 計75ツール (40-60%削減)
+- **[NEW] サブエージェント指示文スリム化**: CompanyDB 350→20行, AdPlatform 300→40行, CASupport 95→30行
+- **[NEW] Orchestrator指示文簡潔化**: 350→80行 (キーワードマトリクス + 並列パターン大幅削減)
+- **[NEW] Thinking Level per-agent**: low(4), medium(5), high(3) + Orchestrator=medium (コスト30-50%削減)
+- **[NEW] EventsCompactionConfig**: 10ターンで会話履歴自動圧縮 (LlmEventSummarizer使用)
+- **[NEW] ContextCacheConfig**: 90%入力トークンコスト削減 (既設)
 
 ### エラー耐性
 - サブエージェント503: on_tool_error_callbackでdict返却→re-raise回避
@@ -93,6 +103,10 @@
 - **App使用時**: pluginsはAppに設定（Runnerではなく）
 - **MCP Image**: mcp_tool.pyがJSON dictにシリアライズ→before_model_callbackでPartsを直接注入が唯一の解
 - **新エージェント追加時**: Plugin SUB_AGENT_NAMES + フロントエンドUI設定を必ず同時更新
+- **Geminiクラス名**: `from google.adk.models.google_llm import Gemini` (`GoogleLlm`ではなく`Gemini`)
+- **EventsCompactionConfig**: `App`コンストラクタに`events_compaction_config`として渡す。`LlmEventSummarizer`のllm引数は`Gemini`インスタンス
+- **ThinkingConfig thinking_level**: `minimal`, `low`, `medium`, `high`。タスク複雑度に応じて設定。単純ツール呼び出し→low、分析→medium、統合推論→high
+- **ADK指示文のトークン節約原則**: ADKはツールスキーマ(関数シグネチャ+docstring)を自動送信するため、指示文にパラメータ説明を重複記述するのは無駄。ワークフロー+判断基準+出力形式だけを書く
 
 ### 設計判断
 - **機能配置**: 別エージェントか既存統合かはユーザーに確認。同ドメインは原則同エージェント

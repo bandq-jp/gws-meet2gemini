@@ -53,6 +53,10 @@ class GoogleSearchAgentFactory(SubAgentFactory):
             "競合情報の調査を担当。"
         )
 
+    @property
+    def thinking_level(self) -> str:
+        return "low"
+
     def _get_domain_tools(
         self,
         mcp_servers: List[Any] | None = None,
@@ -108,7 +112,7 @@ class GoogleSearchAgentFactory(SubAgentFactory):
             tools=self._get_domain_tools(mcp_servers, asset),
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

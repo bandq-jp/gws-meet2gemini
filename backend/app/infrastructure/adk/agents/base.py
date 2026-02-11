@@ -68,6 +68,15 @@ class SubAgentFactory(ABC):
         # Use Gemini Flash for sub-agents (fast and cost-effective)
         return self._settings.adk_sub_agent_model or "gemini-2.0-flash"
 
+    @property
+    def thinking_level(self) -> str:
+        """Thinking level for this agent. Override in subclass for tuning.
+
+        Options: minimal, low, medium, high
+        Default: medium (balanced cost/quality for most agents)
+        """
+        return "medium"
+
     @abstractmethod
     def _get_domain_tools(
         self,
@@ -116,7 +125,7 @@ class SubAgentFactory(ABC):
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

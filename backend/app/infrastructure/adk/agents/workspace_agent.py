@@ -52,6 +52,10 @@ class GoogleWorkspaceAgentFactory(SubAgentFactory):
             "メール検索・閲覧、予定確認・検索を担当。"
         )
 
+    @property
+    def thinking_level(self) -> str:
+        return "low"
+
     def _get_domain_tools(
         self,
         mcp_servers: List[Any] | None = None,
@@ -218,7 +222,7 @@ search_calendar_events(query="○○") → 該当イベント一覧
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

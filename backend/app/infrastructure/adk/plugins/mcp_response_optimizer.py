@@ -1,15 +1,17 @@
 """
 Plugin to optimize tool interactions for LLM token savings.
 
-Four optimizations:
+Five optimizations:
 1. before_model_callback: Compress verbose tool descriptions (MCP + Zoho + Meta, ~60% input token reduction)
 2. before_model_callback: Inject pending ad image Parts into LLM context (multimodal)
 3. after_tool_callback: Compress GA4/Meta Ads report responses (~70% output token reduction)
 4. after_tool_callback: Intercept get_ad_image, resize to ~Full HD, convert to types.Part
+5. before_tool_callback: Session-scoped cache for read-only tools (skip redundant API calls)
 """
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -65,6 +67,24 @@ _COMPRESSED_DESCRIPTIONS: dict[str, str] = {
         "GSC期間比較。site_url, period1_start/end, period2_start/end(必須), "
         "dimensions, limit指定可能。2期間のパフォーマンスを比較。"
     ),
+    "get_search_analytics": (
+        "GSC検索分析。site_url, start_date, end_date(必須), "
+        "dimensions, search_type, row_limit, sort_by, "
+        "filter_dimension, filter_expression, filter_operator指定可能。"
+    ),
+    "get_performance_overview": (
+        "GSCパフォーマンス概要。site_url(必須), start_date, end_date指定可能。"
+        "クリック・表示・CTR・掲載順位のサマリー。"
+    ),
+    "get_search_by_page_query": (
+        "GSCページ別クエリ分析。site_url, page_url(必須), "
+        "start_date, end_date, row_limit指定可能。"
+    ),
+    "inspect_url_enhanced": (
+        "GSC URL検査(強化版)。site_url, url(必須)。"
+        "インデックス状態・クロール情報・リッチリザルト確認。"
+    ),
+    "get_sitemaps": "GSCサイトマップ一覧取得。site_url(必須)。提出済みサイトマップのステータス確認。",
     # ── Zoho CRM tools (Tier 1) ──
     "list_crm_modules": (
         "Zoho CRM全モジュール一覧。include_record_counts=Trueで件数付き。"
@@ -135,7 +155,86 @@ _COMPRESSED_DESCRIPTIONS: dict[str, str] = {
     "search_behaviors": "行動ターゲティング検索。limit指定可能。",
     "search_demographics": "デモグラ検索。demographic_class(必須: demographics/life_events/industries/income等)。",
     "search_geo_locations": "地域検索。query(必須), location_types(country/region/city/zip)。",
+    # ── Company DB tools (8) ──
+    "get_company_definitions": "企業DBマスタ定義一覧。業種・勤務地・ニーズタイプ・担当者リスト。",
+    "search_companies": "条件フィルタ企業検索。industry, location, min_salary, max_age, remote_ok指定可能。",
+    "get_company_detail": "企業全詳細+訴求ポイント取得。company_name(必須, 部分一致)。",
+    "get_company_requirements": "採用要件のみ取得。company_name(必須)。年齢・学歴・経験社数。",
+    "get_appeal_by_need": "ニーズ別訴求ポイント。company_name, need_type(salary/growth/wlb/atmosphere/future)(必須)。",
+    "match_candidate_to_companies": (
+        "候補者→企業スコアリング(厳密マッチ)。record_id or age/salary/education等手動指定。"
+        "セマンティック検索はfind_companies_for_candidateを使用。"
+    ),
+    "get_pic_recommended_companies": "担当者別推奨企業リスト。pic_name(必須)。",
+    "compare_companies": "2-5社の並列比較表(年収・要件・訴求)。company_names(必須)。",
+    # ── Semantic Company tools (2) ──
+    "find_companies_for_candidate": (
+        "★最優先: 転職理由からベクトルマッチング。transfer_reasons(必須), "
+        "age, desired_salary, desired_locations, limit指定可能。"
+    ),
+    "semantic_search_companies": (
+        "★高速: 自然言語ベクトル検索。query(必須), "
+        "chunk_types(overview/requirements/salary/growth/wlb/culture), "
+        "max_age, min_salary, locations, limit指定可能。"
+    ),
+    # ── Gmail tools (4) ──
+    "search_gmail": "Gmail検索(Gmail検索構文対応)。query(必須), max_results指定可能。",
+    "get_email_detail": "メール本文取得(最大3000文字)。message_id(必須)。",
+    "get_email_thread": "スレッド全体を時系列取得(各1000文字)。thread_id(必須)。",
+    "get_recent_emails": "直近N時間のメール一覧。hours, label, max_results指定可能。",
+    # ── Calendar tools (4) ──
+    "get_today_events": "今日の予定一覧(JST)。パラメータなし。",
+    "list_calendar_events": "期間指定のイベント一覧。date_from, date_to, max_results指定可能。未指定→今日から7日間。",
+    "search_calendar_events": "キーワードでイベント検索。query(必須), date_from, date_to指定可能。",
+    "get_event_detail": "イベント詳細(参加者・Meet URL等)。event_id(必須)。",
+    # ── Slack tools (7) ──
+    "search_slack_messages": (
+        "Slack横断フルテキスト検索。query(必須), "
+        "channel, from_user, date_from, date_to, max_results指定可能。"
+    ),
+    "get_channel_messages": "チャネルの直近メッセージ取得。channel_name_or_id(必須), hours, max_results指定可能。",
+    "get_thread_replies": "スレッド全返信取得。channel_name_or_id, thread_ts(必須)。",
+    "list_slack_channels": "アクセス可能チャネル一覧(DM除外)。types, max_results指定可能。",
+    "search_company_in_slack": "企業名でSlack横断検索(構造化出力)。company_name(必須), days_back指定可能。",
+    "search_candidate_in_slack": "候補者名でSlack横断検索(構造化出力)。candidate_name(必須), days_back指定可能。",
+    "get_my_slack_activity": "自分の投稿・メンション取得。activity_type(all/my_posts/mentions), days_back指定可能。",
+    # ── Candidate Insight tools (5) ──
+    "analyze_competitor_risk": "競合エージェントリスク分析。channel, date_from, date_to, limit指定可能。",
+    "assess_candidate_urgency": "緊急度評価(転職時期・離職・他社オファー)。channel, status, date_from, date_to指定可能。",
+    "analyze_transfer_patterns": "転職パターン集計。channel, group_by(reason/timing/vision)指定可能。",
+    "generate_candidate_briefing": "面談ブリーフィング生成(Zoho+構造化データ統合)。record_id(必須)。",
+    "get_candidate_summary": "候補者統合サマリー(Zoho+構造化+リスク評価)ワンショット取得。record_id(必須)。",
+    # ── Meeting tools (4) ──
+    "search_meetings": "議事録検索。title_keyword, candidate_name, organizer_email, date_from, date_to指定可能。",
+    "get_meeting_transcript": "議事録本文取得(最大5000文字)。meeting_id(必須)。",
+    "get_structured_data_for_candidate": "候補者のAI構造化データ取得。record_idまたはcandidate_name(必須)。",
+    "get_candidate_full_profile": "候補者完全プロファイル(Zoho+構造化+議事録統合)。record_id(必須)。",
 }
+
+# ── Cacheable tools (read-only, data stable within a session) ──
+# These tools are safe to cache within a session (5-15 min).
+# NOT cached: Gmail, Calendar, Slack (real-time), GA4/GSC (live data), Meta Ads (time-sensitive)
+_CACHEABLE_TOOLS: frozenset[str] = frozenset({
+    # Company DB (8) - spreadsheet data, rarely changes
+    "get_company_definitions", "search_companies", "get_company_detail",
+    "get_company_requirements", "get_appeal_by_need",
+    "match_candidate_to_companies", "get_pic_recommended_companies", "compare_companies",
+    # Semantic Company (2)
+    "find_companies_for_candidate", "semantic_search_companies",
+    # Zoho metadata (3) - schema/layout rarely changes
+    "list_crm_modules", "get_module_schema", "get_module_layout",
+    # Zoho record detail (1) - specific record, stable within session
+    "get_record_detail",
+    # Meeting (4) - historical data
+    "search_meetings", "get_meeting_transcript",
+    "get_structured_data_for_candidate", "get_candidate_full_profile",
+    # Candidate Insight (5) - analysis over historical data
+    "generate_candidate_briefing", "get_candidate_summary",
+    "analyze_competitor_risk", "assess_candidate_urgency", "analyze_transfer_patterns",
+})
+
+# Maximum cached entries per session to prevent unbounded growth
+_MAX_CACHE_ENTRIES_PER_SESSION = 50
 
 
 class MCPResponseOptimizerPlugin(BasePlugin):
@@ -159,22 +258,56 @@ class MCPResponseOptimizerPlugin(BasePlugin):
     # All tools whose descriptions may need compression
     COMPRESSIBLE_TOOL_NAMES = frozenset(
         _COMPRESSED_DESCRIPTIONS.keys()
-    ) | frozenset({
-        # GSC tools without pre-written descriptions
-        "get_search_analytics",
-        "get_performance_overview",
-        "get_search_by_page_query",
-        "inspect_url_enhanced",
-        "get_sitemaps",
-    })
+    )
 
     # Invocation-scoped storage for image Parts waiting to be injected.
     # Key: invocation_id, Value: list of types.Part (image inline_data).
     # Populated in after_tool_callback, consumed in before_model_callback.
     _pending_images: dict[str, list] = defaultdict(list)
 
+    # Session-scoped tool result cache.
+    # Key: session_id, Value: dict of cache_key -> result dict.
+    # Prevents redundant API calls for read-only tools within a session.
+    _tool_cache: dict[str, dict[str, dict]] = defaultdict(dict)
+
     def __init__(self, name: str = "mcp_response_optimizer"):
         super().__init__(name=name)
+
+    # ── Tool cache: skip redundant calls for read-only tools ──
+
+    async def before_tool_callback(
+        self,
+        *,
+        tool: BaseTool,
+        tool_args: dict[str, Any],
+        tool_context: ToolContext,
+    ) -> Optional[dict]:
+        """Return cached result for cacheable read-only tools.
+
+        If the same tool was called with identical args in this session,
+        return the cached result immediately (skipping the actual API call).
+        """
+        if tool.name not in _CACHEABLE_TOOLS:
+            return None
+
+        session_id = self._get_session_id(tool_context)
+        if not session_id:
+            return None
+
+        cache_key = self._make_cache_key(tool.name, tool_args)
+        session_cache = self._tool_cache.get(session_id)
+        if not session_cache:
+            return None
+
+        cached = session_cache.get(cache_key)
+        if cached is not None:
+            logger.info(
+                f"[MCPOptimizer] Cache hit: {tool.name} "
+                f"(session={session_id[:8]}..., {len(session_cache)} entries)"
+            )
+            return cached
+
+        return None
 
     # ── Input optimization: compress tool descriptions + inject images ──
 
@@ -313,11 +446,21 @@ class MCPResponseOptimizerPlugin(BasePlugin):
         tool_context: ToolContext,
         result: dict,
     ) -> Optional[dict]:
-        """Intercept GA4/Meta Ads responses and compress them.
+        """Intercept tool responses for compression and caching.
 
-        Also intercepts get_ad_image to extract the image, resize it,
-        and store as types.Part for injection into the next LLM call.
+        Responsibilities:
+        - Cache results from cacheable read-only tools
+        - Compress GA4 report responses to compact table format
+        - Compress Meta Ads verbose responses
+        - Intercept get_ad_image for multimodal injection
         """
+        # ── Cache cacheable tool results ──
+        if tool.name in _CACHEABLE_TOOLS and result is not None:
+            try:
+                self._store_in_cache(tool_context, tool.name, tool_args, result)
+            except Exception as e:
+                logger.debug(f"[MCPOptimizer] Cache store failed: {e}")
+
         # ── Ad image interception ──
         if tool.name == "get_ad_image":
             try:
@@ -825,3 +968,50 @@ class MCPResponseOptimizerPlugin(BasePlugin):
                 cleaned.append(clean_item)
 
         return json.dumps(cleaned, ensure_ascii=False)
+
+    # ── Tool cache helpers ──
+
+    def _store_in_cache(
+        self,
+        tool_context: ToolContext,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        result: dict,
+    ) -> None:
+        """Store tool result in session-scoped cache."""
+        session_id = self._get_session_id(tool_context)
+        if not session_id:
+            return
+
+        session_cache = self._tool_cache[session_id]
+        if len(session_cache) >= _MAX_CACHE_ENTRIES_PER_SESSION:
+            return  # Don't grow unbounded
+
+        cache_key = self._make_cache_key(tool_name, tool_args)
+        session_cache[cache_key] = result
+        logger.debug(
+            f"[MCPOptimizer] Cached: {tool_name} "
+            f"({len(session_cache)} entries, session={session_id[:8]}...)"
+        )
+
+    @staticmethod
+    def _get_session_id(tool_context: ToolContext) -> Optional[str]:
+        """Extract session ID from tool context for cache scoping."""
+        inv_ctx = getattr(tool_context, "_invocation_context", None)
+        if not inv_ctx:
+            return None
+        # Prefer session ID for cross-invocation caching within a session
+        session = getattr(inv_ctx, "session", None)
+        if session:
+            sid = getattr(session, "id", None)
+            if sid:
+                return str(sid)
+        # Fallback to invocation_id (still useful within one turn)
+        return getattr(inv_ctx, "invocation_id", None)
+
+    @staticmethod
+    def _make_cache_key(tool_name: str, tool_args: dict[str, Any]) -> str:
+        """Create deterministic cache key from tool name and sorted args."""
+        args_str = json.dumps(tool_args, sort_keys=True, ensure_ascii=False, default=str)
+        args_hash = hashlib.md5(args_str.encode()).hexdigest()[:12]
+        return f"{tool_name}:{args_hash}"

@@ -48,34 +48,10 @@ CA_SUPPORT_INSTRUCTIONS = """
 ## ミッション
 候補者の転職成功を支援するため、Zoho CRM・議事録・企業DB・メールを統合的に分析・提案します。
 
----
-
-## ツール概要（33個）
-
-- **Zoho CRM系（12個）**: 全モジュール動的アクセス（メタデータ発見→COQL検索→専門分析の3層構造）
-  - Tier 1: list_crm_modules, get_module_schema, get_module_layout
-  - Tier 2: query_crm_records, aggregate_crm_data, get_record_detail, get_related_records
-  - Tier 3: analyze_funnel_by_channel, trend_analysis_by_period, compare_channels, get_pic_performance, get_conversion_metrics
-- **候補者インサイト（4個）**: analyze_competitor_risk, assess_candidate_urgency, analyze_transfer_patterns, generate_candidate_briefing
-- **企業DB（7個）**: search_companies, get_company_detail, get_company_requirements, get_appeal_by_need, match_candidate_to_companies, get_pic_recommended_companies, get_company_definitions
-- **セマンティック検索（2個）★優先**: find_companies_for_candidate, semantic_search_companies
-- **議事録（4個）**: search_meetings, get_meeting_transcript, get_structured_data_for_candidate, get_candidate_full_profile
-- **Gmail（4個）**: search_gmail, get_email_detail, get_email_thread, get_recent_emails
-
----
-
 ## 主要ワークフロー
-
-### 企業提案（推奨）
-get_candidate_full_profile → find_companies_for_candidate → get_appeal_by_need
-
-### 面談準備
-get_record_detail("jobSeeker", id) → get_structured_data_for_candidate → analyze_competitor_risk
-
-### 情報補完（メール）
-search_gmail("from:候補者名 newer_than:30d") → get_email_thread → CRM情報と突合
-
----
+- **企業提案**: get_candidate_full_profile → find_companies_for_candidate → get_appeal_by_need
+- **面談準備**: get_record_detail → get_structured_data_for_candidate → analyze_competitor_risk
+- **情報補完**: search_gmail("from:候補者名 newer_than:30d") → get_email_thread → CRM情報と突合
 
 ## 検索優先順位
 1. **セマンティック検索**: find_companies_for_candidate / semantic_search_companies
@@ -83,8 +59,6 @@ search_gmail("from:候補者名 newer_than:30d") → get_email_thread → CRM情
 3. **厳密検索**: search_companies（フォールバック）
 
 ## ニーズタイプ: salary / growth / wlb / atmosphere / future
-
----
 
 ## ルール
 - 即座にツール実行（許可を求めるな）
@@ -124,6 +98,10 @@ class CASupportAgentFactory(SubAgentFactory):
             "面談準備・企業提案・リスク分析を一括実行。"
             "集団分析や単一ドメインの質問には専門エージェントを使用。"
         )
+
+    @property
+    def thinking_level(self) -> str:
+        return "high"
 
     def _get_domain_tools(
         self,
@@ -182,7 +160,7 @@ class CASupportAgentFactory(SubAgentFactory):
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

@@ -47,6 +47,10 @@ class CandidateInsightAgentFactory(SubAgentFactory):
             "Supabase構造化データとZoho CRMデータを統合した高度な分析を実施。"
         )
 
+    @property
+    def thinking_level(self) -> str:
+        return "high"
+
     def _get_domain_tools(
         self,
         mcp_servers: List[Any] | None = None,
@@ -148,7 +152,7 @@ analyze_transfer_patterns(group_by="reason") → 転職理由の傾向
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

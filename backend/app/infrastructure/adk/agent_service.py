@@ -23,7 +23,9 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Awaitable, Dict
 from google.adk.agents import Agent
 from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.agents.run_config import StreamingMode
-from google.adk.apps.app import App
+from google.adk.apps.app import App, EventsCompactionConfig
+from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
+from google.adk.models.google_llm import Gemini
 from google.adk.memory import InMemoryMemoryService
 from google.adk.runners import Runner, RunConfig
 from google.adk.sessions import InMemorySessionService
@@ -194,11 +196,32 @@ class ADKAgentService:
                 )
                 logger.info(f"[ADK] Context caching enabled: {cache_config}")
 
+            # Build events compaction config (compresses long conversation history)
+            compaction_config = None
+            try:
+                summarizer = LlmEventSummarizer(
+                    llm=Gemini(model=self._settings.gemini_fallback_model),
+                    prompt_template=(
+                        "以下の会話履歴を簡潔に要約してください。"
+                        "重要なデータ（数値、企業名、候補者名、ID）は正確に保持。\n\n"
+                        "{conversation_history}"
+                    ),
+                )
+                compaction_config = EventsCompactionConfig(
+                    compaction_interval=10,
+                    overlap_size=2,
+                    summarizer=summarizer,
+                )
+                logger.info("[ADK] Events compaction enabled (interval=10, overlap=2)")
+            except Exception as e:
+                logger.warning(f"[ADK] Events compaction setup failed: {e}")
+
             app = App(
                 name="marketing_ai",
                 root_agent=orchestrator,
                 plugins=app_plugins,
                 context_cache_config=cache_config,
+                events_compaction_config=compaction_config,
             )
 
             # Create runner with App (required for context caching)

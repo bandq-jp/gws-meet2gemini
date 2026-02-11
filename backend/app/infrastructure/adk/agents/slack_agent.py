@@ -52,6 +52,10 @@ class SlackAgentFactory(SubAgentFactory):
             "メッセージ全文検索・チャネル履歴・スレッド取得・企業/候補者検索を担当。"
         )
 
+    @property
+    def thinking_level(self) -> str:
+        return "low"
+
     def _get_domain_tools(
         self,
         mcp_servers: List[Any] | None = None,
@@ -231,7 +235,7 @@ search_candidate_in_slack(candidate_name="山田") → 構造化サマリー
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(

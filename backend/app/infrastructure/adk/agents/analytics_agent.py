@@ -277,7 +277,7 @@ order_bys: [{metric: {metric_name: "sessions"}, desc: true}]
             tools=tools,
             planner=BuiltInPlanner(
                 thinking_config=types.ThinkingConfig(
-                    thinking_level="high",
+                    thinking_level=self.thinking_level,
                 ),
             ),
             generate_content_config=types.GenerateContentConfig(
