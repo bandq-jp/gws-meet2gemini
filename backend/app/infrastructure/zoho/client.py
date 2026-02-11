@@ -1385,8 +1385,9 @@ class ZohoWriteClient:
         zoho_data = {}
 
         # フィールド長制限定義（文字数制限のあるテキストフィールド）
+        # Zoho CRMのテキストフィールドはデフォルト255文字制限
         text_field_limits = {
-            # テキストフィールドの255文字制限
+            # 255文字制限のテキストフィールド
             "difficult_work": 255,
             "enjoyed_work": 255,
             "salary_memo": 255,
@@ -1399,15 +1400,24 @@ class ZohoWriteClient:
             "customer_acquisition": 255,
             "base_incentive_ratio": 255,
             "new_existing_ratio": 255,
-            # より長いテキストフィールド（あれば）
+            "other_offer_salary": 255,
+            "ca_ra_focus": 255,
+            "current_duties": 255,       # field131: 現職での担当業務
+            "career_history": 255,        # field85: 職歴
+            "company_good_points": 255,   # field46: 現職企業の良いところ
+            "company_bad_points": 255,    # field56: 現職企業の悪いところ
+            "transfer_trigger": 255,      # field96: 転職検討理由/きっかけ
+            "timing_details": 255,        # field27: 転職希望時期の詳細
+            "salary_breakdown": 255,      # field35: 現年収内訳
+            "current_agents": 255,        # 現在利用中のエージェント
+            "agent_count": 255,           # エージェント利用数
+            # より長いテキストフィールド
             "transfer_priorities": 1000,
             "companies_in_selection": 500,
             "other_company_intention": 500,
             "job_appeal_points": 500,
             "job_concerns": 500,
             "introduced_jobs": 500,
-            "other_offer_salary": 255,
-            "ca_ra_focus": 255,
         }
 
         for structured_field, value in structured_data.items():
@@ -1462,7 +1472,12 @@ class ZohoWriteClient:
 
                 zoho_data[zoho_field] = converted_text
             elif isinstance(value, (int, float)):
-                zoho_data[zoho_field] = value
+                # Zohoでinteger型のフィールドはintに変換（floatだとINVALID_DATAエラー）
+                integer_fields = {"field28", "desired_first_year_salary"}
+                if zoho_field in integer_fields:
+                    zoho_data[zoho_field] = int(value)
+                else:
+                    zoho_data[zoho_field] = value
             elif isinstance(value, str):
                 # 文字列の場合は文字数制限チェック
                 cleaned_value = value.strip()
