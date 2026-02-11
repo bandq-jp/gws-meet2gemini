@@ -71,6 +71,10 @@ class MeetingRepositoryImpl:
             return data
         return []
     
+    # ビュー名: meeting_documents_enriched
+    # is_structured (bool), zoho_sync_status (text) を持つ計算済みビュー
+    VIEW = "meeting_documents_enriched"
+
     def list_meetings_paginated(
         self,
         page: int = 1,
@@ -82,18 +86,15 @@ class MeetingRepositoryImpl:
     ) -> Dict[str, Any]:
         """ページネーション付きの軽量な議事録一覧取得
 
-        タブごとに最適なクエリ戦略を使い分ける:
-        - 全て:     LEFT JOIN  で count+page+enrichment を 1クエリ
-        - 構造化:   INNER JOIN で count+page+enrichment を 1クエリ
-        - 未処理:   structured ID取得 + NOT IN で count+page を 2クエリ
-        - 同期失敗: INNER JOIN + ステータスフィルタで 1クエリ
+        meeting_documents_enriched ビューを使用し、全タブ 1 クエリで
+        正確な total + page_size 件のデータを返す。
         """
         try:
             sb = get_supabase()
             start = (page - 1) * page_size
             end = start + page_size - 1
 
-            base_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,created_at,updated_at"
+            select_fields = "id,doc_id,title,meeting_datetime,organizer_email,organizer_name,document_url,invited_emails,created_at,updated_at,is_structured,zoho_sync_status"
 
             empty_response = {
                 "items": [], "total": 0, "page": page,
@@ -101,92 +102,35 @@ class MeetingRepositoryImpl:
                 "has_next": False, "has_previous": False,
             }
 
-            def apply_base_filters(query):
-                """アカウント・検索の共通フィルタ"""
-                if accounts:
-                    query = query.in_("organizer_email", accounts)
-                if search_query and search_query.strip():
-                    query_term = f"%{search_query.strip()}%"
-                    query = query.or_(
-                        f"title.ilike.{query_term},"
-                        f"organizer_email.ilike.{query_term},"
-                        f"organizer_name.ilike.{query_term}"
-                    )
-                return query
+            # ビューに対して 1 クエリ (count + page)
+            query = sb.table(self.VIEW).select(select_fields, count="exact")
 
-            def _flatten_structured_outputs(items: list):
-                """PostgREST embedded structured_outputs を flat 化"""
-                for it in items:
-                    so = it.pop("structured_outputs", None)
-                    if isinstance(so, list) and so:
-                        it["is_structured"] = True
-                        it["zoho_sync_status"] = so[0].get("zoho_sync_status")
-                    else:
-                        it["is_structured"] = False
-                        it["zoho_sync_status"] = None
-
-            # ================================================================
-            # タブごとの最適クエリ
-            # ================================================================
-
-            if zoho_sync_failed is True:
-                # ---- 同期失敗: INNER JOIN + ステータスフィルタ (1クエリ) ----
-                select_expr = f"{base_fields},structured_outputs!inner(zoho_sync_status)"
-                query = sb.table(self.TABLE).select(select_expr, count="exact")
-                query = apply_base_filters(query)
-                query = query.filter(
-                    "structured_outputs.zoho_sync_status", "in",
-                    "(failed,auth_error,field_mapping_error,error)"
+            # 共通フィルタ: アカウント・検索
+            if accounts:
+                query = query.in_("organizer_email", accounts)
+            if search_query and search_query.strip():
+                query_term = f"%{search_query.strip()}%"
+                query = query.or_(
+                    f"title.ilike.{query_term},"
+                    f"organizer_email.ilike.{query_term},"
+                    f"organizer_name.ilike.{query_term}"
                 )
-                res = query.order("meeting_datetime", desc=True).range(start, end).execute()
-                total = getattr(res, "count", 0) or 0
-                items = getattr(res, "data", []) or []
-                _flatten_structured_outputs(items)
 
+            # タブ固有フィルタ
+            if zoho_sync_failed is True:
+                query = query.in_(
+                    "zoho_sync_status",
+                    ["failed", "auth_error", "field_mapping_error", "error"]
+                )
             elif structured is True:
-                # ---- 構造化: INNER JOIN (1クエリ) ----
-                select_expr = f"{base_fields},structured_outputs!inner(zoho_sync_status)"
-                query = sb.table(self.TABLE).select(select_expr, count="exact")
-                query = apply_base_filters(query)
-                res = query.order("meeting_datetime", desc=True).range(start, end).execute()
-                total = getattr(res, "count", 0) or 0
-                items = getattr(res, "data", []) or []
-                _flatten_structured_outputs(items)
-
+                query = query.eq("is_structured", True)
             elif structured is False:
-                # ---- 未処理: structured ID 除外 (2クエリ) ----
-                # Q1: 構造化済み meeting_id を取得
-                s_res = sb.table("structured_outputs").select("meeting_id").execute()
-                s_data = getattr(s_res, "data", []) or []
-                exclude_ids = [row["meeting_id"] for row in s_data]
+                query = query.eq("is_structured", False)
 
-                # Q2: NOT IN フィルタ付き count + page 一括
-                query = sb.table(self.TABLE).select(base_fields, count="exact")
-                query = apply_base_filters(query)
-                if exclude_ids:
-                    ids_csv = ",".join(exclude_ids)
-                    query = query.filter("id", "not.in", f"({ids_csv})")
-                res = query.order("meeting_datetime", desc=True).range(start, end).execute()
-                total = getattr(res, "count", 0) or 0
-                items = getattr(res, "data", []) or []
-                # 未処理 = structured_outputs が存在しない → 固定値
-                for it in items:
-                    it["is_structured"] = False
-                    it["zoho_sync_status"] = None
+            res = query.order("meeting_datetime", desc=True).range(start, end).execute()
+            total = getattr(res, "count", 0) or 0
+            items = getattr(res, "data", []) or []
 
-            else:
-                # ---- 全て: LEFT JOIN (1クエリ) ----
-                select_expr = f"{base_fields},structured_outputs(zoho_sync_status)"
-                query = sb.table(self.TABLE).select(select_expr, count="exact")
-                query = apply_base_filters(query)
-                res = query.order("meeting_datetime", desc=True).range(start, end).execute()
-                total = getattr(res, "count", 0) or 0
-                items = getattr(res, "data", []) or []
-                _flatten_structured_outputs(items)
-
-            # ================================================================
-            # レスポンス
-            # ================================================================
             if total == 0:
                 return empty_response
 

@@ -63,6 +63,9 @@ export default function HitocariListPage() {
 
   // Tab states
   const [activeTab, setActiveTab] = useState<'all' | 'structured' | 'unstructured' | 'sync_failed'>('all');
+
+  // URL復元フラグ（ブラウザバック対応）
+  const [urlRestored, setUrlRestored] = useState(false);
   
   // Combobox states
   const [open, setOpen] = useState(false);
@@ -229,7 +232,38 @@ export default function HitocariListPage() {
   useEffect(() => {
     loadAvailableAccounts();
   }, [loadAvailableAccounts]);
-  
+
+  // URL からタブ・ページを復元（ブラウザバック対応）
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    const page = parseInt(params.get('page') || '1', 10);
+    const validTabs = ['all', 'structured', 'unstructured', 'sync_failed'] as const;
+    if (tab && (validTabs as readonly string[]).includes(tab)) {
+      setActiveTab(tab as typeof activeTab);
+    }
+    if (page > 1) {
+      switch (tab || 'all') {
+        case 'structured': setStructuredPage(page); break;
+        case 'unstructured': setUnstructuredPage(page); break;
+        case 'sync_failed': setSyncFailedPage(page); break;
+        default: setAllPage(page); break;
+      }
+    }
+    setUrlRestored(true);
+  }, []);
+
+  // タブ・ページ変更時に URL を同期（replaceState で履歴エントリを上書き）
+  useEffect(() => {
+    if (!urlRestored) return;
+    const params = new URLSearchParams();
+    if (activeTab !== 'all') params.set('tab', activeTab);
+    const page = getCurrentPage();
+    if (page > 1) params.set('page', page.toString());
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `/hitocari?${qs}` : '/hitocari');
+  }, [activeTab, allPage, structuredPage, unstructuredPage, syncFailedPage, getCurrentPage, urlRestored]);
+
   // selectedAccountの状態をショートカットで更新するためのuseEffect
   useEffect(() => {
     if (availableAccounts.length > 0) {
@@ -241,12 +275,12 @@ export default function HitocariListPage() {
     }
   }, [showAllAccounts, currentUserEmail, availableAccounts]);
 
-  // Load meetings when accounts or filters change
+  // Load meetings when accounts or filters change (URL復元完了後のみ)
   useEffect(() => {
-    if (availableAccounts.length > 0) {
-      loadMeetings(activeTab, getCurrentPage(), true, currentSearchQuery);
+    if (availableAccounts.length > 0 && urlRestored) {
+      loadMeetings(activeTab, getCurrentPage(), false, currentSearchQuery);
     }
-  }, [availableAccounts.length, activeTab, currentSearchQuery, getCurrentPage, loadMeetings]);
+  }, [availableAccounts.length, activeTab, urlRestored, currentSearchQuery, getCurrentPage, loadMeetings]);
 
 
   const handleCollectMeetings = async () => {
