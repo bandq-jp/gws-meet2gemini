@@ -9,6 +9,7 @@ class CandidateSummaryOut(BaseModel):
     status: Optional[str] = None
     channel: Optional[str] = None
     registration_date: Optional[str] = None
+    modified_time: Optional[str] = None
     pic: Optional[str] = None
     linked_meetings_count: int = 0
 
@@ -67,7 +68,7 @@ class CompanyMatchOut(BaseModel):
     age_limit: Optional[int] = None
     max_salary: Optional[int] = None
     locations: Optional[List[str]] = None
-    remote: Optional[bool] = None
+    remote: Optional[str] = None
 
 
 class JobMatchResponse(BaseModel):

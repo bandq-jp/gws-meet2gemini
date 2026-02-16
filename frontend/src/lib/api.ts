@@ -168,6 +168,7 @@ export interface CandidateSummary {
   status: string | null;
   channel: string | null;
   registration_date: string | null;
+  modified_time: string | null;
   pic: string | null;
   linked_meetings_count: number;
 }
@@ -215,7 +216,7 @@ export interface CompanyMatch {
   age_limit: number | null;
   max_salary: number | null;
   locations: string[] | null;
-  remote: boolean | null;
+  remote: string | null;
 }
 
 export interface JobMatchResult {
@@ -695,7 +696,7 @@ class ApiClient {
     if (sortBy) params.set('sort_by', sortBy);
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
-    return this.request<CandidateListResponse>(`/candidates/?${params.toString()}`);
+    return this.request<CandidateListResponse>(`/candidates?${params.toString()}`);
   }
 
   async getCandidateDetail(recordId: string): Promise<CandidateDetail> {

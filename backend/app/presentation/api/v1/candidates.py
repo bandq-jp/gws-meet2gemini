@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/", response_model=CandidateListResponse)
+@router.get("", response_model=CandidateListResponse)
 def list_candidates(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=50),

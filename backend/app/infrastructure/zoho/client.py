@@ -932,6 +932,14 @@ class ZohoClient:
 
     # --- 候補者一覧ページ用 ---
 
+    # sort_by → COQL ORDER BY フィールドマッピング
+    _SORT_FIELD_MAP = {
+        "registration_date": "field18",       # 登録日 (YYYY-MM-DD)
+        "modified_time": "Modified_Time",     # Zoho更新日時 (ISO 8601)
+        "status": "customer_status",          # ステータス (1.リード〜19.他社送客)
+        "created_time": "Created_Time",       # Zoho作成日時
+    }
+
     def list_candidates_paginated(
         self,
         page: int = 1,
@@ -951,14 +959,20 @@ class ZohoClient:
             search: 名前検索（部分一致）
             status: 顧客ステータスフィルタ
             channel: 流入経路フィルタ
-            sort_by: ソートキー (registration_date, modified_time, status)
+            sort_by: ソートキー (registration_date, modified_time, status, created_time)
             date_from: 登録日開始 (YYYY-MM-DD)
             date_to: 登録日終了 (YYYY-MM-DD)
 
         Returns:
-            {"data": [records], "total": int}
+            {"data": [records], "total": int, ...}
         """
         module_api = self.settings.zoho_app_hc_module
+
+        # COQL ORDER BY用のフィールド名を解決
+        coql_sort_field = self._SORT_FIELD_MAP.get(sort_by, self.DATE_FIELD_API)
+        # 全ソート降順（最新 / 最終更新 / ステータス進行度高い順）
+        # statusのみ昇順にしたい場合は asc にする
+        coql_sort_dir = "asc" if sort_by == "status" else "desc"
 
         def _coql_fetch() -> List[Dict[str, Any]]:
             fields = [
@@ -966,7 +980,7 @@ class ZohoClient:
                 self.CHANNEL_FIELD_API,
                 self.STATUS_FIELD_API,
                 self.DATE_FIELD_API,
-                "Modified_Time", "Owner",
+                "Modified_Time", "Created_Time", "Owner",
             ]
             select_fields = ", ".join(fields)
 
@@ -981,8 +995,12 @@ class ZohoClient:
                 query += " WHERE " + " AND ".join(where_parts)
             else:
                 query += " WHERE id is not null"
+
+            # ORDER BY をCOQLに含めて、サーバーサイドでソート済みの結果を得る
+            query += f" ORDER BY {coql_sort_field} {coql_sort_dir}"
             query += " LIMIT 2000"
 
+            logger.info("[zoho] list_candidates COQL: %s", query)
             result = self._coql_query(query)
             return result.get("data", []) or []
 
@@ -996,7 +1014,7 @@ class ZohoClient:
             logger.warning("[zoho] list_candidates_paginated failed: %s, using legacy", e)
             data = _legacy_fetch()
 
-        # メモリ内フィルタリング
+        # メモリ内フィルタリング（COQL WHERE に入れられない条件）
         if channel:
             data = [r for r in data if r.get(self.CHANNEL_FIELD_API) == channel]
         if status:
@@ -1005,14 +1023,11 @@ class ZohoClient:
             search_lower = search.lower()
             data = [r for r in data if search_lower in (r.get("Name") or "").lower()]
 
-        # ソート
-        sort_key_map = {
-            "registration_date": self.DATE_FIELD_API,
-            "modified_time": "Modified_Time",
-            "status": self.STATUS_FIELD_API,
-        }
-        sort_field = sort_key_map.get(sort_by, self.DATE_FIELD_API)
-        data.sort(key=lambda r: r.get(sort_field) or "", reverse=(sort_by != "status"))
+        # メモリ内フィルタ後に再ソート（COQLで返った順序がフィルタで崩れることはないが、
+        # legacyフォールバック時はソート未適用なので常に実施）
+        py_sort_field = self._SORT_FIELD_MAP.get(sort_by, self.DATE_FIELD_API)
+        py_sort_reverse = (sort_by != "status")  # status以外は降順
+        data.sort(key=lambda r: r.get(py_sort_field) or "", reverse=py_sort_reverse)
 
         total = len(data)
         start = (page - 1) * page_size
@@ -1038,6 +1053,7 @@ class ZohoClient:
                 "status": r.get(self.STATUS_FIELD_API),
                 "channel": r.get(self.CHANNEL_FIELD_API),
                 "registration_date": r.get(self.DATE_FIELD_API),
+                "modified_time": r.get("Modified_Time"),
                 "pic": pic,
             })
 

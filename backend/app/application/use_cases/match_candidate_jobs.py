@@ -231,6 +231,40 @@ def _parse_agent_response(text: str) -> Dict[str, Any]:
     }
 
 
+def _safe_int(val: Any) -> Optional[int]:
+    """Safely convert a value to int, returning None on failure."""
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalize_companies(companies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Normalize company fields from LLM output to match schema types.
+
+    LLM may return:
+    - remote as string ('週2-3', 'なし') instead of bool → keep as str
+    - age_limit as string ('35') → convert to int
+    - max_salary as string ('800') → convert to int
+    - match_score as string ('0.85') → convert to float
+    """
+    normalized = []
+    for c in companies:
+        normalized.append({
+            "company_name": str(c.get("company_name", "")),
+            "match_score": float(c.get("match_score", 0)) if c.get("match_score") is not None else 0.0,
+            "recommendation_reason": c.get("recommendation_reason"),
+            "appeal_points": c.get("appeal_points") or [],
+            "age_limit": _safe_int(c.get("age_limit")),
+            "max_salary": _safe_int(c.get("max_salary")),
+            "locations": c.get("locations"),
+            "remote": str(c["remote"]) if c.get("remote") is not None else None,
+        })
+    return normalized
+
+
 async def _run_agent(agent: Agent, user_message: str) -> str:
     """Run the ADK agent and collect text response."""
     session_service = InMemorySessionService()
@@ -323,7 +357,10 @@ class MatchCandidateJobsUseCase:
         # 5. Parse response
         parsed = _parse_agent_response(response_text)
 
-        # 6. Build candidate profile for response
+        # 6. Normalize company fields (LLM may return unexpected types)
+        companies = _normalize_companies(parsed.get("recommended_companies", []))
+
+        # 7. Build candidate profile for response
         candidate_profile = {
             "name": zoho_record.get("Name"),
             "age": zoho_record.get("field15"),
@@ -334,7 +371,7 @@ class MatchCandidateJobsUseCase:
 
         return {
             "candidate_profile": candidate_profile,
-            "recommended_companies": parsed.get("recommended_companies", []),
+            "recommended_companies": companies,
             "total_found": parsed.get("total_found", 0),
             "analysis_text": parsed.get("analysis_text"),
         }
@@ -384,9 +421,8 @@ class MatchCandidateJobsUseCase:
             limit=limit,
         )
 
-        companies = []
-        for c in result.get("recommended_companies", []):
-            companies.append({
+        companies = _normalize_companies([
+            {
                 "company_name": c.get("company_name", ""),
                 "match_score": c.get("match_score", 0),
                 "recommendation_reason": None,
@@ -395,7 +431,9 @@ class MatchCandidateJobsUseCase:
                 "max_salary": c.get("max_salary"),
                 "locations": c.get("locations"),
                 "remote": c.get("remote"),
-            })
+            }
+            for c in result.get("recommended_companies", [])
+        ])
 
         candidate_profile = {
             "name": zoho_record.get("Name"),

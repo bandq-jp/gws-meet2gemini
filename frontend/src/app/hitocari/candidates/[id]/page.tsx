@@ -556,7 +556,7 @@ function CompanyMatchCard({ company, rank }: { company: CompanyMatch; rank: numb
           <span>〜{company.age_limit}歳</span>
         )}
         {company.remote && (
-          <Badge variant="outline" className="text-xs">リモート可</Badge>
+          <Badge variant="outline" className="text-xs">リモート: {company.remote}</Badge>
         )}
       </div>
 

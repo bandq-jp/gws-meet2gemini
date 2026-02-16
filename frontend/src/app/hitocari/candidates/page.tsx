@@ -5,7 +5,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   ArrowUpDown,
+  Calendar,
   ChevronRight,
+  Clock,
   FileText,
   Loader2,
   RefreshCw,
@@ -179,8 +181,9 @@ export default function CandidatesPage() {
   const channels = useMemo(() => response?.filters?.channels || [], [response]);
 
   const sortOptions = [
-    { value: "registration_date", label: "登録日順" },
-    { value: "modified_time", label: "更新日順" },
+    { value: "registration_date", label: "登録日（新しい順）" },
+    { value: "modified_time", label: "最終更新（新しい順）" },
+    { value: "created_time", label: "作成日（新しい順）" },
     { value: "status", label: "ステータス順" },
   ];
 
@@ -370,7 +373,14 @@ function CandidateCard({ candidate }: { candidate: CandidateSummary }) {
                 )}
                 {candidate.registration_date && (
                   <div className="flex items-center space-x-1 shrink-0">
-                    <span>{candidate.registration_date}</span>
+                    <Calendar className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span>登録 {candidate.registration_date}</span>
+                  </div>
+                )}
+                {candidate.modified_time && (
+                  <div className="flex items-center space-x-1 shrink-0">
+                    <Clock className="h-3 w-3 sm:h-4 sm:w-4" />
+                    <span>更新 {candidate.modified_time.split("T")[0]}</span>
                   </div>
                 )}
                 {candidate.linked_meetings_count > 0 && (
