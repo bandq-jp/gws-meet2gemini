@@ -74,6 +74,22 @@
 - サブエージェント503: on_tool_error_callbackでdict返却→re-raise回避
 - オーケストレーター503: _pump_adk_events()で指数バックオフリトライ (2s→4s→8s, 最大3回)
 
+### 候補者管理ページ (2026-02-16追加)
+- **一覧**: `/hitocari/candidates` — Zoho CRM (APP-hc) からCOQL+メモリ内フィルタでページネーション取得
+  - フィルタ: ステータス(customer_status), チャネル(field14), 名前検索, ソート(登録日/更新日/ステータス)
+  - URL search params + replaceState でブラウザバック対応
+  - `count_meetings_by_zoho_record_ids()` で関連議事録数をバッチ集約
+- **詳細**: `/hitocari/candidates/[id]` — Zoho全フィールド + structured_outputs + 関連議事録
+  - 2カラムレイアウト: 左=基本情報+構造化データ, 右=関連議事録+AIマッチング
+- **求人マッチング**: `POST /api/v1/candidates/{record_id}/job-match`
+  - ADK JobMatchAgent (Gemini 3 Flash) がセマンティック検索+分析を実行
+  - フォールバック: ADKエージェント失敗時は `find_companies_for_candidate()` 直接呼出し
+  - 候補者プロフィール = Zohoデータ + 面談構造化データ(transfer_reasons等) を統合
+  - 結果: JSON形式 (analysis_text + recommended_companies[])
+- **Backend**: `candidates.py` router → use cases (list, detail, meetings, match) → ZohoClient.list_candidates_paginated()
+- **Frontend**: `api.ts` に CandidateSummary/CandidateDetail/CompanyMatch/JobMatchResult interfaces追加
+- **サイドバー**: `app-sidebar.tsx` "候補者管理" enabled: true
+
 ### 議事録一覧ページネーション
 - `meeting_documents_enriched` VIEW: `is_structured`, `zoho_sync_status` を計算列で持つ
 - 全タブ1クエリ: `count="exact"` + `.range()` でSQL側フィルタ+ページネーション

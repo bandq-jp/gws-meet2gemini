@@ -158,7 +158,7 @@ export function AppSidebar() {
             icon: UserCheck,
             href: "/hitocari/candidates",
             id: "candidates",
-            enabled: false,
+            enabled: true,
             description: "候補者情報の統合管理",
           },
           {

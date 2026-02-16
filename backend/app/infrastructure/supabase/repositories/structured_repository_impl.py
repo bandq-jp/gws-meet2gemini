@@ -1,8 +1,11 @@
 from __future__ import annotations
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from datetime import datetime
+import logging
 from app.infrastructure.supabase.client import get_supabase
 from app.domain.entities.structured_data import StructuredData, ZohoCandidateInfo, ZohoSyncInfo
+
+logger = logging.getLogger(__name__)
 
 class StructuredRepositoryImpl:
     TABLE = "structured_outputs"
@@ -129,3 +132,111 @@ class StructuredRepositoryImpl:
         # returning="minimal" でレスポンスからdata JSONB等を除外（エグレス削減）
         sb.table(self.TABLE).update(payload, returning="minimal").eq("meeting_id", meeting_id).execute()
         return {}
+
+    # --- 候補者ページ用メソッド ---
+
+    def get_by_zoho_record_id(self, record_id: str) -> Optional[Dict[str, Any]]:
+        """Get first structured output linked to a Zoho record ID."""
+        sb = get_supabase()
+        try:
+            res = (
+                sb.table(self.TABLE)
+                .select("meeting_id, data, zoho_candidate_id, zoho_record_id, zoho_candidate_name, zoho_candidate_email, zoho_sync_status, created_at, updated_at")
+                .eq("zoho_record_id", record_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+        except Exception as e:
+            logger.warning("[structured_repo] get_by_zoho_record_id failed: %s", e)
+            return None
+
+    def get_all_by_zoho_record_id(self, record_id: str) -> List[Dict[str, Any]]:
+        """Get all structured outputs linked to a Zoho record ID (multiple meetings)."""
+        sb = get_supabase()
+        try:
+            res = (
+                sb.table(self.TABLE)
+                .select("meeting_id, data, zoho_sync_status, created_at, updated_at")
+                .eq("zoho_record_id", record_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            logger.warning("[structured_repo] get_all_by_zoho_record_id failed: %s", e)
+            return []
+
+    def count_meetings_by_zoho_record_ids(self, record_ids: List[str]) -> Dict[str, int]:
+        """Batch count of linked meetings per Zoho record ID.
+
+        Returns:
+            Dict mapping record_id -> count
+        """
+        if not record_ids:
+            return {}
+        sb = get_supabase()
+        try:
+            res = (
+                sb.table(self.TABLE)
+                .select("zoho_record_id")
+                .in_("zoho_record_id", record_ids)
+                .execute()
+            )
+            counts: Dict[str, int] = {}
+            for row in res.data or []:
+                rid = row.get("zoho_record_id")
+                if rid:
+                    counts[rid] = counts.get(rid, 0) + 1
+            return counts
+        except Exception as e:
+            logger.warning("[structured_repo] count_meetings_by_zoho_record_ids failed: %s", e)
+            return {}
+
+    def get_meetings_with_structured_by_zoho_record_id(self, record_id: str) -> List[Dict[str, Any]]:
+        """Get meeting documents linked to a Zoho record ID via structured_outputs.
+
+        Returns list of dicts with meeting info + structured status.
+        """
+        sb = get_supabase()
+        try:
+            # First get meeting_ids from structured_outputs
+            so_res = (
+                sb.table(self.TABLE)
+                .select("meeting_id, data, zoho_sync_status, created_at")
+                .eq("zoho_record_id", record_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            if not so_res.data:
+                return []
+
+            meeting_ids = [row["meeting_id"] for row in so_res.data]
+
+            # Fetch meeting documents
+            m_res = (
+                sb.table("meeting_documents")
+                .select("id, title, meeting_datetime, organizer_email")
+                .in_("id", meeting_ids)
+                .execute()
+            )
+            meeting_map = {m["id"]: m for m in (m_res.data or [])}
+
+            # Merge
+            results = []
+            for so in so_res.data:
+                mid = so["meeting_id"]
+                meeting = meeting_map.get(mid, {})
+                results.append({
+                    "meeting_id": mid,
+                    "title": meeting.get("title"),
+                    "meeting_datetime": meeting.get("meeting_datetime"),
+                    "organizer_email": meeting.get("organizer_email"),
+                    "is_structured": True,
+                    "structured_data": so.get("data"),
+                })
+            return results
+        except Exception as e:
+            logger.warning("[structured_repo] get_meetings_with_structured failed: %s", e)
+            return []

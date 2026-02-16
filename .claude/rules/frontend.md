@@ -5,6 +5,8 @@
 | `/` | ダッシュボード (サービスカード) |
 | `/hitocari` | 議事録一覧 (ページネーション, フィルタ) |
 | `/hitocari/[id]` | 議事録詳細 (トランスクリプト, 構造化データ) |
+| `/hitocari/candidates` | 候補者一覧 (Zoho CRM, ページネーション, フィルタ) |
+| `/hitocari/candidates/[id]` | 候補者詳細 (Zohoデータ, 面談データ, AIマッチング) |
 | `/hitocari/mypage` | マイページ |
 | `/hitocari/settings` | 設定 |
 | `/marketing` | マーケティングAIチャット (ChatKit) |

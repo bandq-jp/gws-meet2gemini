@@ -9,6 +9,7 @@ from .marketing import router as marketing_router
 from .marketing_v2 import router as marketing_v2_router
 from .image_gen import router as image_gen_router
 from .feedback import router as feedback_router
+from .candidates import router as candidates_router
 
 router = APIRouter()
 router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
@@ -20,3 +21,4 @@ router.include_router(marketing_router)
 router.include_router(marketing_v2_router)
 router.include_router(image_gen_router)
 router.include_router(feedback_router)
+router.include_router(candidates_router, prefix="/candidates", tags=["candidates"])

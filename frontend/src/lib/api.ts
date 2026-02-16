@@ -161,6 +161,70 @@ export interface ImageGenSession {
   updated_at?: string;
 }
 
+// Candidate interfaces
+export interface CandidateSummary {
+  record_id: string;
+  name: string;
+  status: string | null;
+  channel: string | null;
+  registration_date: string | null;
+  pic: string | null;
+  linked_meetings_count: number;
+}
+
+export interface CandidateListResponse {
+  items: CandidateSummary[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+  filters: {
+    statuses: string[];
+    channels: string[];
+  };
+}
+
+export interface LinkedMeeting {
+  meeting_id: string;
+  title: string | null;
+  meeting_datetime: string | null;
+  organizer_email: string | null;
+  is_structured: boolean;
+}
+
+export interface StructuredOutputBrief {
+  meeting_id: string;
+  data: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface CandidateDetail {
+  record_id: string;
+  zoho_record: Record<string, unknown>;
+  structured_outputs: StructuredOutputBrief[];
+  linked_meetings: LinkedMeeting[];
+}
+
+export interface CompanyMatch {
+  company_name: string;
+  match_score: number;
+  appeal_points: string[];
+  recommendation_reason: string | null;
+  age_limit: number | null;
+  max_salary: number | null;
+  locations: string[] | null;
+  remote: boolean | null;
+}
+
+export interface JobMatchResult {
+  candidate_profile: Record<string, unknown>;
+  recommended_companies: CompanyMatch[];
+  total_found: number;
+  analysis_text: string | null;
+}
+
 // Custom Schema interfaces
 export interface EnumOption {
   id?: string;
@@ -608,6 +672,50 @@ class ApiClient {
     period: string;
   }> {
     return this.request(`/image-gen/usage`);
+  }
+
+  // ── Candidate endpoints ──
+
+  async getCandidates(
+    page = 1,
+    pageSize = 20,
+    search?: string,
+    status?: string,
+    channel?: string,
+    sortBy?: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ): Promise<CandidateListResponse> {
+    const params = new URLSearchParams();
+    params.set('page', page.toString());
+    params.set('page_size', pageSize.toString());
+    if (search?.trim()) params.set('search', search.trim());
+    if (status) params.set('status', status);
+    if (channel) params.set('channel', channel);
+    if (sortBy) params.set('sort_by', sortBy);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+    return this.request<CandidateListResponse>(`/candidates/?${params.toString()}`);
+  }
+
+  async getCandidateDetail(recordId: string): Promise<CandidateDetail> {
+    return this.request<CandidateDetail>(`/candidates/${encodeURIComponent(recordId)}`);
+  }
+
+  async getCandidateMeetings(recordId: string): Promise<{ items: LinkedMeeting[]; total: number }> {
+    return this.request<{ items: LinkedMeeting[]; total: number }>(
+      `/candidates/${encodeURIComponent(recordId)}/meetings`
+    );
+  }
+
+  async matchCandidateJobs(
+    recordId: string,
+    overrides?: { transfer_reasons?: string; desired_salary?: number; desired_locations?: string[]; limit?: number }
+  ): Promise<JobMatchResult> {
+    return this.request<JobMatchResult>(`/candidates/${encodeURIComponent(recordId)}/job-match`, {
+      method: 'POST',
+      body: JSON.stringify(overrides || {}),
+    });
   }
 
 }

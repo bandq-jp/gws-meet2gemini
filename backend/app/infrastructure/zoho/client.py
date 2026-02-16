@@ -930,6 +930,127 @@ class ZohoClient:
                     logger.warning("[zoho] _search_by_criteria_legacy failed: %s", e)
                     return []
 
+    # --- 候補者一覧ページ用 ---
+
+    def list_candidates_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+        channel: Optional[str] = None,
+        sort_by: str = "registration_date",
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """候補者（APP-hc）をページネーション付きで取得
+
+        Args:
+            page: ページ番号（1始まり）
+            page_size: 1ページあたりの件数
+            search: 名前検索（部分一致）
+            status: 顧客ステータスフィルタ
+            channel: 流入経路フィルタ
+            sort_by: ソートキー (registration_date, modified_time, status)
+            date_from: 登録日開始 (YYYY-MM-DD)
+            date_to: 登録日終了 (YYYY-MM-DD)
+
+        Returns:
+            {"data": [records], "total": int}
+        """
+        module_api = self.settings.zoho_app_hc_module
+
+        def _coql_fetch() -> List[Dict[str, Any]]:
+            fields = [
+                "id", "Name",
+                self.CHANNEL_FIELD_API,
+                self.STATUS_FIELD_API,
+                self.DATE_FIELD_API,
+                "Modified_Time", "Owner",
+            ]
+            select_fields = ", ".join(fields)
+
+            where_parts: List[str] = []
+            if date_from:
+                where_parts.append(f"{self.DATE_FIELD_API} >= '{date_from}'")
+            if date_to:
+                where_parts.append(f"{self.DATE_FIELD_API} <= '{date_to}'")
+
+            query = f"SELECT {select_fields} FROM {module_api}"
+            if where_parts:
+                query += " WHERE " + " AND ".join(where_parts)
+            else:
+                query += " WHERE id is not null"
+            query += " LIMIT 2000"
+
+            result = self._coql_query(query)
+            return result.get("data", []) or []
+
+        def _legacy_fetch() -> List[Dict[str, Any]]:
+            all_records = self._fetch_all_records(max_pages=15)
+            return self._filter_by_date(all_records, date_from, date_to) if (date_from or date_to) else all_records
+
+        try:
+            data = self._with_coql_fallback(_coql_fetch, _legacy_fetch)
+        except Exception as e:
+            logger.warning("[zoho] list_candidates_paginated failed: %s, using legacy", e)
+            data = _legacy_fetch()
+
+        # メモリ内フィルタリング
+        if channel:
+            data = [r for r in data if r.get(self.CHANNEL_FIELD_API) == channel]
+        if status:
+            data = [r for r in data if r.get(self.STATUS_FIELD_API) == status]
+        if search:
+            search_lower = search.lower()
+            data = [r for r in data if search_lower in (r.get("Name") or "").lower()]
+
+        # ソート
+        sort_key_map = {
+            "registration_date": self.DATE_FIELD_API,
+            "modified_time": "Modified_Time",
+            "status": self.STATUS_FIELD_API,
+        }
+        sort_field = sort_key_map.get(sort_by, self.DATE_FIELD_API)
+        data.sort(key=lambda r: r.get(sort_field) or "", reverse=(sort_by != "status"))
+
+        total = len(data)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_data = data[start:end]
+
+        import math
+        total_pages = math.ceil(total / page_size) if total > 0 else 1
+
+        # レコード整形
+        records = []
+        for r in page_data:
+            owner = r.get("Owner")
+            pic = None
+            if isinstance(owner, dict):
+                pic = owner.get("name")
+            elif owner:
+                pic = str(owner)
+
+            records.append({
+                "record_id": r.get("id"),
+                "name": r.get("Name") or "",
+                "status": r.get(self.STATUS_FIELD_API),
+                "channel": r.get(self.CHANNEL_FIELD_API),
+                "registration_date": r.get(self.DATE_FIELD_API),
+                "pic": pic,
+            })
+
+        return {
+            "data": records,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_previous": page > 1,
+        }
+
     # チャネル・ステータスマスタ（クラス定数として定義）
     CHANNELS = [
         "sco_bizreach", "sco_dodaX", "sco_ambi", "sco_rikunavi",
