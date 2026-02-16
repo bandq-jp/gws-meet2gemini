@@ -81,13 +81,19 @@
   - `count_meetings_by_zoho_record_ids()` で関連議事録数をバッチ集約
 - **詳細**: `/hitocari/candidates/[id]` — Zoho全フィールド + structured_outputs + 関連議事録
   - 2カラムレイアウト: 左=基本情報+構造化データ, 右=関連議事録+AIマッチング
+  - **JD詳細Sheet**: マッチ結果カードの企業名クリック → 右ドロワーで求人票全フィールド表示 (7セクション: 基本/年収/勤務/要件/業務/組織/運用)
+  - **LINEメッセージ生成**: カード内「LINE送信文」ボタン → Collapsibleパネル展開 → テンプレート即時生成 + 「AI推敲」ボタンでGemini 2.5 Flash リライト → コピー
+  - **Zoho CRMリンク**: `crm.zoho.jp/crm/org90001323481/tab/{module}/{id}` — 候補者=CustomModule1, JD旧=CustomModule2, JD新=CustomModule20, 企業=Accounts
 - **求人マッチング**: `POST /api/v1/candidates/{record_id}/job-match`
   - ADK JobMatchAgent (Gemini 3 Flash) がセマンティック検索+分析を実行
   - フォールバック: ADKエージェント失敗時は `find_companies_for_candidate()` 直接呼出し
   - 候補者プロフィール = Zohoデータ + 面談構造化データ(transfer_reasons等) を統合
   - 結果: JSON形式 (analysis_text + recommended_jobs[])
-- **Backend**: `candidates.py` router → use cases (list, detail, meetings, match) → ZohoClient.list_candidates_paginated()
-- **Frontend**: `api.ts` に CandidateSummary/CandidateDetail/JobMatch/JobMatchResult interfaces追加
+  - **JD IDマッピング**: エージェント出力後 `company_name+job_name` でZoho JD record IDを復元 (`_norm_key` fuzzy match)
+- **JD詳細**: `GET /api/v1/candidates/jd/{jd_id}?version=` → GetJDDetailUseCase → ZohoClient.get_job_description()
+- **LINE文面生成**: `POST /api/v1/candidates/line-message/generate` → GenerateLineMessageUseCase → GeminiClient (2.5-flash, temp=0.7) → テンプレートフォールバック
+- **Backend**: `candidates.py` router → use cases (list, detail, meetings, match, get_jd_detail, generate_line_message) → ZohoClient
+- **Frontend**: `api.ts` に CandidateSummary/CandidateDetail/JobMatch/JobMatchResult/JDDetail/LineMessage interfaces + getJDDetail/generateLineMessage methods
 - **サイドバー**: `app-sidebar.tsx` "候補者管理" enabled: true
 
 ### 求人マッチング マルチソースアーキテクチャ (2026-02-16改善)

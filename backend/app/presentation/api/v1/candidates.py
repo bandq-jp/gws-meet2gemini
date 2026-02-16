@@ -9,9 +9,12 @@ from app.presentation.schemas.candidate import (
     CandidateListResponse,
     CandidateMeetingsResponse,
     CandidateSummaryOut,
+    JDDetailOut,
     JobMatchOut,
     JobMatchRequest,
     JobMatchResponse,
+    LineMessageRequest,
+    LineMessageResponse,
     LinkedMeetingOut,
     StructuredOutputBrief,
 )
@@ -58,6 +61,43 @@ def list_candidates(
         )
     except Exception as e:
         logger.error("[candidates] list failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/jd/{jd_id}", response_model=JDDetailOut)
+def get_jd_detail(
+    jd_id: str,
+    version: Optional[str] = Query(None, description="old (JOB) or new (JobDescription)"),
+):
+    """求人票(JD)の詳細を取得"""
+    from app.application.use_cases.get_jd_detail import GetJDDetailUseCase
+
+    try:
+        use_case = GetJDDetailUseCase()
+        result = use_case.execute(jd_id, version=version)
+
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+
+        return JDDetailOut(id=jd_id, **{k: v for k, v in result.items() if k != "id"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("[candidates] jd detail failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/line-message/generate", response_model=LineMessageResponse)
+def generate_line_message(body: LineMessageRequest):
+    """候補者向けLINEメッセージをAI生成"""
+    from app.application.use_cases.generate_line_message import GenerateLineMessageUseCase
+
+    try:
+        use_case = GenerateLineMessageUseCase()
+        result = use_case.execute(body.model_dump())
+        return LineMessageResponse(**result)
+    except Exception as e:
+        logger.error("[candidates] line-message generate failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

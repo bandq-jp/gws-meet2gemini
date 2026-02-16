@@ -209,6 +209,7 @@ export interface CandidateDetail {
 }
 
 export interface JobMatch {
+  jd_id: string | null;
   job_name: string;
   company_name: string;
   match_score: number;
@@ -221,6 +222,61 @@ export interface JobMatch {
   position: string | null;
   hiring_appetite: string | null;
   source: string;
+}
+
+export interface JDDetail {
+  id: string;
+  name: string | null;
+  company: string | null;
+  company_id: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  expected_salary: string | null;
+  incentive: string | null;
+  location: string | null;
+  remote: string | null;
+  is_remote: boolean | null;
+  flex: string | null;
+  is_flex: boolean | null;
+  overtime: string | null;
+  age_max: number | null;
+  education: string | null;
+  exp_count_max: number | null;
+  hr_experience: string | null;
+  job_details: string | null;
+  ideal_candidate: string | null;
+  hiring_background: string | null;
+  org_structure: string | null;
+  after_career: string | null;
+  category: string | null;
+  position: string | null;
+  hiring_appetite: string | null;
+  benefits: string | null;
+  holiday: string | null;
+  annual_days_off: string | null;
+  is_open: boolean | null;
+  fee: string | null;
+  jd_manager: string | null;
+  company_features: string | null;
+  modified_time: string | null;
+  module_version: string | null;
+}
+
+export interface LineMessageRequest {
+  job_name: string;
+  company_name: string;
+  appeal_points: string[];
+  recommendation_reason?: string | null;
+  salary_range?: string | null;
+  location?: string | null;
+  remote?: string | null;
+  candidate_name?: string | null;
+  candidate_desires?: string | null;
+}
+
+export interface LineMessageResponse {
+  message: string;
+  char_count: number;
 }
 
 export interface JobMatchResult {
@@ -722,6 +778,20 @@ class ApiClient {
     return this.request<JobMatchResult>(`/candidates/${encodeURIComponent(recordId)}/job-match`, {
       method: 'POST',
       body: JSON.stringify(overrides || {}),
+    });
+  }
+
+  async getJDDetail(jdId: string, version?: string): Promise<JDDetail> {
+    const params = new URLSearchParams();
+    if (version) params.set('version', version);
+    const qs = params.toString();
+    return this.request<JDDetail>(`/candidates/jd/${encodeURIComponent(jdId)}${qs ? `?${qs}` : ''}`);
+  }
+
+  async generateLineMessage(data: LineMessageRequest): Promise<LineMessageResponse> {
+    return this.request<LineMessageResponse>('/candidates/line-message/generate', {
+      method: 'POST',
+      body: JSON.stringify(data),
     });
   }
 

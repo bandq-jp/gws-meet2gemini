@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -8,10 +8,14 @@ import {
   ArrowLeft,
   Briefcase,
   Calendar,
+  Check,
+  ChevronDown,
+  Copy,
   ExternalLink,
   FileText,
   Loader2,
   MapPin,
+  MessageSquare,
   Sparkles,
   UserCheck,
   Wallet,
@@ -20,13 +24,19 @@ import {
 import {
   apiClient,
   type CandidateDetail,
+  type JDDetail,
   type JobMatch,
   type JobMatchResult,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Textarea } from "@/components/ui/textarea";
+
+const ZOHO_CRM_BASE = "https://crm.zoho.jp/crm/org90001323481/tab";
 
 // ステータスに応じたBadge variant
 function getStatusVariant(status: string | null | undefined): "default" | "secondary" | "destructive" | "outline" {
@@ -120,6 +130,11 @@ export default function CandidateDetailPage() {
   const [matching, setMatching] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
 
+  // JD detail sheet state
+  const [selectedJdId, setSelectedJdId] = useState<string | null>(null);
+  const [jdDetail, setJdDetail] = useState<JDDetail | null>(null);
+  const [jdLoading, setJdLoading] = useState(false);
+
   const loadDetail = useCallback(async () => {
     if (!recordId) return;
     setLoading(true);
@@ -138,6 +153,21 @@ export default function CandidateDetailPage() {
   useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+
+  const handleOpenJdDetail = async (jdId: string) => {
+    setSelectedJdId(jdId);
+    setJdLoading(true);
+    setJdDetail(null);
+    try {
+      const version = matchResult?.jd_module_version || undefined;
+      const result = await apiClient.getJDDetail(jdId, version);
+      setJdDetail(result);
+    } catch (err) {
+      console.error("Failed to load JD detail:", err);
+    } finally {
+      setJdLoading(false);
+    }
+  };
 
   const handleJobMatch = async () => {
     if (!recordId) return;
@@ -237,7 +267,7 @@ export default function CandidateDetailPage() {
                     {typeof zoho.id === "string" && zoho.id && (
                       <Button asChild variant="outline" size="sm">
                         <a
-                          href={`https://crm.zoho.com/crm/org/tab/CustomModule1/${zoho.id}`}
+                          href={`${ZOHO_CRM_BASE}/CustomModule1/${zoho.id}`}
                           target="_blank"
                           rel="noopener noreferrer"
                         >
@@ -474,6 +504,10 @@ export default function CandidateDetailPage() {
                           key={`${job.company_name}-${job.job_name}-${index}`}
                           job={job}
                           rank={index + 1}
+                          candidateName={candidateName}
+                          candidateDesires={latestStructured?.data?.transfer_reasons as string | undefined}
+                          onOpenJd={job.jd_id ? () => handleOpenJdDetail(job.jd_id!) : undefined}
+                          jdModuleVersion={matchResult.jd_module_version}
                         />
                       ))
                     )}
@@ -484,6 +518,21 @@ export default function CandidateDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* JD Detail Sheet */}
+      <Sheet open={!!selectedJdId} onOpenChange={(open) => { if (!open) setSelectedJdId(null); }}>
+        <SheetContent className="sm:max-w-xl overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>求人票詳細</SheetTitle>
+          </SheetHeader>
+          {jdLoading && (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          )}
+          {jdDetail && <JDDetailContent jd={jdDetail} />}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
@@ -527,7 +576,27 @@ function RenderStructuredValue({ value }: { value: unknown }) {
   return <span className="break-words whitespace-normal leading-relaxed">{String(value)}</span>;
 }
 
-function JobMatchCard({ job, rank }: { job: JobMatch; rank: number }) {
+function JobMatchCard({
+  job,
+  rank,
+  candidateName,
+  candidateDesires,
+  onOpenJd,
+  jdModuleVersion,
+}: {
+  job: JobMatch;
+  rank: number;
+  candidateName: string;
+  candidateDesires?: string;
+  onOpenJd?: () => void;
+  jdModuleVersion?: string | null;
+}) {
+  const [lineOpen, setLineOpen] = useState(false);
+  const [lineMessage, setLineMessage] = useState("");
+  const [lineGenerating, setLineGenerating] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   const scoreColor =
     job.match_score >= 0.7
       ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
@@ -542,6 +611,59 @@ function JobMatchCard({ job, rank }: { job: JobMatch; rank: number }) {
     slack: "Slack",
   };
 
+  // Template fallback for instant message
+  const buildTemplate = () => {
+    const name = candidateName?.replace(/様$/, "") || "";
+    const nameLine = name ? `${name}様\n\n` : "";
+    const points = job.appeal_points.slice(0, 3).join("、") || "ご希望に合った条件";
+    return (
+      `${nameLine}` +
+      `お世話になっております。\n` +
+      `ご希望にマッチしそうな求人がございましたのでご連絡いたしました。\n\n` +
+      `${job.company_name}のポジションで、${points}といった特徴がございます。\n\n` +
+      `ご興味ございましたらお気軽にお返事ください。\n` +
+      `詳細をご説明させていただきます。`
+    );
+  };
+
+  const handleLineToggle = () => {
+    if (!lineOpen && !lineMessage) {
+      setLineMessage(buildTemplate());
+    }
+    setLineOpen(!lineOpen);
+  };
+
+  const handleAiRefine = async () => {
+    setLineGenerating(true);
+    try {
+      const result = await apiClient.generateLineMessage({
+        job_name: job.job_name,
+        company_name: job.company_name,
+        appeal_points: job.appeal_points,
+        recommendation_reason: job.recommendation_reason,
+        salary_range: job.salary_range,
+        location: job.location,
+        remote: job.remote,
+        candidate_name: candidateName?.replace(/様$/, ""),
+        candidate_desires: candidateDesires,
+      });
+      setLineMessage(result.message);
+    } catch (err) {
+      console.error("AI refine failed:", err);
+    } finally {
+      setLineGenerating(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(lineMessage);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Zoho JD link
+  const jdTab = jdModuleVersion === "new" ? "CustomModule20" : "CustomModule2";
+
   return (
     <div className="border rounded-lg p-4 space-y-3">
       {/* Header */}
@@ -549,13 +671,32 @@ function JobMatchCard({ job, rank }: { job: JobMatch; rank: number }) {
         <div className="flex items-start gap-2 min-w-0">
           <span className="text-lg font-bold text-muted-foreground shrink-0">#{rank}</span>
           <div className="min-w-0">
-            <h5 className="font-semibold truncate">{job.company_name}</h5>
+            <button
+              type="button"
+              onClick={onOpenJd}
+              disabled={!onOpenJd}
+              className={`font-semibold truncate text-left ${onOpenJd ? "hover:text-primary hover:underline cursor-pointer" : ""}`}
+            >
+              {job.company_name}
+            </button>
             {job.job_name && job.job_name !== job.company_name && (
               <p className="text-xs text-muted-foreground truncate">{job.job_name}</p>
             )}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
+          {job.jd_id && (
+            <Button asChild variant="ghost" size="sm" className="h-7 w-7 p-0">
+              <a
+                href={`${ZOHO_CRM_BASE}/${jdTab}/${job.jd_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Zoho CRMで開く"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </Button>
+          )}
           {job.hiring_appetite && (
             <Badge variant={job.hiring_appetite === "緊急" ? "destructive" : "outline"} className="text-xs">
               {job.hiring_appetite}
@@ -624,6 +765,213 @@ function JobMatchCard({ job, rank }: { job: JobMatch; rank: number }) {
           ))}
         </div>
       )}
+
+      {/* LINE Message Panel */}
+      <Collapsible open={lineOpen} onOpenChange={setLineOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-between text-xs"
+            onClick={handleLineToggle}
+          >
+            <span className="flex items-center gap-1.5">
+              <MessageSquare className="h-3.5 w-3.5" />
+              LINE送信文
+            </span>
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${lineOpen ? "rotate-180" : ""}`} />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-2 space-y-2">
+            <Textarea
+              ref={textareaRef}
+              value={lineMessage}
+              onChange={(e) => setLineMessage(e.target.value)}
+              rows={8}
+              className="text-sm resize-none"
+              placeholder="メッセージがここに表示されます..."
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">{lineMessage.length}文字</span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAiRefine}
+                  disabled={lineGenerating}
+                  className="text-xs"
+                >
+                  {lineGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  )}
+                  AI推敲
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCopy}
+                  disabled={!lineMessage}
+                  className="text-xs"
+                >
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 mr-1" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5 mr-1" />
+                  )}
+                  {copied ? "コピー済" : "コピー"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
+
+// ---- JD Detail Sheet Content ----
+
+function JDDetailContent({ jd }: { jd: JDDetail }) {
+  const jdTab = jd.module_version === "new" ? "CustomModule20" : "CustomModule2";
+
+  const sections: { title: string; fields: { label: string; value: string | number | null | undefined; long?: boolean }[] }[] = [
+    {
+      title: "基本情報",
+      fields: [
+        { label: "企業名", value: jd.company },
+        { label: "求人名", value: jd.name },
+        { label: "ポジション", value: jd.position },
+        { label: "カテゴリ", value: jd.category },
+        { label: "採用意欲", value: jd.hiring_appetite },
+        {
+          label: "ステータス",
+          value: jd.is_open != null ? (jd.is_open ? "オープン" : "クローズ") : null,
+        },
+      ],
+    },
+    {
+      title: "年収・待遇",
+      fields: [
+        {
+          label: "年収レンジ",
+          value:
+            jd.salary_min != null || jd.salary_max != null
+              ? `${jd.salary_min ?? "?"}万〜${jd.salary_max ?? "?"}万`
+              : jd.expected_salary,
+        },
+        { label: "想定年収", value: jd.expected_salary },
+        { label: "インセンティブ", value: jd.incentive },
+        { label: "福利厚生", value: jd.benefits },
+        { label: "休日", value: jd.holiday },
+        { label: "年間休日数", value: jd.annual_days_off },
+      ],
+    },
+    {
+      title: "勤務条件",
+      fields: [
+        { label: "勤務地", value: jd.location },
+        { label: "リモート", value: jd.remote ?? (jd.is_remote != null ? (jd.is_remote ? "あり" : "なし") : null) },
+        { label: "フレックス", value: jd.flex ?? (jd.is_flex != null ? (jd.is_flex ? "あり" : "なし") : null) },
+        { label: "残業", value: jd.overtime },
+      ],
+    },
+    {
+      title: "要件",
+      fields: [
+        { label: "年齢上限", value: jd.age_max != null ? `${jd.age_max}歳` : null },
+        { label: "学歴", value: jd.education },
+        { label: "人材紹介経験", value: jd.hr_experience },
+        { label: "経験年数上限", value: jd.exp_count_max != null ? `${jd.exp_count_max}年` : null },
+      ],
+    },
+    {
+      title: "業務内容・候補者像",
+      fields: [
+        { label: "業務内容", value: jd.job_details, long: true },
+        { label: "理想の候補者", value: jd.ideal_candidate, long: true },
+        { label: "採用背景", value: jd.hiring_background, long: true },
+      ],
+    },
+    {
+      title: "組織・キャリア",
+      fields: [
+        { label: "組織体制", value: jd.org_structure, long: true },
+        { label: "入社後キャリア", value: jd.after_career, long: true },
+        { label: "企業の特徴", value: jd.company_features, long: true },
+      ],
+    },
+    {
+      title: "運用情報",
+      fields: [
+        { label: "フィー", value: jd.fee },
+        { label: "JD担当", value: jd.jd_manager },
+        { label: "最終更新", value: jd.modified_time?.split("T")[0] },
+        { label: "モジュール", value: jd.module_version === "new" ? "JobDescription (新)" : "JOB (旧)" },
+      ],
+    },
+  ];
+
+  return (
+    <div className="space-y-6 pt-4">
+      {/* Header buttons */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {jd.is_open != null && (
+          <Badge variant={jd.is_open ? "default" : "secondary"}>
+            {jd.is_open ? "オープン" : "クローズ"}
+          </Badge>
+        )}
+        <Button asChild variant="outline" size="sm">
+          <a
+            href={`${ZOHO_CRM_BASE}/${jdTab}/${jd.id}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <ExternalLink className="h-4 w-4 mr-2" />
+            Zoho CRM
+          </a>
+        </Button>
+        {jd.company_id && (
+          <Button asChild variant="outline" size="sm">
+            <a
+              href={`${ZOHO_CRM_BASE}/Accounts/${jd.company_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLink className="h-4 w-4 mr-2" />
+              企業
+            </a>
+          </Button>
+        )}
+      </div>
+
+      {/* Sections */}
+      {sections.map((section) => {
+        const filled = section.fields.filter((f) => f.value != null && f.value !== "");
+        if (filled.length === 0) return null;
+        return (
+          <div key={section.title} className="space-y-2">
+            <h4 className="text-sm font-semibold">{section.title}</h4>
+            <div className="grid grid-cols-1 border border-border rounded-lg overflow-hidden">
+              {filled.map((field, idx) => (
+                <div
+                  key={field.label}
+                  className={`flex flex-col sm:grid sm:grid-cols-[120px_1fr] ${idx > 0 ? "border-t border-border" : ""}`}
+                >
+                  <div className="bg-muted/30 px-3 py-2 text-xs font-medium text-muted-foreground sm:border-r border-border">
+                    {field.label}
+                  </div>
+                  <div className={`px-3 py-2 text-xs sm:text-sm border-t sm:border-t-0 border-border sm:border-0 min-w-0 ${field.long ? "whitespace-pre-wrap" : ""}`}>
+                    {String(field.value)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

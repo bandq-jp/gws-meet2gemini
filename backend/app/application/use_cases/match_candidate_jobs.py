@@ -356,13 +356,46 @@ def _safe_int(val: Any) -> Optional[int]:
         return None
 
 
-def _normalize_job_results(jobs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Normalize job match results from LLM output."""
+def _norm_key(s: str) -> str:
+    """Normalize string for fuzzy matching: lowercase, strip whitespace."""
+    return s.strip().lower().replace("　", " ")
+
+
+def _normalize_job_results(
+    jobs: List[Dict[str, Any]],
+    jd_results: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """Normalize job match results from LLM output, mapping back JD IDs."""
+    # Build lookup from original JD results
+    jd_lookup: Dict[tuple, str] = {}
+    if jd_results:
+        for jd in jd_results:
+            key = (_norm_key(jd.get("company") or ""), _norm_key(jd.get("name") or ""))
+            jd_id = jd.get("id")
+            if jd_id and key != ("", ""):
+                jd_lookup[key] = str(jd_id)
+
     normalized = []
     for j in jobs:
+        company = str(j.get("company_name", ""))
+        job_name = str(j.get("job_name") or company)
+
+        # Map JD ID by company+name
+        jd_id = jd_lookup.get((_norm_key(company), _norm_key(job_name)))
+        # Fallback: try company-only match if unique
+        if not jd_id and jd_results:
+            company_matches = [
+                str(jd.get("id")) for jd in jd_results
+                if _norm_key(jd.get("company") or "") == _norm_key(company)
+                and _norm_key(jd.get("name") or "") and jd.get("id")
+            ]
+            if len(company_matches) == 1:
+                jd_id = company_matches[0]
+
         normalized.append({
-            "job_name": str(j.get("job_name") or j.get("company_name", "")),
-            "company_name": str(j.get("company_name", "")),
+            "jd_id": jd_id,
+            "job_name": job_name,
+            "company_name": company,
             "match_score": float(j.get("match_score", 0)) if j.get("match_score") is not None else 0.0,
             "recommendation_reason": j.get("recommendation_reason"),
             "appeal_points": j.get("appeal_points") or [],
@@ -503,7 +536,7 @@ class MatchCandidateJobsUseCase:
 
         # Support both "recommended_jobs" (new) and "recommended_companies" (legacy)
         raw_jobs = parsed.get("recommended_jobs") or parsed.get("recommended_companies", [])
-        jobs = _normalize_job_results(raw_jobs)
+        jobs = _normalize_job_results(raw_jobs, jd_results=jd_results)
 
         candidate_profile = {
             "name": zoho_record.get("Name"),
@@ -542,6 +575,7 @@ class MatchCandidateJobsUseCase:
                 salary_range = f"{salary_min or '?'}-{salary_max or '?'}万円"
 
             jobs.append({
+                "jd_id": str(jd.get("id")) if jd.get("id") else None,
                 "job_name": jd.get("name") or "",
                 "company_name": jd.get("company") or "",
                 "match_score": 0.5,
