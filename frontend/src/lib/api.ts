@@ -208,22 +208,28 @@ export interface CandidateDetail {
   linked_meetings: LinkedMeeting[];
 }
 
-export interface CompanyMatch {
+export interface JobMatch {
+  job_name: string;
   company_name: string;
   match_score: number;
-  appeal_points: string[];
   recommendation_reason: string | null;
-  age_limit: number | null;
-  max_salary: number | null;
-  locations: string[] | null;
+  appeal_points: string[];
+  concerns: string[];
+  salary_range: string | null;
+  location: string | null;
   remote: string | null;
+  position: string | null;
+  hiring_appetite: string | null;
+  source: string;
 }
 
 export interface JobMatchResult {
   candidate_profile: Record<string, unknown>;
-  recommended_companies: CompanyMatch[];
+  recommended_jobs: JobMatch[];
   total_found: number;
   analysis_text: string | null;
+  data_sources_used: string[];
+  jd_module_version: string | null;
 }
 
 // Custom Schema interfaces
@@ -711,7 +717,7 @@ class ApiClient {
 
   async matchCandidateJobs(
     recordId: string,
-    overrides?: { transfer_reasons?: string; desired_salary?: number; desired_locations?: string[]; limit?: number }
+    overrides?: { transfer_reasons?: string; desired_salary?: number; desired_locations?: string[]; limit?: number; jd_module_version?: string }
   ): Promise<JobMatchResult> {
     return this.request<JobMatchResult>(`/candidates/${encodeURIComponent(recordId)}/job-match`, {
       method: 'POST',

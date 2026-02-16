@@ -240,3 +240,50 @@ class StructuredRepositoryImpl:
         except Exception as e:
             logger.warning("[structured_repo] get_meetings_with_structured failed: %s", e)
             return []
+
+    def get_full_transcripts_by_zoho_record_id(self, record_id: str) -> List[Dict[str, Any]]:
+        """候補者に紐づく全議事録の全文テキストを取得。
+
+        Returns:
+            List of dicts: meeting_id, title, meeting_datetime, text_content, structured_data
+        """
+        sb = get_supabase()
+        try:
+            # structured_outputs から meeting_id を取得
+            so_res = (
+                sb.table(self.TABLE)
+                .select("meeting_id, data, created_at")
+                .eq("zoho_record_id", record_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            if not so_res.data:
+                return []
+
+            meeting_ids = [row["meeting_id"] for row in so_res.data]
+
+            # meeting_documents から全文を取得
+            m_res = (
+                sb.table("meeting_documents")
+                .select("id, title, meeting_datetime, text_content")
+                .in_("id", meeting_ids)
+                .execute()
+            )
+            meeting_map = {m["id"]: m for m in (m_res.data or [])}
+
+            results = []
+            for so in so_res.data:
+                mid = so["meeting_id"]
+                meeting = meeting_map.get(mid, {})
+                text = meeting.get("text_content") or ""
+                results.append({
+                    "meeting_id": mid,
+                    "title": meeting.get("title"),
+                    "meeting_datetime": meeting.get("meeting_datetime"),
+                    "text_content": text,
+                    "structured_data": so.get("data"),
+                })
+            return results
+        except Exception as e:
+            logger.warning("[structured_repo] get_full_transcripts failed: %s", e)
+            return []

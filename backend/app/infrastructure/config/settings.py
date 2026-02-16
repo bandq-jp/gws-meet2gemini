@@ -60,6 +60,11 @@ class Settings:
     # If not set, field API names will be auto-discovered by display label lookup
     zoho_app_hc_name_field_api: str | None = os.getenv("ZOHO_APP_HC_NAME_FIELD_API") or None
     zoho_app_hc_id_field_api: str | None = os.getenv("ZOHO_APP_HC_ID_FIELD_API") or None
+    # JD-hc module configuration (job descriptions)
+    # "old" = JOB (663件, 旧スキーマ), "new" = JobDescription (新スキーマ, 今後メイン)
+    zoho_jd_module_version: str = os.getenv("ZOHO_JD_MODULE_VERSION", "old")
+    zoho_jd_module_old: str = os.getenv("ZOHO_JD_MODULE_OLD", "JOB")
+    zoho_jd_module_new: str = os.getenv("ZOHO_JD_MODULE_NEW", "JobDescription")
 
     # Cloud Tasks / Cloud Run
     gcp_project: str = os.getenv("GCP_PROJECT", os.getenv("GOOGLE_CLOUD_PROJECT", ""))

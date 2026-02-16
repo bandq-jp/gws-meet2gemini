@@ -85,10 +85,20 @@
   - ADK JobMatchAgent (Gemini 3 Flash) がセマンティック検索+分析を実行
   - フォールバック: ADKエージェント失敗時は `find_companies_for_candidate()` 直接呼出し
   - 候補者プロフィール = Zohoデータ + 面談構造化データ(transfer_reasons等) を統合
-  - 結果: JSON形式 (analysis_text + recommended_companies[])
+  - 結果: JSON形式 (analysis_text + recommended_jobs[])
 - **Backend**: `candidates.py` router → use cases (list, detail, meetings, match) → ZohoClient.list_candidates_paginated()
-- **Frontend**: `api.ts` に CandidateSummary/CandidateDetail/CompanyMatch/JobMatchResult interfaces追加
+- **Frontend**: `api.ts` に CandidateSummary/CandidateDetail/JobMatch/JobMatchResult interfaces追加
 - **サイドバー**: `app-sidebar.tsx` "候補者管理" enabled: true
+
+### 求人マッチング マルチソースアーキテクチャ (2026-02-16改善)
+- **PRIMARY**: Zoho JD-hc (old: `JOB` 663件 / new: `JobDescription` 1件) — 構造化求人票
+- **SUPPLEMENTARY**: Semantic search (company_chunks pgvector) — 企業カルチャー/訴求
+- **COMPLEMENTARY**: Gmail / Slack — 最新情報
+- **INPUT**: Zoho APP-hc + 全構造化データ + 議事録全文 (max 8000文字/件)
+- **JDモジュール切替**: `ZOHO_JD_MODULE_VERSION` (old/new), API `jd_module_version` パラメータ
+- **Zoho JDフィールド統一**: `_JD_FIELD_MAP` で40+フィールドのold/new正規化
+- **レスポンス形式**: `recommended_jobs[]` (job_name, company_name, match_score, concerns, salary_range, position, hiring_appetite, source)
+- **フォールバック**: ADKエージェント失敗時はZoho JD結果をそのまま返却
 
 ### 議事録一覧ページネーション
 - `meeting_documents_enriched` VIEW: `is_structured`, `zoho_sync_status` を計算列で持つ

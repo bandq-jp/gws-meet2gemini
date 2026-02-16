@@ -9,6 +9,7 @@ from app.presentation.schemas.candidate import (
     CandidateListResponse,
     CandidateMeetingsResponse,
     CandidateSummaryOut,
+    JobMatchOut,
     JobMatchRequest,
     JobMatchResponse,
     LinkedMeetingOut,
@@ -109,12 +110,13 @@ def get_candidate_meetings(record_id: str):
 
 @router.post("/{record_id}/job-match", response_model=JobMatchResponse)
 def match_candidate_jobs(record_id: str, body: Optional[JobMatchRequest] = None):
-    """候補者の求人マッチング（ADKエージェント活用）"""
+    """候補者の求人マッチング（ADKエージェント活用 — Zoho JD + セマンティック + Mail/Slack）"""
     from app.application.use_cases.match_candidate_jobs import MatchCandidateJobsUseCase
 
     try:
         use_case = MatchCandidateJobsUseCase()
         overrides = {}
+        jd_module_version = None
         if body:
             if body.transfer_reasons:
                 overrides["transfer_reasons"] = body.transfer_reasons
@@ -123,13 +125,29 @@ def match_candidate_jobs(record_id: str, body: Optional[JobMatchRequest] = None)
             if body.desired_locations:
                 overrides["desired_locations"] = body.desired_locations
             overrides["limit"] = body.limit
+            jd_module_version = body.jd_module_version
 
-        result = use_case.execute(record_id, overrides=overrides)
+        result = use_case.execute(
+            record_id,
+            overrides=overrides,
+            jd_module_version=jd_module_version,
+        )
 
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
 
-        return JobMatchResponse(**result)
+        # Normalize recommended_jobs to JobMatchOut
+        raw_jobs = result.get("recommended_jobs", [])
+        jobs = [JobMatchOut(**j) for j in raw_jobs]
+
+        return JobMatchResponse(
+            candidate_profile=result.get("candidate_profile", {}),
+            recommended_jobs=jobs,
+            total_found=result.get("total_found", len(jobs)),
+            analysis_text=result.get("analysis_text"),
+            data_sources_used=result.get("data_sources_used", []),
+            jd_module_version=result.get("jd_module_version"),
+        )
     except HTTPException:
         raise
     except Exception as e:

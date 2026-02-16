@@ -1311,7 +1311,289 @@ class ZohoClient:
             "referral": "紹介経由で獲得したリード",
             "other": "その他",
         }
-    
+
+    # =========================================================================
+    # JD-hc（求人票）モジュール — 旧(JOB) / 新(JobDescription) 対応
+    # =========================================================================
+
+    # フィールドマッピング: 正規化名 → {old: API名, new: API名}
+    _JD_FIELD_MAP = {
+        # 基本
+        "id":               {"old": "id",                "new": "id"},
+        "name":             {"old": "Name",              "new": "Name"},
+        "company":          {"old": "company",           "new": "company"},
+        # 年収
+        "salary_min":       {"old": "salary_low",        "new": "minimum_salary"},
+        "salary_max":       {"old": "field10",           "new": "maximum_salary"},
+        "expected_salary":  {"old": None,                "new": "expected_salary"},
+        "incentive":        {"old": "incentive",         "new": "incentive_detail"},
+        # 勤務地・働き方
+        "location":         {"old": "location",          "new": "job_location"},
+        "remote":           {"old": "remote",            "new": "remote_detail"},
+        "is_remote":        {"old": None,                "new": "is_remote"},
+        "flex":             {"old": "field17",           "new": "flex_detail"},
+        "is_flex":          {"old": None,                "new": "is_flex"},
+        "overtime":         {"old": None,                "new": "overtime"},
+        "closing_time":     {"old": None,                "new": "closing_time"},
+        # 要件
+        "age_max":          {"old": "field31",           "new": "age"},
+        "age_min":          {"old": "field33",           "new": None},
+        "education":        {"old": "education",         "new": "education"},
+        "exp_count_max":    {"old": None,                "new": "number_of_company_worked_for"},
+        "hr_experience":    {"old": "field24",           "new": None},
+        # 業務・組織
+        "job_details":      {"old": "field15",           "new": "job_details"},
+        "ideal_candidate":  {"old": "ideal_candidate",   "new": "persona"},
+        "hiring_background":{"old": "field13",           "new": "hiring_background_detail"},
+        "org_structure":    {"old": None,                "new": "organizational_structure"},
+        "exec_background":  {"old": None,                "new": "executive_background"},
+        "biz_strategy":     {"old": None,                "new": "business_strategy"},
+        "after_career":     {"old": None,                "new": "after_career"},
+        "integration_path": {"old": None,                "new": "integration_path"},
+        # 分類
+        "category":         {"old": "category",          "new": "support_area"},
+        "position":         {"old": "category_hr_industry", "new": "position_name"},
+        "class_level":      {"old": "class",             "new": None},
+        "tags":             {"old": "tags",              "new": None},
+        "company_features": {"old": "field14",           "new": None},
+        # 運用
+        "is_open":          {"old": "field21",           "new": "open_close"},
+        "hiring_appetite":  {"old": None,                "new": "hiring_appetite"},
+        "fee":              {"old": None,                "new": "fee"},
+        "fee_detail":       {"old": None,                "new": "fee_detail"},
+        "jd_manager":       {"old": "field22",           "new": "JD_manager"},
+        # 福利厚生
+        "benefits":         {"old": "employee_benefits", "new": "other_employee_benefits"},
+        "holiday":          {"old": "holiday",           "new": "vacation_detail"},
+        "annual_days_off":  {"old": None,                "new": "total_annual_days_off"},
+        # メタ
+        "modified_time":    {"old": "Modified_Time",     "new": "Modified_Time"},
+        "created_time":     {"old": "Created_Time",      "new": "Created_Time"},
+    }
+
+    def _get_jd_module(self, version: str | None = None) -> str:
+        """JDモジュールAPI名を返す。"""
+        v = version or self.settings.zoho_jd_module_version
+        if v == "new":
+            return self.settings.zoho_jd_module_new
+        return self.settings.zoho_jd_module_old
+
+    def _jd_field(self, canonical: str, version: str | None = None) -> str | None:
+        """正規化フィールド名 → 実API名。該当なしは None。"""
+        v = version or self.settings.zoho_jd_module_version
+        mapping = self._JD_FIELD_MAP.get(canonical)
+        if not mapping:
+            return None
+        return mapping.get(v)
+
+    def _jd_select_fields(self, version: str | None = None) -> str:
+        """COQL SELECT句用のフィールドリスト生成。"""
+        v = version or self.settings.zoho_jd_module_version
+        fields = set()
+        for _canonical, mapping in self._JD_FIELD_MAP.items():
+            api_name = mapping.get(v)
+            if api_name:
+                fields.add(api_name)
+        # Owner は常に含める
+        fields.add("Owner")
+        return ", ".join(sorted(fields))
+
+    def _normalize_jd_record(
+        self, record: Dict[str, Any], version: str | None = None
+    ) -> Dict[str, Any]:
+        """Zoho JDレコードを正規化辞書に変換。"""
+        import re as _re
+
+        v = version or self.settings.zoho_jd_module_version
+        normalized: Dict[str, Any] = {}
+
+        for canonical, mapping in self._JD_FIELD_MAP.items():
+            api_name = mapping.get(v)
+            if api_name and api_name in record:
+                val = record[api_name]
+                # Lookup フィールド展開 (company等)
+                if isinstance(val, dict) and "name" in val:
+                    normalized[f"{canonical}_id"] = val.get("id")
+                    normalized[canonical] = val["name"]
+                else:
+                    normalized[canonical] = val
+            else:
+                normalized[canonical] = None
+
+        # 年収の正規化（文字列→数値変換）
+        for key in ("salary_min", "salary_max"):
+            v_str = normalized.get(key)
+            if v_str is not None and not isinstance(v_str, (int, float)):
+                try:
+                    cleaned = str(v_str).replace("万円", "").replace("万", "").replace(",", "").replace(" ", "").strip()
+                    normalized[key] = int(cleaned) if cleaned else None
+                except (ValueError, TypeError):
+                    normalized[key] = None
+
+        # 年齢上限の正規化（新モジュールのpicklist→数値）
+        age_val = normalized.get("age_max")
+        if isinstance(age_val, str):
+            nums = _re.findall(r"\d+", age_val)
+            if nums:
+                normalized["age_max"] = max(int(n) for n in nums)
+            elif "以上" in age_val:
+                normalized["age_max"] = 99  # 年齢制限なし
+            else:
+                normalized["age_max"] = None
+
+        # is_open の正規化
+        is_open = normalized.get("is_open")
+        if isinstance(is_open, bool):
+            pass  # 新モジュール: True/False そのまま
+        elif isinstance(is_open, str):
+            normalized["is_open"] = is_open == "オープン"
+        elif is_open is None:
+            normalized["is_open"] = None  # 不明
+
+        # raw レコードも保持
+        normalized["_raw"] = record
+        normalized["_module_version"] = v
+
+        return normalized
+
+    def search_jd_for_candidate(
+        self,
+        age: int | None = None,
+        desired_salary: int | None = None,
+        location: str | None = None,
+        education: str | None = None,
+        version: str | None = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """候補者条件に合う求人票をZoho JD-hcからCOQL検索。
+
+        Returns:
+            正規化済みJDレコードのリスト（スコア計算なし、フィルタリングのみ）。
+        """
+        v = version or self.settings.zoho_jd_module_version
+        module = self._get_jd_module(v)
+        select_fields = self._jd_select_fields(v)
+
+        # WHERE句構築
+        conditions = ["id is not null"]
+
+        # 新モジュールの場合、open_close=trueでフィルタ
+        is_open_field = self._jd_field("is_open", v)
+        if v == "new" and is_open_field:
+            conditions.append(f"{is_open_field} = true")
+
+        query = f"SELECT {select_fields} FROM {module} WHERE {' AND '.join(conditions)} ORDER BY Modified_Time desc LIMIT {min(limit * 5, 2000)}"
+
+        logger.info("[zoho] search_jd COQL: %s...", query[:200])
+
+        try:
+            result = self._coql_query(query)
+            records = result.get("data", []) or []
+            logger.info("[zoho] search_jd COQL success: %d records", len(records))
+        except Exception as e:
+            logger.error("[zoho] search_jd COQL failed: %s", e)
+            return []
+
+        # 正規化
+        normalized = [self._normalize_jd_record(r, v) for r in records]
+
+        # メモリ内フィルタ
+        filtered = []
+        for jd in normalized:
+            # 旧モジュールの「オープン」フィルタ（COQLで未対応の場合）
+            if v == "old":
+                is_open_val = jd.get("is_open")
+                # field21 が設定されていてクローズなら除外
+                if is_open_val is not None and is_open_val is False:
+                    continue
+
+            # 年齢フィルタ
+            if age and jd.get("age_max"):
+                if isinstance(jd["age_max"], (int, float)) and age > jd["age_max"]:
+                    continue
+
+            # 年収フィルタ（希望年収が上限以下）
+            if desired_salary and jd.get("salary_max"):
+                if isinstance(jd["salary_max"], (int, float)):
+                    if desired_salary > jd["salary_max"] * 1.2:  # 20%バッファ
+                        continue
+
+            filtered.append(jd)
+
+        return filtered[:limit]
+
+    def get_job_description(
+        self, record_id: str, version: str | None = None
+    ) -> Dict[str, Any] | None:
+        """JD-hcの単一レコード詳細を正規化して返す。"""
+        v = version or self.settings.zoho_jd_module_version
+        module = self._get_jd_module(v)
+
+        try:
+            data = self._get(f"/crm/v2/{module}/{record_id}") or {}
+            records = data.get("data", [])
+            if not records:
+                return None
+            return self._normalize_jd_record(records[0], v)
+        except Exception as e:
+            logger.error("[zoho] get_jd detail failed: %s", e)
+            return None
+
+    def list_job_descriptions_paginated(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        search: str | None = None,
+        company_name: str | None = None,
+        version: str | None = None,
+    ) -> Dict[str, Any]:
+        """JD-hcのページネーション付き一覧。"""
+        v = version or self.settings.zoho_jd_module_version
+        module = self._get_jd_module(v)
+        select_fields = self._jd_select_fields(v)
+
+        query = f"SELECT {select_fields} FROM {module} WHERE id is not null ORDER BY Modified_Time desc LIMIT 2000"
+
+        try:
+            result = self._coql_query(query)
+            records = result.get("data", []) or []
+        except Exception as e:
+            logger.error("[zoho] list_jd failed: %s", e)
+            records = []
+
+        normalized = [self._normalize_jd_record(r, v) for r in records]
+
+        # フィルタ
+        if search:
+            sl = search.lower()
+            normalized = [
+                jd for jd in normalized
+                if sl in (jd.get("name") or "").lower()
+                or sl in (jd.get("company") or "").lower()
+            ]
+        if company_name:
+            cl = company_name.lower()
+            normalized = [
+                jd for jd in normalized
+                if cl in (jd.get("company") or "").lower()
+            ]
+
+        total = len(normalized)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        items = normalized[start: start + page_size]
+
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_previous": page > 1,
+            "module_version": v,
+        }
+
 
 # class ZohoBaseClient:
 #     def __init__(self) -> None:
@@ -1857,6 +2139,7 @@ class ZohoWriteClient:
                 "error": f"Unexpected error: {str(e)}",
                 "attempted_data": zoho_data
             }
+
 
 
 class ZohoFieldValidator(ZohoClient):

@@ -58,21 +58,28 @@ class JobMatchRequest(BaseModel):
     desired_salary: Optional[int] = None
     desired_locations: Optional[List[str]] = None
     limit: int = Field(default=10, ge=1, le=20)
+    jd_module_version: Optional[str] = Field(default=None, description="old (JOB) or new (JobDescription)")
 
 
-class CompanyMatchOut(BaseModel):
-    company_name: str
+class JobMatchOut(BaseModel):
+    job_name: str = ""
+    company_name: str = ""
     match_score: float = 0.0
-    appeal_points: List[str] = Field(default_factory=list)
     recommendation_reason: Optional[str] = None
-    age_limit: Optional[int] = None
-    max_salary: Optional[int] = None
-    locations: Optional[List[str]] = None
+    appeal_points: List[str] = Field(default_factory=list)
+    concerns: List[str] = Field(default_factory=list)
+    salary_range: Optional[str] = None
+    location: Optional[str] = None
     remote: Optional[str] = None
+    position: Optional[str] = None
+    hiring_appetite: Optional[str] = None
+    source: str = "unknown"
 
 
 class JobMatchResponse(BaseModel):
     candidate_profile: Dict[str, Any] = Field(default_factory=dict)
-    recommended_companies: List[CompanyMatchOut] = Field(default_factory=list)
+    recommended_jobs: List[JobMatchOut] = Field(default_factory=list)
     total_found: int = 0
     analysis_text: Optional[str] = None
+    data_sources_used: List[str] = Field(default_factory=list)
+    jd_module_version: Optional[str] = None

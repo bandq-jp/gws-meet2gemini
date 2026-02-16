@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
+  AlertTriangle,
   ArrowLeft,
   Briefcase,
   Calendar,
@@ -19,7 +20,7 @@ import {
 import {
   apiClient,
   type CandidateDetail,
-  type CompanyMatch,
+  type JobMatch,
   type JobMatchResult,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
@@ -436,26 +437,42 @@ export default function CandidateDetailPage() {
                     </div>
                   )}
 
+                  {/* Data sources & module version */}
+                  {(matchResult.data_sources_used?.length > 0 || matchResult.jd_module_version) && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {matchResult.jd_module_version && (
+                        <Badge variant="outline" className="text-xs">
+                          JDモジュール: {matchResult.jd_module_version === "old" ? "JOB (旧)" : "JobDescription (新)"}
+                        </Badge>
+                      )}
+                      {matchResult.data_sources_used?.map((src) => (
+                        <Badge key={src} variant="secondary" className="text-xs">
+                          {src === "zoho_jd" ? "Zoho求人票" : src === "semantic" ? "セマンティック" : src === "gmail" ? "Gmail" : src === "slack" ? "Slack" : src}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Top matches */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold">
-                        推薦企業 ({matchResult.total_found}件)
+                        推薦求人 ({matchResult.total_found}件)
                       </h4>
                       <Button variant="ghost" size="sm" onClick={handleJobMatch} disabled={matching}>
                         <Sparkles className="h-3 w-3 mr-1" />
                         再分析
                       </Button>
                     </div>
-                    {matchResult.recommended_companies.length === 0 ? (
+                    {matchResult.recommended_jobs.length === 0 ? (
                       <p className="text-sm text-muted-foreground py-4 text-center">
-                        条件に合う企業が見つかりませんでした
+                        条件に合う求人が見つかりませんでした
                       </p>
                     ) : (
-                      matchResult.recommended_companies.map((company, index) => (
-                        <CompanyMatchCard
-                          key={company.company_name}
-                          company={company}
+                      matchResult.recommended_jobs.map((job, index) => (
+                        <JobMatchCard
+                          key={`${job.company_name}-${job.job_name}-${index}`}
+                          job={job}
                           rank={index + 1}
                         />
                       ))
@@ -510,63 +527,100 @@ function RenderStructuredValue({ value }: { value: unknown }) {
   return <span className="break-words whitespace-normal leading-relaxed">{String(value)}</span>;
 }
 
-function CompanyMatchCard({ company, rank }: { company: CompanyMatch; rank: number }) {
+function JobMatchCard({ job, rank }: { job: JobMatch; rank: number }) {
   const scoreColor =
-    company.match_score >= 0.7
+    job.match_score >= 0.7
       ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-      : company.match_score >= 0.5
+      : job.match_score >= 0.5
         ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
         : "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200";
+
+  const sourceLabel: Record<string, string> = {
+    zoho_jd: "Zoho求人票",
+    semantic: "セマンティック",
+    gmail: "Gmail",
+    slack: "Slack",
+  };
 
   return (
     <div className="border rounded-lg p-4 space-y-3">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 min-w-0">
           <span className="text-lg font-bold text-muted-foreground shrink-0">#{rank}</span>
-          <h5 className="font-semibold truncate">{company.company_name}</h5>
+          <div className="min-w-0">
+            <h5 className="font-semibold truncate">{job.company_name}</h5>
+            {job.job_name && job.job_name !== job.company_name && (
+              <p className="text-xs text-muted-foreground truncate">{job.job_name}</p>
+            )}
+          </div>
         </div>
-        <span className={`text-xs font-medium px-2 py-1 rounded-full shrink-0 ${scoreColor}`}>
-          {(company.match_score * 100).toFixed(0)}%
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {job.hiring_appetite && (
+            <Badge variant={job.hiring_appetite === "緊急" ? "destructive" : "outline"} className="text-xs">
+              {job.hiring_appetite}
+            </Badge>
+          )}
+          <span className={`text-xs font-medium px-2 py-1 rounded-full ${scoreColor}`}>
+            {(job.match_score * 100).toFixed(0)}%
+          </span>
+        </div>
       </div>
 
       {/* Recommendation Reason */}
-      {company.recommendation_reason && (
+      {job.recommendation_reason && (
         <p className="text-sm text-muted-foreground leading-relaxed">
-          {company.recommendation_reason}
+          {job.recommendation_reason}
         </p>
       )}
 
       {/* Metadata */}
       <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-        {company.max_salary && (
+        {job.salary_range && (
           <div className="flex items-center gap-1">
             <Wallet className="h-3 w-3" />
-            <span>〜{company.max_salary}万円</span>
+            <span>{job.salary_range}</span>
           </div>
         )}
-        {company.locations && company.locations.length > 0 && (
+        {job.location && (
           <div className="flex items-center gap-1">
             <MapPin className="h-3 w-3" />
-            <span>{company.locations.join(", ")}</span>
+            <span>{job.location}</span>
           </div>
         )}
-        {company.age_limit && (
-          <span>〜{company.age_limit}歳</span>
+        {job.position && (
+          <div className="flex items-center gap-1">
+            <Briefcase className="h-3 w-3" />
+            <span>{job.position}</span>
+          </div>
         )}
-        {company.remote && (
-          <Badge variant="outline" className="text-xs">リモート: {company.remote}</Badge>
+        {job.remote && (
+          <Badge variant="outline" className="text-xs">リモート: {job.remote}</Badge>
+        )}
+        {job.source && (
+          <Badge variant="secondary" className="text-xs">{sourceLabel[job.source] || job.source}</Badge>
         )}
       </div>
 
       {/* Appeal Points */}
-      {company.appeal_points.length > 0 && (
+      {job.appeal_points.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {company.appeal_points.map((point, i) => (
+          {job.appeal_points.map((point, i) => (
             <Badge key={i} variant="secondary" className="text-xs max-w-full">
               <span className="break-words whitespace-normal leading-tight">{point}</span>
             </Badge>
+          ))}
+        </div>
+      )}
+
+      {/* Concerns */}
+      {job.concerns.length > 0 && (
+        <div className="space-y-1">
+          {job.concerns.map((concern, i) => (
+            <div key={i} className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+              <span className="break-words">{concern}</span>
+            </div>
           ))}
         </div>
       )}
