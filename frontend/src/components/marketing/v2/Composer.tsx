@@ -77,14 +77,12 @@ export function Composer({
     await onSend(trimmed || "添付ファイルを分析してください", filesToSend);
   }, [input, files, isStreaming, disabled, onSend]);
 
+  // Enter = 改行（デフォルト動作）、送信はボタンのみ
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSubmit();
-      }
+    (_e: React.KeyboardEvent) => {
+      // no-op: Enter で改行、送信はボタンクリックのみ
     },
-    [handleSubmit]
+    []
   );
 
   const handleInput = useCallback(
@@ -240,8 +238,8 @@ export function Composer({
             </button>
           )}
         </div>
-        <p className="text-center text-[10px] sm:text-[11px] text-[#9ca3af] mt-2">
-          <span className="hidden sm:inline">Shift+Enter で改行 / </span>Enter で送信 / ファイル添付可
+        <p className="text-center text-[10px] sm:text-[11px] text-rose-500/80 font-medium mt-2">
+          Enter で改行 / 送信はボタンのみ / ファイル添付可
         </p>
       </div>
     </div>
