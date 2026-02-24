@@ -806,7 +806,7 @@ export default function ImageGenPage() {
 
   const handleNewSession = useCallback(async () => {
     const email = user?.emailAddresses[0]?.emailAddress;
-    await createSession({
+    const session = await createSession({
       template_id: selectedTemplateId || undefined,
       title: selectedTemplate?.name
         ? `${selectedTemplate.name} - ${new Date().toLocaleDateString("ja-JP")}`
@@ -816,6 +816,7 @@ export default function ImageGenPage() {
       created_by: user?.id,
       created_by_email: email,
     });
+    return session;
   }, [
     createSession,
     selectedTemplateId,
@@ -830,13 +831,19 @@ export default function ImageGenPage() {
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || isGenerating || quotaReached) return;
 
-    if (!currentSession) {
-      await handleNewSession();
+    // セッション未作成の場合は先に作成し、返されたセッションIDを直接渡す
+    // (React State更新は非同期のため、currentSession はまだ null の可能性がある)
+    let sessionId = currentSession?.id;
+    if (!sessionId) {
+      const newSession = await handleNewSession();
+      if (!newSession?.id) return;
+      sessionId = newSession.id;
     }
 
     await generateImage(prompt.trim(), {
       aspect_ratio: aspectRatio !== "auto" ? aspectRatio : undefined,
       image_size: imageSize,
+      sessionId,
     });
     setPrompt("");
     textareaRef.current?.focus();

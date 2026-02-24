@@ -94,6 +94,12 @@
 - **残課題**: 姓のみタイトル (`田中様_初回面談`) は26%存在→データ制約で改善不可
 - **残課題**: Zoho重複レコード（同名別ID: 向井直也×2, 大石周×2）→正しくスキップするが手動対応必要
 
+### 画像生成スタジオ バグ修正 (2026-02-24)
+- **BFFプロキシ gaxios問題**: 本番環境で `client.request()` (gaxios) が multipart/form-data の ArrayBuffer を `JSON.stringify()` → `{}` に変換していた。ファイルアップロード時は native `fetch()` + IDトークンヘッダーで転送するよう修正
+- **handleGenerate Race Condition**: `handleNewSession()` 後の React State更新が非同期のため `currentSession` が null のまま `generateImage()` に渡されていた。`generateImage` に `sessionId` オプションを追加し、新規セッションIDを直接渡すよう修正
+- **update_session({}) 空dict PATCH**: `image_gen.py` で `update_session(session_id, {})` が PostgREST に空body PATCH を送信していた。`{"updated_at": ...}` を明示的に渡すよう修正
+- **教訓**: `google-auth-library` の `client.request()` (gaxios内部) は `ArrayBuffer` を `JSON.stringify()` してしまう。バイナリデータ転送には native `fetch()` + `getRequestHeaders()` でIDトークンだけ取得して使う
+
 ---
 
 ## 自己改善ログ（教訓集）
@@ -130,6 +136,8 @@
 - Portal系の固定幅は `Math.min(desired, window.innerWidth - margin)` で動的計算
 - `100vh` → `100dvh` でモバイルアドレスバー対応
 - shadcn/ui SidebarのSheet mobileは `SidebarTrigger` 配置だけで動作
+- **gaxios (google-auth-library) はバイナリ非対応**: `client.request({ data: ArrayBuffer })` は内部で `JSON.stringify()` → `{}` に化ける。multipart/form-data送信には `client.getRequestHeaders()` + native `fetch()` を使う
+- **React State更新後の即時参照**: `setState()` 直後の値は古いclosureを参照。新しい値が必要な場合は関数の戻り値を直接使い、State経由の参照を避ける
 
 ### API固有知見
 - **Slack**: `search.messages`はUser Token(`xoxp-`)のみ。Bot Token(`xoxb-`)では`not_allowed_token_type`

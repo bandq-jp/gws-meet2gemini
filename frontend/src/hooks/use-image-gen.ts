@@ -162,9 +162,10 @@ export function useImageGen() {
   const generateImage = useCallback(
     async (
       prompt: string,
-      options?: { aspect_ratio?: string; image_size?: string }
+      options?: { aspect_ratio?: string; image_size?: string; sessionId?: string }
     ) => {
-      if (!currentSession) {
+      const targetSessionId = options?.sessionId || currentSession?.id;
+      if (!targetSessionId) {
         setError("セッションが選択されていません");
         return null;
       }
@@ -175,7 +176,7 @@ export function useImageGen() {
       // Optimistically add user message
       const userMsg: ImageGenMessage = {
         id: `temp-${Date.now()}`,
-        session_id: currentSession.id,
+        session_id: targetSessionId,
         role: "user",
         text_content: prompt,
         created_at: new Date().toISOString(),
@@ -183,7 +184,7 @@ export function useImageGen() {
       setMessages((prev) => [...prev, userMsg]);
 
       try {
-        const result = await apiClient.generateImage(currentSession.id, {
+        const result = await apiClient.generateImage(targetSessionId, {
           prompt,
           ...options,
         });

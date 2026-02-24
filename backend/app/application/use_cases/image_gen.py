@@ -276,7 +276,7 @@ def generate_image(
     })
 
     # Update session timestamp
-    repo.update_session(session_id, {})
+    repo.update_session(session_id, {"updated_at": datetime.now(timezone.utc).isoformat()})
 
     return assistant_msg
 

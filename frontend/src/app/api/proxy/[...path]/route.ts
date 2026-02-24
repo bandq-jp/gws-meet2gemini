@@ -188,24 +188,53 @@ async function handleRequest(
     });
 
     const client = await googleAuth.getIdTokenClient(CLOUD_RUN_BASE_URL);
+    const authHeaders = await client.getRequestHeaders();
 
-    // ヘッダーの準備（本番環境）
+    // ── ファイルアップロード: native fetch() で転送 ──
+    // gaxios (client.request()) は ArrayBuffer を JSON.stringify() して破壊するため、
+    // multipart/form-data は native fetch() で直接転送する必要がある。
+    if (isFileUpload) {
+      const forwardHeaders = new Headers();
+      request.headers.forEach((value, key) => {
+        if (key === 'host' || key === 'content-length') return;
+        forwardHeaders.set(key, value);
+      });
+      forwardHeaders.set('Authorization', authHeaders['Authorization'] || authHeaders['authorization'] || '');
+
+      console.log(`[Proxy] Production file upload via native fetch: ${targetUrl}`);
+
+      const fetchInit: RequestInit & { duplex?: string } = {
+        method,
+        headers: forwardHeaders,
+        body: body,  // ArrayBuffer — fetch() は正しくバイナリとして送信する
+        duplex: 'half',
+      };
+      const uploadRes = await fetch(targetUrl, fetchInit);
+
+      console.log(`[Proxy] Cloud Run Upload Response: ${uploadRes.status} ${uploadRes.statusText}`);
+
+      const resContentType = uploadRes.headers.get('content-type') || '';
+      if (!uploadRes.ok) {
+        const errorText = await uploadRes.text();
+        console.error(`[Proxy] Upload error response: ${errorText}`);
+        let errorData;
+        try { errorData = JSON.parse(errorText); } catch { errorData = { detail: errorText || uploadRes.statusText }; }
+        return NextResponse.json(errorData, { status: uploadRes.status });
+      }
+      if (resContentType.startsWith('image/') || resContentType.startsWith('application/octet-stream')) {
+        const data = await uploadRes.arrayBuffer();
+        return new NextResponse(data, { status: uploadRes.status, headers: { 'Content-Type': resContentType } });
+      }
+      const responseData = await uploadRes.json();
+      return NextResponse.json(responseData);
+    }
+
+    // ── 通常リクエスト: gaxios (client.request()) で転送 ──
     const requestHeaders: Record<string, string> = {};
     if (contentType) {
       requestHeaders['Content-Type'] = contentType;
-    } else if (!isFileUpload) {
+    } else {
       requestHeaders['Content-Type'] = 'application/json';
-    }
-
-    // ファイルアップロード時に重要なヘッダーを引き継ぐ
-    if (isFileUpload) {
-      const contentLength = request.headers.get('content-length');
-      const contentDisposition = request.headers.get('content-disposition');
-      const xFilename = request.headers.get('x-filename');
-
-      if (contentLength) requestHeaders['Content-Length'] = contentLength;
-      if (contentDisposition) requestHeaders['Content-Disposition'] = contentDisposition;
-      if (xFilename) requestHeaders['X-Filename'] = xFilename;
     }
 
     // Detect if this is a binary-serving endpoint (images, file downloads)
