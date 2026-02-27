@@ -118,6 +118,21 @@ _FUNNEL_STAGES = [
 ]
 
 
+def _status_number(status: str) -> int:
+    """ステータス文字列から先頭の番号を抽出する。
+
+    "12. 内定" → 12, "4. 面談済み" → 4
+    番号が取れない場合は 999 を返す。
+    """
+    dot_pos = status.find(".")
+    if dot_pos > 0:
+        try:
+            return int(status[:dot_pos].strip())
+        except ValueError:
+            pass
+    return 999
+
+
 def _clean_lookup_fields(record: Dict[str, Any], strip_empty: bool = False) -> Dict[str, Any]:
     """ルックアップフィールドを展開し、$系システムフィールドを除去。
 
@@ -1071,13 +1086,15 @@ def get_conversion_metrics(
                 continue
 
             # Cumulative counts (candidates who reached at least this stage)
+            # Use numeric comparison to avoid lexicographic ordering bugs
+            # (e.g., "12. 内定" < "4. 面談済み" in string comparison)
             interview_plus = sum(
                 cnt for st, cnt in status_counts.items()
-                if st >= "4. 面談済み" and st < "16. クローズ"
+                if 4 <= _status_number(st) <= 15
             )
             offer_plus = sum(
                 cnt for st, cnt in status_counts.items()
-                if st >= "12. 内定" and st <= "14. 入社"
+                if 12 <= _status_number(st) <= 14
             )
             hired_count = status_counts.get("14. 入社", 0)
 

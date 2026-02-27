@@ -24,6 +24,7 @@ from google.adk.agents import Agent
 from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.agents.run_config import StreamingMode
 from google.adk.apps.app import App
+from google.adk.events.event import Event
 from google.adk.memory import InMemoryMemoryService
 from google.adk.runners import Runner, RunConfig
 from google.adk.sessions import InMemorySessionService
@@ -86,6 +87,75 @@ class ADKAgentService:
             # Default: in-memory for development
             logger.info("[ADK] Using InMemoryMemoryService (dev mode)")
             return InMemoryMemoryService()
+
+    async def _restore_context_items(
+        self,
+        session_id: str,
+        user_id: str,
+        context_items: List[Dict[str, Any]],
+    ) -> bool:
+        """
+        Restore context_items into InMemorySessionService storage.
+
+        When a backend restarts (e.g., Cloud Run scale-to-zero), in-memory sessions
+        are lost. This method re-injects the conversation history (text only) from
+        the frontend-provided context_items into the freshly created session so that
+        the LLM retains awareness of prior turns.
+
+        Only text parts are replayed; function_call/function_response are skipped to
+        prevent the Runner from attempting to re-execute tool calls.
+
+        Args:
+            session_id: The conversation/session ID.
+            user_id: The user ID.
+            context_items: List of {role, parts: [{text: ...}]} dicts.
+
+        Returns:
+            True if events were successfully injected.
+        """
+        try:
+            storage = self._session_service.sessions
+            storage_session = (
+                storage.get("marketing_ai", {})
+                .get(user_id, {})
+                .get(session_id)
+            )
+            if not storage_session:
+                return False
+
+            events = []
+            for item in context_items:
+                role = item.get("role", "user")
+                parts_data = item.get("parts", [])
+
+                # Only restore text parts (skip function_call/function_response)
+                text_parts = []
+                for p in parts_data:
+                    if "text" in p and p["text"]:
+                        text_parts.append(types.Part(text=p["text"]))
+
+                if not text_parts:
+                    continue
+
+                content = types.Content(role=role, parts=text_parts)
+                author = "user" if role == "user" else "MarketingOrchestrator"
+                event = Event(
+                    author=author,
+                    content=content,
+                    invocation_id=str(uuid.uuid4()),
+                )
+                events.append(event)
+
+            if events:
+                storage_session.events = events
+                logger.info(
+                    f"[ADK] Restored {len(events)} context events into session {session_id}"
+                )
+                return True
+            return False
+        except Exception as e:
+            logger.warning(f"[ADK] Failed to restore context items: {e}")
+            return False
 
     async def _save_session_to_memory(self, session: Any, user_email: str) -> None:
         """
@@ -168,6 +238,11 @@ class ADKAgentService:
                     session_id=session_id,
                     state=initial_state or {},
                 )
+                # Restore context from DB if available (e.g., after Cloud Run restart)
+                if context_items:
+                    await self._restore_context_items(
+                        session_id, user_id, context_items
+                    )
 
             # Build orchestrator agent with domain-specific MCP toolsets
             orchestrator = self._orchestrator_factory.build_agent(

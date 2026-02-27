@@ -161,7 +161,7 @@ class Settings:
     memory_service_type: str = os.getenv("MEMORY_SERVICE_TYPE", "supabase")
     memory_auto_save: bool = os.getenv("MEMORY_AUTO_SAVE", "true").lower() == "true"
     memory_preload_enabled: bool = os.getenv("MEMORY_PRELOAD_ENABLED", "true").lower() == "true"
-    memory_max_results: int = int(os.getenv("MEMORY_MAX_RESULTS", "5"))
+    memory_max_results: int = int(os.getenv("MEMORY_MAX_RESULTS", "3"))
     memory_embedding_model: str = os.getenv("MEMORY_EMBEDDING_MODEL", "gemini-embedding-001")
     memory_embedding_dimensions: int = int(os.getenv("MEMORY_EMBEDDING_DIMENSIONS", "768"))
 

@@ -184,7 +184,7 @@ class SupabaseMemoryService(BaseMemoryService):
                     "match_app_name": app_name,
                     "match_user_id": user_id,
                     "match_count": self._max_results,
-                    "similarity_threshold": 0.3,  # Minimum similarity score
+                    "similarity_threshold": 0.55,  # Increased from 0.3 to reduce cross-conversation bleed
                 },
             ).execute()
 

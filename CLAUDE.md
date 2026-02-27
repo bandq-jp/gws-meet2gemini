@@ -51,7 +51,7 @@
 
 ---
 
-## 現在のシステム状態 (2026-02-10時点)
+## 現在のシステム状態 (2026-02-27更新)
 
 ### ADKエージェント構成
 - **オーケストレーター**: Gemini 3 Flash Preview, Context Cache有効 (90%コスト削減)
@@ -73,6 +73,16 @@
 ### エラー耐性
 - サブエージェント503: on_tool_error_callbackでdict返却→re-raise回避
 - オーケストレーター503: _pump_adk_events()で指数バックオフリトライ (2s→4s→8s, 最大3回)
+
+### ADKフィードバック対応 (2026-02-27)
+- **メモリ閾値修正**: `similarity_threshold` 0.3→0.55、`memory_max_results` 5→3（他会話のトピック混入対策）
+- **オーケストレーター指示文強化**: ルール5修正（記憶の慎重な活用）、ルール6追加（定義の一貫性）、ルール7追加（データ出所の透明性）
+- **ZohoCRM指示文強化**: チャネル別フィルタルール（org_hitocareer等）、ステータス厳守ルール（"12. 内定"のみが内定）
+- **Slack指示文強化**: プライバシー制御ルール追加（人事・評価・給与情報の非表示、機密チャネル情報の省略）
+- **AdPlatform指示文強化**: データなし時の正直な報告ルール追加
+- **セッション復元**: `_restore_context_items()` でCloud Run再起動後も `context_items` をADKセッションに注入（テキスト部分のみ、function_call/responseは除外）
+- **Zoho `get_conversion_metrics` 文字列比較バグ修正**: `interview_plus` がPython辞書順比較で `"12. 内定" < "4. 面談済み"` となり**常に0件**になっていた。`_status_number()` ヘルパーで先頭番号を数値抽出し正しく比較するよう修正
+- **Slack DM除外**: 全検索クエリに `-is:dm` を追加。`_build_search_query`、`search_company_in_slack`、`search_candidate_in_slack`、`get_my_slack_activity` の全箇所
 
 ### 議事録一覧ページネーション
 - `meeting_documents_enriched` VIEW: `is_structured`, `zoho_sync_status` を計算列で持つ
@@ -119,6 +129,10 @@
 - **App使用時**: pluginsはAppに設定（Runnerではなく）
 - **MCP Image**: mcp_tool.pyがJSON dictにシリアライズ→before_model_callbackでPartsを直接注入が唯一の解
 - **新エージェント追加時**: Plugin SUB_AGENT_NAMES + フロントエンドUI設定を必ず同時更新
+- **InMemorySessionService揮発性**: Cloud Run再起動で全セッション消失。context_itemsをEventとして再注入すれば復元可能。`sessions`属性はpublicアクセス可
+- **PreloadMemoryTool閾値**: similarity_threshold=0.3は低すぎて別会話のトピックが混入する。0.55以上を推奨。max_resultsも3程度に絞る
+- **エージェント指示文にドメイン知識を**: Zohoチャネルフィルタ、ステータス値の厳密な定義、データなし時の報告義務など、業務知識を指示文に明記しないとAIが推測する
+- **番号付きステータスの文字列比較は壊れる**: `"12. 内定" >= "4. 面談済み"` は辞書順で `False`（`"1" < "4"`）。番号抽出して数値比較が必要
 
 ### 設計判断
 - **機能配置**: 別エージェントか既存統合かはユーザーに確認。同ドメインは原則同エージェント

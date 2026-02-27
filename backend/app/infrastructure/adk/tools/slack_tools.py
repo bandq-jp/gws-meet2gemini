@@ -42,8 +42,11 @@ def _build_search_query(
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
 ) -> str:
-    """Build Slack search query with modifiers."""
-    parts = [query]
+    """Build Slack search query with modifiers.
+
+    Always excludes DMs (-is:dm) to prevent private conversation leakage.
+    """
+    parts = [query, "-is:dm"]
     if channel:
         ch = channel.lstrip("#").strip()
         parts.append(f"in:#{ch}")
@@ -369,7 +372,7 @@ def search_company_in_slack(
 
     try:
         svc = _get_slack_service()
-        full_query = f"{company_name} after:{date_from}"
+        full_query = f"{company_name} after:{date_from} -is:dm"
         result = svc.search_messages(query=full_query, count=30, sort="timestamp", sort_dir="desc")
 
         if not result.get("success"):
@@ -444,7 +447,7 @@ def search_candidate_in_slack(
 
     try:
         svc = _get_slack_service()
-        full_query = f"{candidate_name} after:{date_from}"
+        full_query = f"{candidate_name} after:{date_from} -is:dm"
         result = svc.search_messages(query=full_query, count=30, sort="timestamp", sort_dir="desc")
 
         if not result.get("success"):
@@ -549,9 +552,9 @@ def get_my_slack_activity(
     }
 
     try:
-        # My posts
+        # My posts (exclude DMs to prevent private conversation leakage)
         if activity_type in ("all", "my_posts"):
-            query = f"from:<@{slack_user_id}> after:{date_from}"
+            query = f"from:<@{slack_user_id}> after:{date_from} -is:dm"
             posts_result = svc.search_messages(query=query, count=max_results)
             if posts_result.get("success"):
                 posts = []
@@ -569,9 +572,9 @@ def get_my_slack_activity(
                     "messages": posts,
                 }
 
-        # Mentions to me
+        # Mentions to me (exclude DMs)
         if activity_type in ("all", "mentions"):
-            query = f"<@{slack_user_id}> after:{date_from}"
+            query = f"<@{slack_user_id}> after:{date_from} -is:dm"
             mentions_result = svc.search_messages(query=query, count=max_results)
             if mentions_result.get("success"):
                 mentions = []
