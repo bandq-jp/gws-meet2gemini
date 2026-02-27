@@ -43,7 +43,9 @@ class Settings:
     gemini_api_key: str = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
 
-    # Image Generation quota (monthly, shared across all users, 0=unlimited)
+    # Image Generation
+    image_gen_has_dedicated_key: bool = bool(os.getenv("IMAGE_GEN_GEMINI_API_KEY"))
+    image_gen_gemini_api_key: str = os.getenv("IMAGE_GEN_GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     image_gen_monthly_limit: int = int(os.getenv("IMAGE_GEN_MONTHLY_LIMIT", "30"))
     gemini_fallback_model: str = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
     gemini_temperature: float = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))

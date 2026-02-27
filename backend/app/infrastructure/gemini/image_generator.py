@@ -1,7 +1,7 @@
 """
 Gemini 画像生成クライアント
 
-gemini-3-pro-image-preview を使用し、リファレンス画像をもとに新しい画像を生成する。
+gemini-3.1-flash-image-preview を使用し、リファレンス画像をもとに新しい画像を生成する。
 最大14枚のリファレンス画像、人物一貫性最大5人、解像度1K/2K/4K対応。
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from app.infrastructure.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gemini-3-pro-image-preview"
+MODEL = "gemini-3.1-flash-image-preview"
 
 SUPPORTED_ASPECT_RATIOS = [
     "1:1", "2:3", "3:2", "3:4", "4:3",

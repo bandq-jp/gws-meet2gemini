@@ -25,7 +25,8 @@ def _get_repo() -> ImageGenRepository:
 
 
 def _get_generator() -> GeminiImageGenerator:
-    return GeminiImageGenerator()
+    settings = get_settings()
+    return GeminiImageGenerator(api_key=settings.image_gen_gemini_api_key)
 
 
 # ── Templates ──
@@ -174,13 +175,15 @@ def get_usage() -> Dict[str, Any]:
 
     repo = _get_repo()
     used = repo.count_monthly_generations(year, month)
+    # 個別APIキー設定時は無制限
+    is_unlimited = settings.image_gen_has_dedicated_key or settings.image_gen_monthly_limit <= 0
     limit = settings.image_gen_monthly_limit
 
     return {
         "used": used,
         "limit": limit,
-        "remaining": max(0, limit - used) if limit > 0 else None,
-        "is_unlimited": limit <= 0,
+        "remaining": None if is_unlimited else max(0, limit - used),
+        "is_unlimited": is_unlimited,
         "period": f"{year}-{month:02d}",
     }
 
