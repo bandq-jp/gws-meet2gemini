@@ -100,29 +100,35 @@ class GeminiImageGenerator:
         if image_size and image_size in SUPPORTED_IMAGE_SIZES:
             image_config_kwargs["image_size"] = image_size
 
-        # Google Search + Image Search grounding
-        search_tool = types.Tool(
-            google_search=types.GoogleSearch(
-                search_types=types.SearchTypes(
-                    web_search=types.WebSearch(),
-                    image_search=types.ImageSearch(),
-                )
-            )
-        )
-
         config_kwargs: Dict[str, Any] = {
             "response_modalities": ["TEXT", "IMAGE"],
-            "tools": [search_tool],
         }
+
+        # Google Search + Image Search grounding
+        # リファレンス画像がある場合はSearch無効（同時使用非対応）
+        use_search = not reference_images
+        if use_search:
+            config_kwargs["tools"] = [
+                types.Tool(
+                    google_search=types.GoogleSearch(
+                        search_types=types.SearchTypes(
+                            web_search=types.WebSearch(),
+                            image_search=types.ImageSearch(),
+                        )
+                    )
+                )
+            ]
+
         if image_config_kwargs:
             config_kwargs["image_config"] = types.ImageConfig(**image_config_kwargs)
 
         logger.info(
-            "Generating image: model=%s, refs=%d, ratio=%s, size=%s, search=enabled",
+            "Generating image: model=%s, refs=%d, ratio=%s, size=%s, search=%s",
             MODEL,
             len(reference_images) if reference_images else 0,
             aspect_ratio,
             image_size,
+            use_search,
         )
 
         response = self.client.models.generate_content(
