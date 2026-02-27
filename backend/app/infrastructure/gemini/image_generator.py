@@ -2,7 +2,8 @@
 Gemini 画像生成クライアント
 
 gemini-3.1-flash-image-preview を使用し、リファレンス画像をもとに新しい画像を生成する。
-最大14枚のリファレンス画像、人物一貫性最大5人、解像度1K/2K/4K対応。
+Google Search + Image Search グラウンディング対応。
+最大14枚のリファレンス画像、解像度0.5K/1K/2K/4K対応。
 """
 from __future__ import annotations
 
@@ -22,11 +23,11 @@ logger = logging.getLogger(__name__)
 MODEL = "gemini-3.1-flash-image-preview"
 
 SUPPORTED_ASPECT_RATIOS = [
-    "1:1", "2:3", "3:2", "3:4", "4:3",
-    "4:5", "5:4", "9:16", "16:9", "21:9",
+    "1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3",
+    "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
 ]
 
-SUPPORTED_IMAGE_SIZES = ["1K", "2K", "4K"]
+SUPPORTED_IMAGE_SIZES = ["0.5K", "1K", "2K", "4K"]
 
 
 @dataclass
@@ -40,7 +41,7 @@ class ImageGenResult:
 
 
 class GeminiImageGenerator:
-    """Gemini 3 Pro Image Preview を使った画像生成"""
+    """Gemini 3.1 Flash Image Preview を使った画像生成"""
 
     def __init__(self, api_key: Optional[str] = None):
         settings = get_settings()
@@ -56,7 +57,7 @@ class GeminiImageGenerator:
         prompt: str,
         reference_images: Optional[List[tuple[bytes, str]]] = None,
         aspect_ratio: str = "auto",
-        image_size: str = "1K",
+        image_size: str = "4K",
         system_prompt: Optional[str] = None,
     ) -> ImageGenResult:
         """
@@ -66,7 +67,7 @@ class GeminiImageGenerator:
             prompt: ユーザーのプロンプト
             reference_images: [(image_bytes, mime_type), ...] 最大14枚
             aspect_ratio: アスペクト比 (auto or supported ratios)
-            image_size: 解像度 (1K, 2K, 4K)
+            image_size: 解像度 (0.5K, 1K, 2K, 4K)
             system_prompt: テンプレート固有のシステムプロンプト
 
         Returns:
@@ -99,14 +100,25 @@ class GeminiImageGenerator:
         if image_size and image_size in SUPPORTED_IMAGE_SIZES:
             image_config_kwargs["image_size"] = image_size
 
+        # Google Search + Image Search grounding
+        search_tool = types.Tool(
+            google_search=types.GoogleSearch(
+                search_types=types.SearchTypes(
+                    web_search=types.WebSearch(),
+                    image_search=types.ImageSearch(),
+                )
+            )
+        )
+
         config_kwargs: Dict[str, Any] = {
             "response_modalities": ["TEXT", "IMAGE"],
+            "tools": [search_tool],
         }
         if image_config_kwargs:
             config_kwargs["image_config"] = types.ImageConfig(**image_config_kwargs)
 
         logger.info(
-            "Generating image: model=%s, refs=%d, ratio=%s, size=%s",
+            "Generating image: model=%s, refs=%d, ratio=%s, size=%s, search=enabled",
             MODEL,
             len(reference_images) if reference_images else 0,
             aspect_ratio,
