@@ -8,7 +8,7 @@ import type {
   ImageGenMessage,
   ImageGenReference,
 } from "@/lib/api";
-import { getRefImageUrl } from "@/lib/api";
+import { apiClient, getRefImageUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -126,8 +126,6 @@ function TemplateDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("custom");
-  const [aspectRatio, setAspectRatio] = useState("auto");
-  const [imageSize, setImageSize] = useState("1K");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploadingRef, setUploadingRef] = useState(false);
@@ -147,16 +145,12 @@ function TemplateDialog({
         setName(template.name || "");
         setDescription(template.description || "");
         setCategory(template.category || "custom");
-        setAspectRatio(template.aspect_ratio || "auto");
-        setImageSize(template.image_size || "1K");
         setSystemPrompt(template.system_prompt || "");
         setStep("info");
       } else {
         setName("");
         setDescription("");
         setCategory("custom");
-        setAspectRatio("auto");
-        setImageSize("1K");
         setSystemPrompt("");
         setStep("info");
         setCreatedTemplate(null);
@@ -172,8 +166,6 @@ function TemplateDialog({
         name: name.trim(),
         description: description.trim() || undefined,
         category,
-        aspect_ratio: aspectRatio,
-        image_size: imageSize,
         system_prompt: systemPrompt.trim() || undefined,
       });
       if (!template && result) {
@@ -191,6 +183,17 @@ function TemplateDialog({
     }
   };
 
+  // After upload/delete, refresh createdTemplate from the latest templates list
+  const refreshCreatedTemplate = useCallback(async () => {
+    if (!createdTemplate?.id) return;
+    try {
+      const updated = await apiClient.getImageGenTemplate(createdTemplate.id);
+      setCreatedTemplate(updated);
+    } catch {
+      // ignore
+    }
+  }, [createdTemplate?.id]);
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files?.length || !workingTemplate?.id) return;
@@ -199,6 +202,7 @@ function TemplateDialog({
       for (const file of Array.from(files)) {
         await onUploadRef(workingTemplate.id, file, refLabel);
       }
+      await refreshCreatedTemplate();
       toast.success(`${files.length}枚追加しました`);
     } catch {
       toast.error("アップロードに失敗しました");
@@ -221,12 +225,18 @@ function TemplateDialog({
       for (const file of files) {
         await onUploadRef(workingTemplate.id, file, refLabel);
       }
+      await refreshCreatedTemplate();
       toast.success(`${files.length}枚追加しました`);
     } catch {
       toast.error("アップロードに失敗しました");
     } finally {
       setUploadingRef(false);
     }
+  };
+
+  const handleDeleteRef = async (refId: string, templateId: string) => {
+    await onDeleteRef(refId, templateId);
+    await refreshCreatedTemplate();
   };
 
   const refs = workingTemplate?.image_gen_references || [];
@@ -331,43 +341,6 @@ function TemplateDialog({
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] font-medium text-muted-foreground">
-                    アスペクト比
-                  </Label>
-                  <Select value={aspectRatio} onValueChange={setAspectRatio}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ASPECT_RATIOS.map((r) => (
-                        <SelectItem key={r.value} value={r.value}>
-                          {r.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-[11px] font-medium text-muted-foreground">
-                    解像度
-                  </Label>
-                  <Select value={imageSize} onValueChange={setImageSize}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {RESOLUTIONS.map((r) => (
-                        <SelectItem key={r.value} value={r.value}>
-                          {r.label} ({r.desc})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
               <div className="space-y-1.5">
                 <Label className="text-[11px] font-medium text-muted-foreground">
                   システムプロンプト（任意）
@@ -395,7 +368,7 @@ function TemplateDialog({
                     setIsDragOver={setIsDragOver}
                     handleFileSelect={handleFileSelect}
                     handleDrop={handleDrop}
-                    onDeleteRef={onDeleteRef}
+                    onDeleteRef={handleDeleteRef}
                   />
                 </>
               )}
@@ -762,7 +735,7 @@ export default function ImageGenPage() {
   const isMobile = useIsMobile();
   const [prompt, setPrompt] = useState("");
   const [aspectRatio, setAspectRatio] = useState("auto");
-  const [imageSize, setImageSize] = useState("1K");
+  const [imageSize, setImageSize] = useState("4K");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     null
   );
@@ -904,57 +877,7 @@ export default function ImageGenPage() {
             </h1>
           </div>
 
-          <Separator orientation="vertical" className="h-4 hidden sm:block" />
-
-          {/* Generation controls */}
-          <div className="flex items-center gap-1.5 flex-1 min-w-0">
-            {/* Aspect ratio */}
-            <Select value={aspectRatio} onValueChange={setAspectRatio}>
-              <SelectTrigger className="h-7 w-[72px] text-[11px] border-border/40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ASPECT_RATIOS.map((r) => (
-                  <SelectItem key={r.value} value={r.value}>
-                    {r.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Resolution toggle */}
-            <div className="flex items-center rounded-md h-7 border border-border/40 overflow-hidden">
-              {RESOLUTIONS.map((r) => (
-                <button
-                  key={r.value}
-                  onClick={() => setImageSize(r.value)}
-                  className={`px-2 h-full text-[11px] font-medium transition-all ${
-                    imageSize === r.value
-                      ? "bg-[var(--brand-400)] text-white"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                  }`}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Active template indicator - hidden on mobile */}
-            {selectedTemplate && (
-              <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--brand-100)]/20 border border-[var(--brand-200)]/30 max-w-[180px]">
-                <Layers className="h-3 w-3 text-[var(--brand-400)] shrink-0" />
-                <span className="text-[11px] text-[var(--brand-400)] font-medium truncate">
-                  {selectedTemplate.name}
-                </span>
-                <button
-                  onClick={() => setSelectedTemplateId(null)}
-                  className="shrink-0 hover:text-foreground transition-colors"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            )}
-          </div>
+          <div className="flex-1" />
 
           {/* Right actions */}
           <div className="flex items-center gap-1">
@@ -1505,6 +1428,57 @@ export default function ImageGenPage() {
                     <span>月間画像生成の上限（{usage.limit}枚）に達しました。来月1日にリセットされます。</span>
                   </div>
                 )}
+
+                {/* Settings bar above input */}
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  {/* Aspect ratio */}
+                  <Select value={aspectRatio} onValueChange={setAspectRatio}>
+                    <SelectTrigger className="h-7 w-[80px] text-[11px] border-border/40 rounded-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ASPECT_RATIOS.map((r) => (
+                        <SelectItem key={r.value} value={r.value}>
+                          {r.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  {/* Resolution toggle */}
+                  <div className="flex items-center rounded-lg h-7 border border-border/40 overflow-hidden">
+                    {RESOLUTIONS.map((r) => (
+                      <button
+                        key={r.value}
+                        onClick={() => setImageSize(r.value)}
+                        className={`px-2.5 h-full text-[11px] font-medium transition-all ${
+                          imageSize === r.value
+                            ? "bg-[var(--brand-400)] text-white"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Active template indicator */}
+                  {selectedTemplate && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--brand-100)]/20 border border-[var(--brand-200)]/30 max-w-[200px]">
+                      <Layers className="h-3 w-3 text-[var(--brand-400)] shrink-0" />
+                      <span className="text-[11px] text-[var(--brand-400)] font-medium truncate">
+                        {selectedTemplate.name}
+                      </span>
+                      <button
+                        onClick={() => setSelectedTemplateId(null)}
+                        className="shrink-0 hover:text-foreground transition-colors"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <div className="relative rounded-xl border border-border/60 bg-background focus-within:ring-1 focus-within:ring-[var(--brand-300)]/50 focus-within:border-[var(--brand-300)]/40 transition-all">
                   <Textarea
                     ref={textareaRef}
@@ -1534,12 +1508,8 @@ export default function ImageGenPage() {
                     )}
                   </Button>
                 </div>
-                <div className="flex items-center gap-2 mt-1.5 px-1 text-[10px] text-muted-foreground/60">
+                <div className="mt-1.5 px-1 text-[10px] text-muted-foreground/60">
                   <span>Enterで送信 · Shift+Enterで改行</span>
-                  <span>·</span>
-                  <span>
-                    {aspectRatio !== "auto" ? aspectRatio : "自動"} · {imageSize}
-                  </span>
                 </div>
               </div>
             </div>
@@ -1651,7 +1621,7 @@ export default function ImageGenPage() {
             setTemplateDialogOpen(v);
             if (!v) setEditingTemplate(null);
           }}
-          template={editingTemplate}
+          template={editingTemplate ? templates.find(t => t.id === editingTemplate.id) ?? editingTemplate : null}
           onSave={handleSaveTemplate}
           onUploadRef={uploadReference}
           onDeleteRef={deleteReference}
