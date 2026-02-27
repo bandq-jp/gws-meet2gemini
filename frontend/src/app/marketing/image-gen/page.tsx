@@ -1445,22 +1445,19 @@ export default function ImageGenPage() {
                     </SelectContent>
                   </Select>
 
-                  {/* Resolution toggle */}
-                  <div className="flex items-center rounded-lg h-7 border border-border/40 overflow-hidden">
-                    {RESOLUTIONS.map((r) => (
-                      <button
-                        key={r.value}
-                        onClick={() => setImageSize(r.value)}
-                        className={`px-2.5 h-full text-[11px] font-medium transition-all ${
-                          imageSize === r.value
-                            ? "bg-[var(--brand-400)] text-white"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                        }`}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
+                  {/* Resolution */}
+                  <Select value={imageSize} onValueChange={setImageSize}>
+                    <SelectTrigger className="h-7 w-[72px] text-[11px] border-border/40 rounded-lg">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {RESOLUTIONS.map((r) => (
+                        <SelectItem key={r.value} value={r.value}>
+                          {r.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
                   {/* Active template indicator */}
                   {selectedTemplate && (
