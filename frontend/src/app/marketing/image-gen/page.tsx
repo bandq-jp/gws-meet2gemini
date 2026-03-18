@@ -731,6 +731,7 @@ export default function ImageGenPage() {
     createSession,
     loadSession,
     setCurrentSession,
+    updateSessionTemplate,
     generateImage,
     setError,
     usage,
@@ -781,6 +782,17 @@ export default function ImageGenPage() {
   }, [error, setError]);
 
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
+
+  const handleSelectTemplate = useCallback(
+    (templateId: string | null) => {
+      setSelectedTemplateId(templateId);
+      // If there's an active session, update its template link on the backend
+      if (currentSession?.id) {
+        updateSessionTemplate(currentSession.id, templateId);
+      }
+    },
+    [currentSession, updateSessionTemplate]
+  );
 
   const handleNewSession = useCallback(async () => {
     const email = user?.emailAddresses[0]?.emailAddress;
@@ -1071,13 +1083,13 @@ export default function ImageGenPage() {
                             role="button"
                             tabIndex={0}
                             onClick={() =>
-                              setSelectedTemplateId(
+                              handleSelectTemplate(
                                 isSelected ? null : t.id
                               )
                             }
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ")
-                                setSelectedTemplateId(
+                                handleSelectTemplate(
                                   isSelected ? null : t.id
                                 );
                             }}
@@ -1185,7 +1197,13 @@ export default function ImageGenPage() {
                         return (
                           <button
                             key={s.id}
-                            onClick={() => loadSession(s.id)}
+                            onClick={async () => {
+                              const loaded = await loadSession(s.id);
+                              if (loaded) {
+                                // Sync template selection with the loaded session's template
+                                setSelectedTemplateId(loaded.template_id || null);
+                              }
+                            }}
                             className={`w-full text-left rounded-lg p-2.5 transition-all ${
                               isCurrent
                                 ? "bg-[var(--brand-100)]/15 ring-1 ring-[var(--brand-300)]/25"
@@ -1472,7 +1490,7 @@ export default function ImageGenPage() {
                         {selectedTemplate.name}
                       </span>
                       <button
-                        onClick={() => setSelectedTemplateId(null)}
+                        onClick={() => handleSelectTemplate(null)}
                         className="shrink-0 hover:text-foreground transition-colors"
                       >
                         <X className="h-3 w-3" />

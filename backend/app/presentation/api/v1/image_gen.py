@@ -66,6 +66,10 @@ class GenerateRequest(BaseModel):
     image_size: Optional[str] = None
 
 
+class SessionUpdate(BaseModel):
+    template_id: Optional[str] = None
+
+
 class ReorderRequest(BaseModel):
     reference_ids: List[str]
 
@@ -168,6 +172,27 @@ def get_session(session_id: str) -> Dict[str, Any]:
 @router.post("/sessions")
 def create_session(body: SessionCreate) -> Dict[str, Any]:
     return use_cases.create_session(**body.model_dump())
+
+
+@router.patch("/sessions/{session_id}")
+def update_session(session_id: str, body: SessionUpdate) -> Dict[str, Any]:
+    """Update session (e.g. change template)."""
+    from app.infrastructure.supabase.repositories.image_gen_repository import ImageGenRepository
+    repo = ImageGenRepository()
+    session = repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    payload: Dict[str, Any] = {}
+    if body.template_id is not None:
+        payload["template_id"] = body.template_id
+    elif "template_id" in (body.model_dump(exclude_unset=False)):
+        # Allow explicitly setting template_id to null
+        payload["template_id"] = None
+    if not payload:
+        # At minimum update timestamp
+        from datetime import datetime, timezone
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return repo.update_session(session_id, payload)
 
 
 # ── Usage / Quota ──

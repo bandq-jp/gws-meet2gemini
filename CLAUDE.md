@@ -110,6 +110,18 @@
 - **update_session({}) 空dict PATCH**: `image_gen.py` で `update_session(session_id, {})` が PostgREST に空body PATCH を送信していた。`{"updated_at": ...}` を明示的に渡すよう修正
 - **教訓**: `google-auth-library` の `client.request()` (gaxios内部) は `ArrayBuffer` を `JSON.stringify()` してしまう。バイナリデータ転送には native `fetch()` + `getRequestHeaders()` でIDトークンだけ取得して使う
 
+### 画像生成スタジオ 大規模修正 (2026-03-18)
+- **Multi-turn会話対応**: `generate_image` がセッション内の過去メッセージをGemini APIに渡すよう修正。`client.chats.create()` + `chat.send_message()` でThought Signatureを自動管理。これにより「前の画像を修正して」等の文脈を維持した会話が可能に
+- **system_instruction対応**: テンプレートのsystem_promptを `[System Context]` テキストとしてではなく、Gemini APIのネイティブ `system_instruction` パラメータで渡すよう修正
+- **テンプレート選択の同期修正**: 履歴からセッションをロードした際に `selectedTemplateId` がセッションの `template_id` と同期されていなかった問題を修正。テンプレート選択変更時もバックエンドのセッションに反映
+- **セッションPATCH APIエンドポイント追加**: `PATCH /sessions/{session_id}` でテンプレート変更を永続化
+- **DB CHECK制約修正**: `image_size` CHECK制約に `0.5K` が含まれていなかった（フロントエンドとGemini APIは対応済み）。マイグレーション `0024_fix_image_gen_image_size_constraint.sql` で修正
+- **google-genai SDK更新**: `>=1.65.0` → `>=1.66.0` に更新
+- **ConversationMessage dataclass追加**: 会話履歴の型安全な受け渡し用
+- **_build_conversation_history()**: セッション内メッセージをGemini API形式に変換。assistant画像はStorageからダウンロードして含める
+- **教訓**: Gemini画像生成はchat APIでThought Signatureを自動管理。`generate_content` 直接呼びではマルチターンの文脈が失われる
+- **教訓**: Gemini画像生成の `system_instruction` は `GenerateContentConfig` のパラメータとして渡す（contentsに混ぜない）
+
 ---
 
 ## 自己改善ログ（教訓集）
@@ -152,6 +164,14 @@
 - shadcn/ui SidebarのSheet mobileは `SidebarTrigger` 配置だけで動作
 - **gaxios (google-auth-library) はバイナリ非対応**: `client.request({ data: ArrayBuffer })` は内部で `JSON.stringify()` → `{}` に化ける。multipart/form-data送信には `client.getRequestHeaders()` + native `fetch()` を使う
 - **React State更新後の即時参照**: `setState()` 直後の値は古いclosureを参照。新しい値が必要な場合は関数の戻り値を直接使い、State経由の参照を避ける
+
+### Gemini画像生成API
+- **Multi-turn必須**: `client.chats.create()` + `chat.send_message()` を使う。`client.models.generate_content()` 直接呼びではThought Signatureが管理されず文脈が失われる
+- **Thought Signature**: 暗号化された推論コンテキスト。chat API使用時はSDKが自動管理。手動で `generate_content` を使う場合は応答のsignatureを次ターンに含める必要あり（400エラー回避）
+- **system_instruction**: `GenerateContentConfig(system_instruction=...)` で渡す。contentsに `[System Context]` テキストとして混ぜるのは非推奨
+- **参照画像とSearchは排他**: reference_images使用時はGoogle Search/Image Searchを無効にする必要あり
+- **image_size大文字必須**: `"1k"` は400エラー、`"1K"` が正しい
+- **モデル**: `gemini-3.1-flash-image-preview` (Nano Banana 2)。Pro版は `gemini-3-pro-image-preview`
 
 ### API固有知見
 - **Slack**: `search.messages`はUser Token(`xoxp-`)のみ。Bot Token(`xoxb-`)では`not_allowed_token_type`

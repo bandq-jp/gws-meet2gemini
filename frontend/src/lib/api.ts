@@ -150,7 +150,7 @@ export interface ImageGenMessage {
 
 export interface ImageGenSession {
   id: string;
-  template_id?: string;
+  template_id?: string | null;
   title?: string;
   aspect_ratio: string;
   image_size: string;
@@ -585,6 +585,16 @@ class ApiClient {
   }): Promise<ImageGenSession> {
     return this.request<ImageGenSession>('/image-gen/sessions', {
       method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateImageGenSession(
+    id: string,
+    data: { template_id?: string | null },
+  ): Promise<ImageGenSession> {
+    return this.request<ImageGenSession>(`/image-gen/sessions/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(data),
     });
   }
