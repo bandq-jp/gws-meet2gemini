@@ -2,6 +2,7 @@
 画像生成ユースケース
 
 テンプレート管理、リファレンス画像管理、セッション管理、画像生成を統合する。
+Multi-turn会話対応: セッション内の過去メッセージをGemini APIに渡して文脈を維持する。
 """
 from __future__ import annotations
 
@@ -10,7 +11,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from app.infrastructure.config.settings import get_settings
-from app.infrastructure.gemini.image_generator import GeminiImageGenerator
+from app.infrastructure.gemini.image_generator import (
+    GeminiImageGenerator,
+    ConversationMessage,
+)
 from app.infrastructure.supabase.repositories.image_gen_repository import (
     ImageGenRepository,
     OUTPUTS_BUCKET,
@@ -188,6 +192,62 @@ def get_usage() -> Dict[str, Any]:
     }
 
 
+# ── Conversation History Builder ──
+
+
+def _build_conversation_history(
+    repo: ImageGenRepository,
+    session_id: str,
+) -> List[ConversationMessage]:
+    """
+    セッションの過去メッセージからConversationMessage列を構築する。
+
+    assistant の生成画像はStorageからダウンロードして含める。
+    これにより Gemini API が過去の会話コンテキスト（テキスト＋画像）を理解し、
+    Thought Signatureも SDK の chat API が自動管理する。
+    """
+    messages = repo.list_messages(session_id)
+    history: List[ConversationMessage] = []
+
+    for msg in messages:
+        role = msg.get("role", "user")
+        # Gemini API expects "user" or "model" (not "assistant")
+        gemini_role = "model" if role == "assistant" else "user"
+
+        text_content = msg.get("text_content")
+        image_data = None
+        image_mime = None
+
+        # For assistant messages with generated images, download from storage
+        storage_path = msg.get("storage_path")
+        if role == "assistant" and storage_path:
+            try:
+                image_data = repo.download_image(OUTPUTS_BUCKET, storage_path)
+                # Determine mime type from metadata or path
+                metadata = msg.get("metadata") or {}
+                if storage_path.endswith(".png"):
+                    image_mime = "image/png"
+                elif storage_path.endswith(".jpeg") or storage_path.endswith(".jpg"):
+                    image_mime = "image/jpeg"
+                else:
+                    image_mime = "image/png"
+            except Exception as e:
+                logger.warning(
+                    "Failed to download history image %s: %s", storage_path, e
+                )
+
+        history.append(
+            ConversationMessage(
+                role=gemini_role,
+                text=text_content,
+                image_data=image_data,
+                image_mime_type=image_mime,
+            )
+        )
+
+    return history
+
+
 # ── Image Generation ──
 
 
@@ -198,14 +258,15 @@ def generate_image(
     image_size: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    セッション内で画像を生成する。
+    セッション内で画像を生成する（Multi-turn会話対応）。
 
     1. 月間クォータチェック
     2. セッション情報を取得
     3. テンプレートのリファレンス画像を取得
-    4. Gemini API で画像生成
-    5. 生成画像をStorageに保存
-    6. メッセージとして記録
+    4. 過去の会話履歴を構築
+    5. Gemini API で画像生成（chat APIでThought Signature自動管理）
+    6. 生成画像をStorageに保存
+    7. メッセージとして記録
     """
     # Quota check
     usage = get_usage()
@@ -234,6 +295,9 @@ def generate_image(
             system_prompt = template.get("system_prompt")
             reference_images = repo.get_reference_images(template_id)
 
+    # Build conversation history from past messages in this session
+    conversation_history = _build_conversation_history(repo, session_id)
+
     # Save user message
     repo.add_message({
         "session_id": session_id,
@@ -241,7 +305,7 @@ def generate_image(
         "text_content": prompt,
     })
 
-    # Generate image
+    # Generate image with conversation context
     generator = _get_generator()
     result = generator.generate(
         prompt=prompt,
@@ -249,6 +313,7 @@ def generate_image(
         aspect_ratio=effective_ratio,
         image_size=effective_size,
         system_prompt=system_prompt,
+        conversation_history=conversation_history if conversation_history else None,
     )
 
     # Save generated image to storage
@@ -275,6 +340,7 @@ def generate_image(
             "aspect_ratio": effective_ratio,
             "image_size": effective_size,
             "reference_count": len(reference_images),
+            "history_length": len(conversation_history),
         },
     })
 

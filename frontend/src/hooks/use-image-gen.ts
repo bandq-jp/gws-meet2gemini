@@ -157,6 +157,26 @@ export function useImageGen() {
     }
   }, []);
 
+  // ── Update Session Template ──
+
+  const updateSessionTemplate = useCallback(
+    async (sessionId: string, templateId: string | null) => {
+      try {
+        // Update session's template_id on the backend
+        await apiClient.updateImageGenSession(sessionId, {
+          template_id: templateId,
+        });
+        // Update local state
+        setCurrentSession((prev) =>
+          prev ? { ...prev, template_id: templateId } : prev
+        );
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "セッションの更新に失敗しました");
+      }
+    },
+    []
+  );
+
   // ── Generation ──
 
   const generateImage = useCallback(
@@ -236,6 +256,7 @@ export function useImageGen() {
     createSession,
     loadSession,
     setCurrentSession,
+    updateSessionTemplate,
     // Generation
     generateImage,
     // Usage
