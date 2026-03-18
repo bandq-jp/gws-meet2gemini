@@ -13,7 +13,7 @@ Multi-turn対応:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
@@ -106,7 +106,7 @@ class GeminiImageGenerator:
             prompt: ユーザーのプロンプト
             reference_images: [(image_bytes, mime_type), ...] 最大14枚
             aspect_ratio: アスペクト比 (auto or supported ratios)
-            image_size: 解像度 (0.5K, 1K, 2K, 4K)
+            image_size: 解像度 (1K, 2K, 4K)
             system_prompt: テンプレート固有のシステムプロンプト
             conversation_history: 過去の会話メッセージ（Multi-turn用）
 
@@ -165,8 +165,9 @@ class GeminiImageGenerator:
         # Build contents for current turn
         current_parts: List[Any] = [prompt]
 
-        # Add reference images to first turn only
-        if reference_images:
+        # リファレンス画像は初回ターン（履歴なし）のみ添付。
+        # 2回目以降は会話履歴に初回の画像が含まれるので再送不要。
+        if reference_images and not conversation_history:
             for img_bytes, mime in reference_images[:14]:
                 current_parts.append(
                     types.Part.from_bytes(data=img_bytes, mime_type=mime)

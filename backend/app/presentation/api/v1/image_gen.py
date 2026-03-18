@@ -182,14 +182,12 @@ def update_session(session_id: str, body: SessionUpdate) -> Dict[str, Any]:
     session = repo.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+    # exclude_unset=True: リクエストに含まれたフィールドのみ（null も含む）
+    sent_fields = body.model_dump(exclude_unset=True)
     payload: Dict[str, Any] = {}
-    if body.template_id is not None:
-        payload["template_id"] = body.template_id
-    elif "template_id" in (body.model_dump(exclude_unset=False)):
-        # Allow explicitly setting template_id to null
-        payload["template_id"] = None
+    if "template_id" in sent_fields:
+        payload["template_id"] = sent_fields["template_id"]
     if not payload:
-        # At minimum update timestamp
         from datetime import datetime, timezone
         payload["updated_at"] = datetime.now(timezone.utc).isoformat()
     return repo.update_session(session_id, payload)
