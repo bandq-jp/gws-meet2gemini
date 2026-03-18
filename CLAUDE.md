@@ -115,8 +115,8 @@
 - **system_instruction対応**: テンプレートのsystem_promptを `[System Context]` テキストとしてではなく、Gemini APIのネイティブ `system_instruction` パラメータで渡すよう修正
 - **テンプレート選択の同期修正**: 履歴からセッションをロードした際に `selectedTemplateId` がセッションの `template_id` と同期されていなかった問題を修正。テンプレート選択変更時もバックエンドのセッションに反映
 - **セッションPATCH APIエンドポイント追加**: `PATCH /sessions/{session_id}` でテンプレート変更を永続化
-- **DB CHECK制約修正**: `image_size` CHECK制約に `0.5K` が含まれていなかった（フロントエンドとGemini APIは対応済み）。マイグレーション `0024_fix_image_gen_image_size_constraint.sql` で修正
-- **google-genai SDK更新**: `>=1.65.0` → `>=1.66.0` に更新
+- **0.5Kサイズ削除**: UIとバックエンドから `0.5K` を削除。DB CHECK制約 `('1K', '2K', '4K')` に合わせる
+- **google-genai SDK更新**: `>=1.65.0` → `>=1.66.0` に更新、uv.lockで `1.68.0` に解決
 - **ConversationMessage dataclass追加**: 会話履歴の型安全な受け渡し用
 - **_build_conversation_history()**: セッション内メッセージをGemini API形式に変換。assistant画像はStorageからダウンロードして含める
 - **教訓**: Gemini画像生成はchat APIでThought Signatureを自動管理。`generate_content` 直接呼びではマルチターンの文脈が失われる

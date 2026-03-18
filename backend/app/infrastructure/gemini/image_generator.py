@@ -3,7 +3,7 @@ Gemini 画像生成クライアント
 
 gemini-3.1-flash-image-preview を使用し、リファレンス画像をもとに新しい画像を生成する。
 Google Search + Image Search グラウンディング対応。
-最大14枚のリファレンス画像、解像度0.5K/1K/2K/4K対応。
+最大14枚のリファレンス画像、解像度1K/2K/4K対応。
 
 Multi-turn対応:
 - client.chats.create() でセッションごとの会話を維持
@@ -31,7 +31,7 @@ SUPPORTED_ASPECT_RATIOS = [
     "4:5", "5:4", "8:1", "9:16", "16:9", "21:9",
 ]
 
-SUPPORTED_IMAGE_SIZES = ["0.5K", "1K", "2K", "4K"]
+SUPPORTED_IMAGE_SIZES = ["1K", "2K", "4K"]
 
 
 @dataclass
