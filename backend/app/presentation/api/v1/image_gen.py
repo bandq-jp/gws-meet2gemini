@@ -220,7 +220,21 @@ def generate_image(session_id: str, body: GenerateRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Image generation failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Image generation failed")
+        # Gemini APIのエラーコードをそのまま伝搬（503 UNAVAILABLE等）
+        error_msg = str(e)
+        status_code = 500
+        if "503" in error_msg or "UNAVAILABLE" in error_msg:
+            status_code = 503
+            detail = "画像生成サービスが一時的に混雑しています。しばらく待ってからもう一度お試しください。"
+        elif "400" in error_msg or "INVALID_ARGUMENT" in error_msg:
+            status_code = 400
+            detail = f"画像生成リクエストが無効です: {error_msg[:200]}"
+        elif "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            status_code = 429
+            detail = "API利用制限に達しました。しばらく待ってからもう一度お試しください。"
+        else:
+            detail = f"画像生成に失敗しました: {error_msg[:200]}"
+        raise HTTPException(status_code=status_code, detail=detail)
 
 
 # ── Image Serving ──
