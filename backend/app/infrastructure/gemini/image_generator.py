@@ -7,13 +7,14 @@ Google Search + Image Search グラウンディング対応。
 
 Multi-turn対応:
 - client.chats.create() でセッションごとの会話を維持
-- Thought Signatureを自動的にSDKが管理
-- 過去メッセージをcontents historyとして注入
+- Thought Signatureをレスポンスから抽出してDBに保存
+- 過去メッセージの復元時にThought Signatureを含めて正確にContent再構築
 """
 from __future__ import annotations
 
+import base64
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
@@ -42,15 +43,65 @@ class ImageGenResult:
     mime_type: Optional[str]
     usage: Optional[Dict[str, Any]]
     latency_ms: int
+    # レスポンスの全Parts情報（Thought Signature含む）をJSON化して保存用
+    response_parts: Optional[List[Dict[str, Any]]] = None
 
 
-@dataclass
-class ConversationMessage:
-    """会話履歴の1メッセージ"""
-    role: str  # "user" or "model"
-    text: Optional[str] = None
-    image_data: Optional[bytes] = None
-    image_mime_type: Optional[str] = None
+def _serialize_response_parts(
+    candidate_content: types.Content,
+) -> List[Dict[str, Any]]:
+    """
+    レスポンスのContent.partsをJSON-serializable dictのリストに変換。
+    Thought Signatureをbase64エンコードして保持する。
+    """
+    serialized = []
+    for part in (candidate_content.parts or []):
+        entry: Dict[str, Any] = {}
+        if hasattr(part, "thought") and part.thought:
+            entry["thought"] = True
+        if hasattr(part, "text") and part.text:
+            entry["text"] = part.text
+        if hasattr(part, "inline_data") and part.inline_data:
+            entry["inline_data"] = {
+                "data": base64.b64encode(part.inline_data.data).decode("ascii"),
+                "mime_type": part.inline_data.mime_type,
+            }
+        if hasattr(part, "thought_signature") and part.thought_signature:
+            entry["thought_signature"] = base64.b64encode(
+                part.thought_signature
+            ).decode("ascii")
+        if entry:
+            serialized.append(entry)
+    return serialized
+
+
+def _deserialize_to_content(
+    role: str,
+    serialized_parts: List[Dict[str, Any]],
+) -> types.Content:
+    """
+    JSON化されたParts情報からtypes.Contentを復元する。
+    Thought Signatureを含めて正確に再構築する。
+    """
+    parts: List[types.Part] = []
+    for entry in serialized_parts:
+        kwargs: Dict[str, Any] = {}
+        if entry.get("thought"):
+            kwargs["thought"] = True
+        if entry.get("text"):
+            kwargs["text"] = entry["text"]
+        if entry.get("inline_data"):
+            kwargs["inline_data"] = types.Blob(
+                data=base64.b64decode(entry["inline_data"]["data"]),
+                mime_type=entry["inline_data"]["mime_type"],
+            )
+        if entry.get("thought_signature"):
+            kwargs["thought_signature"] = base64.b64decode(
+                entry["thought_signature"]
+            )
+        if kwargs:
+            parts.append(types.Part(**kwargs))
+    return types.Content(role=role, parts=parts)
 
 
 class GeminiImageGenerator:
@@ -65,31 +116,6 @@ class GeminiImageGenerator:
             )
         self.client = genai.Client(api_key=key)
 
-    def _build_history(
-        self,
-        conversation_history: Optional[List[ConversationMessage]],
-    ) -> Optional[List[types.Content]]:
-        """過去の会話履歴をGemini SDK Content形式に変換する。"""
-        if not conversation_history:
-            return None
-
-        contents: List[types.Content] = []
-        for msg in conversation_history:
-            parts: List[types.Part] = []
-            if msg.text:
-                parts.append(types.Part.from_text(text=msg.text))
-            if msg.image_data and msg.image_mime_type:
-                parts.append(
-                    types.Part.from_bytes(
-                        data=msg.image_data, mime_type=msg.image_mime_type
-                    )
-                )
-            if parts:
-                contents.append(
-                    types.Content(role=msg.role, parts=parts)
-                )
-        return contents if contents else None
-
     def generate(
         self,
         prompt: str,
@@ -97,7 +123,7 @@ class GeminiImageGenerator:
         aspect_ratio: str = "auto",
         image_size: str = "4K",
         system_prompt: Optional[str] = None,
-        conversation_history: Optional[List[ConversationMessage]] = None,
+        history: Optional[List[types.Content]] = None,
     ) -> ImageGenResult:
         """
         画像を生成する（Multi-turn会話対応）。
@@ -108,10 +134,10 @@ class GeminiImageGenerator:
             aspect_ratio: アスペクト比 (auto or supported ratios)
             image_size: 解像度 (1K, 2K, 4K)
             system_prompt: テンプレート固有のシステムプロンプト
-            conversation_history: 過去の会話メッセージ（Multi-turn用）
+            history: Gemini SDK Content形式の会話履歴（Thought Signature含む）
 
         Returns:
-            ImageGenResult with text and image data
+            ImageGenResult with text, image data, and serialized response parts
         """
         t0 = perf_counter()
 
@@ -157,7 +183,7 @@ class GeminiImageGenerator:
             aspect_ratio,
             image_size,
             use_search,
-            len(conversation_history) if conversation_history else 0,
+            len(history) if history else 0,
         )
 
         config = types.GenerateContentConfig(**config_kwargs)
@@ -167,15 +193,13 @@ class GeminiImageGenerator:
 
         # リファレンス画像は初回ターン（履歴なし）のみ添付。
         # 2回目以降は会話履歴に初回の画像が含まれるので再送不要。
-        if reference_images and not conversation_history:
+        if reference_images and not history:
             for img_bytes, mime in reference_images[:14]:
                 current_parts.append(
                     types.Part.from_bytes(data=img_bytes, mime_type=mime)
                 )
 
-        # Use chat API for multi-turn conversation (handles thought signatures automatically)
-        history = self._build_history(conversation_history)
-
+        # Use chat API for multi-turn (handles thought signatures in curated_history)
         chat = self.client.chats.create(
             model=MODEL,
             config=config,
@@ -190,11 +214,14 @@ class GeminiImageGenerator:
         result_text = None
         result_image_data = None
         result_mime_type = None
+        response_parts = None
 
         if response and response.candidates:
             for candidate in response.candidates:
                 if not hasattr(candidate, "content") or not candidate.content:
                     continue
+                # Serialize ALL parts (including thought_signature) for DB storage
+                response_parts = _serialize_response_parts(candidate.content)
                 for part in candidate.content.parts:
                     if hasattr(part, "thought") and part.thought:
                         continue
@@ -227,4 +254,5 @@ class GeminiImageGenerator:
             mime_type=result_mime_type or "image/png",
             usage=usage_dict,
             latency_ms=latency_ms,
+            response_parts=response_parts,
         )

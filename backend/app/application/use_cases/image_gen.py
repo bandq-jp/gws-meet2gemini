@@ -2,7 +2,8 @@
 画像生成ユースケース
 
 テンプレート管理、リファレンス画像管理、セッション管理、画像生成を統合する。
-Multi-turn会話対応: セッション内の過去メッセージをGemini APIに渡して文脈を維持する。
+Multi-turn会話対応: セッション内の過去メッセージ（Thought Signature含む）を
+Gemini APIに渡して文脈を維持する。
 """
 from __future__ import annotations
 
@@ -10,10 +11,12 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from google.genai import types
+
 from app.infrastructure.config.settings import get_settings
 from app.infrastructure.gemini.image_generator import (
     GeminiImageGenerator,
-    ConversationMessage,
+    _deserialize_to_content,
 )
 from app.infrastructure.supabase.repositories.image_gen_repository import (
     ImageGenRepository,
@@ -195,55 +198,59 @@ def get_usage() -> Dict[str, Any]:
 # ── Conversation History Builder ──
 
 
-def _build_conversation_history(
+def _build_gemini_history(
     repo: ImageGenRepository,
     session_id: str,
-) -> List[ConversationMessage]:
+) -> List[types.Content]:
     """
-    セッションの過去メッセージからConversationMessage列を構築する。
+    セッションの過去メッセージから Gemini SDK Content のリストを構築する。
 
-    assistant の生成画像はStorageからダウンロードして含める。
-    これにより Gemini API が過去の会話コンテキスト（テキスト＋画像）を理解し、
-    Thought Signatureも SDK の chat API が自動管理する。
+    - assistant メッセージ: metadata.response_parts に保存された
+      Thought Signature 付き Parts をそのまま復元
+    - user メッセージ: text_content から Content を構築
     """
     messages = repo.list_messages(session_id)
-    history: List[ConversationMessage] = []
+    history: List[types.Content] = []
 
     for msg in messages:
         role = msg.get("role", "user")
-        # Gemini API expects "user" or "model" (not "assistant")
-        gemini_role = "model" if role == "assistant" else "user"
+        metadata = msg.get("metadata") or {}
 
-        text_content = msg.get("text_content")
-        image_data = None
-        image_mime = None
-
-        # For assistant messages with generated images, download from storage
-        storage_path = msg.get("storage_path")
-        if role == "assistant" and storage_path:
-            try:
-                image_data = repo.download_image(OUTPUTS_BUCKET, storage_path)
-                # Determine mime type from metadata or path
-                metadata = msg.get("metadata") or {}
-                if storage_path.endswith(".png"):
-                    image_mime = "image/png"
-                elif storage_path.endswith(".jpeg") or storage_path.endswith(".jpg"):
-                    image_mime = "image/jpeg"
-                else:
-                    image_mime = "image/png"
-            except Exception as e:
-                logger.warning(
-                    "Failed to download history image %s: %s", storage_path, e
+        if role == "assistant":
+            # response_parts が保存されている場合（Thought Signature付き）
+            response_parts = metadata.get("response_parts")
+            if response_parts:
+                content = _deserialize_to_content("model", response_parts)
+                history.append(content)
+            else:
+                # 旧形式: response_parts がないレガシーメッセージ
+                # Storageから画像をダウンロードしてContentを構築（Thought Signatureなし）
+                parts: List[types.Part] = []
+                text_content = msg.get("text_content")
+                if text_content:
+                    parts.append(types.Part.from_text(text=text_content))
+                storage_path = msg.get("storage_path")
+                if storage_path:
+                    try:
+                        img = repo.download_image(OUTPUTS_BUCKET, storage_path)
+                        mime = "image/png"
+                        if storage_path.endswith(".jpeg") or storage_path.endswith(".jpg"):
+                            mime = "image/jpeg"
+                        parts.append(types.Part.from_bytes(data=img, mime_type=mime))
+                    except Exception as e:
+                        logger.warning("Failed to download image %s: %s", storage_path, e)
+                if parts:
+                    history.append(types.Content(role="model", parts=parts))
+        else:
+            # user message
+            text_content = msg.get("text_content")
+            if text_content:
+                history.append(
+                    types.Content(
+                        role="user",
+                        parts=[types.Part.from_text(text=text_content)],
+                    )
                 )
-
-        history.append(
-            ConversationMessage(
-                role=gemini_role,
-                text=text_content,
-                image_data=image_data,
-                image_mime_type=image_mime,
-            )
-        )
 
     return history
 
@@ -263,10 +270,10 @@ def generate_image(
     1. 月間クォータチェック
     2. セッション情報を取得
     3. テンプレートのリファレンス画像を取得
-    4. 過去の会話履歴を構築
-    5. Gemini API で画像生成（chat APIでThought Signature自動管理）
+    4. 過去の会話履歴を構築（Thought Signature含む）
+    5. Gemini API で画像生成（chat APIでThought Signature管理）
     6. 生成画像をStorageに保存
-    7. メッセージとして記録
+    7. レスポンスの全Parts（Thought Signature含む）をmetadataに保存
     """
     # Quota check
     usage = get_usage()
@@ -295,8 +302,8 @@ def generate_image(
             system_prompt = template.get("system_prompt")
             reference_images = repo.get_reference_images(template_id)
 
-    # Build conversation history from past messages in this session
-    conversation_history = _build_conversation_history(repo, session_id)
+    # Build conversation history (with Thought Signatures) from past messages
+    gemini_history = _build_gemini_history(repo, session_id)
 
     # Save user message
     repo.add_message({
@@ -313,7 +320,7 @@ def generate_image(
         aspect_ratio=effective_ratio,
         image_size=effective_size,
         system_prompt=system_prompt,
-        conversation_history=conversation_history if conversation_history else None,
+        history=gemini_history if gemini_history else None,
     )
 
     # Save generated image to storage
@@ -327,7 +334,7 @@ def generate_image(
         )
         image_url = f"/api/v1/image-gen/images/{OUTPUTS_BUCKET}/{storage_path}"
 
-    # Save assistant message
+    # Save assistant message with response_parts (includes Thought Signatures)
     assistant_msg = repo.add_message({
         "session_id": session_id,
         "role": "assistant",
@@ -340,7 +347,10 @@ def generate_image(
             "aspect_ratio": effective_ratio,
             "image_size": effective_size,
             "reference_count": len(reference_images),
-            "history_length": len(conversation_history),
+            "history_length": len(gemini_history),
+            # Thought Signature付きの全Parts（base64エンコード済み）
+            # 次回のmulti-turn会話でこのまま復元される
+            "response_parts": result.response_parts,
         },
     })
 
