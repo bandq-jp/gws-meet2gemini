@@ -222,7 +222,23 @@ def _build_gemini_history(
         if role == "assistant":
             response_parts = metadata.get("response_parts")
             if response_parts:
-                content = _deserialize_to_content("model", response_parts)
+                # inline_dataが省略されている場合、Storageから画像を取得して注入
+                image_data = None
+                image_mime = None
+                storage_path = msg.get("storage_path")
+                if storage_path:
+                    try:
+                        image_data = repo.download_image(OUTPUTS_BUCKET, storage_path)
+                        if storage_path.endswith(".jpeg") or storage_path.endswith(".jpg"):
+                            image_mime = "image/jpeg"
+                        else:
+                            image_mime = "image/png"
+                    except Exception as e:
+                        logger.warning("Failed to download image for history %s: %s", storage_path, e)
+                content = _deserialize_to_content(
+                    "model", response_parts,
+                    image_data=image_data, image_mime_type=image_mime,
+                )
                 history.append(content)
             else:
                 # レガシーメッセージ: Thought Signatureなし。
