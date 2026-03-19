@@ -53,6 +53,11 @@ def _serialize_response_parts(
     """
     レスポンスのContent.partsをJSON-serializable dictのリストに変換。
     Thought Signatureをbase64エンコードして保持する。
+
+    NOTE: inline_data（画像バイナリ）は含めない。4K画像のbase64は5-10MBになり、
+    JSONB metadataカラムへのINSERTでSupabaseのstatement timeoutを引き起こす。
+    画像はSupabase Storageに別途保存済みなので、履歴復元時にダウンロードする。
+    ここではthought_signatureとテキスト情報のみ保存する。
     """
     serialized = []
     for part in (candidate_content.parts or []):
@@ -62,10 +67,10 @@ def _serialize_response_parts(
         if hasattr(part, "text") and part.text:
             entry["text"] = part.text
         if hasattr(part, "inline_data") and part.inline_data:
-            entry["inline_data"] = {
-                "data": base64.b64encode(part.inline_data.data).decode("ascii"),
-                "mime_type": part.inline_data.mime_type,
-            }
+            # 画像データ自体は保存しない（巨大すぎる）
+            # mime_typeだけ記録し、画像はStorageから復元する
+            entry["has_inline_data"] = True
+            entry["inline_data_mime_type"] = part.inline_data.mime_type
         if hasattr(part, "thought_signature") and part.thought_signature:
             entry["thought_signature"] = base64.b64encode(
                 part.thought_signature
@@ -78,10 +83,15 @@ def _serialize_response_parts(
 def _deserialize_to_content(
     role: str,
     serialized_parts: List[Dict[str, Any]],
+    image_data: Optional[bytes] = None,
+    image_mime_type: Optional[str] = None,
 ) -> types.Content:
     """
     JSON化されたParts情報からtypes.Contentを復元する。
     Thought Signatureを含めて正確に再構築する。
+
+    image_data/image_mime_type: inline_dataが省略されている場合に
+    Storageからダウンロードした画像データを注入するために使用。
     """
     parts: List[types.Part] = []
     for entry in serialized_parts:
@@ -91,9 +101,16 @@ def _deserialize_to_content(
         if entry.get("text"):
             kwargs["text"] = entry["text"]
         if entry.get("inline_data"):
+            # 旧形式: inline_dataがそのまま保存されていた場合
             kwargs["inline_data"] = types.Blob(
                 data=base64.b64decode(entry["inline_data"]["data"]),
                 mime_type=entry["inline_data"]["mime_type"],
+            )
+        elif entry.get("has_inline_data") and image_data:
+            # 新形式: inline_dataは省略されており、Storageから注入
+            kwargs["inline_data"] = types.Blob(
+                data=image_data,
+                mime_type=image_mime_type or entry.get("inline_data_mime_type", "image/png"),
             )
         if entry.get("thought_signature"):
             kwargs["thought_signature"] = base64.b64decode(
