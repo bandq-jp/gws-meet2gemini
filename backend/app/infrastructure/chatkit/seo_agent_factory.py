@@ -241,6 +241,11 @@ class MarketingAgentFactory:
             # 候補者インサイトツールも追加（Zoho + Supabase構造化データ連携）
             tools.extend(CANDIDATE_INSIGHT_TOOLS)
 
+        # Model selection: asset base_model > env MARKETING_AGENT_MODEL
+        model = (
+            asset.get("base_model") if asset and asset.get("base_model") else None
+        ) or self._settings.marketing_agent_model
+
         reasoning_effort = (
             asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort
         )
@@ -276,7 +281,7 @@ class MarketingAgentFactory:
             name="SEOAgent",
             instructions=final_instructions,
             tools=tools,
-            model=self._settings.marketing_agent_model,
+            model=model,
             model_settings=ModelSettings(
                 store=True,
                 reasoning=Reasoning(

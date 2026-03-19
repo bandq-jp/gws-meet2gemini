@@ -74,6 +74,14 @@
 - サブエージェント503: on_tool_error_callbackでdict返却→re-raise回避
 - オーケストレーター503: _pump_adk_events()で指数バックオフリトライ (2s→4s→8s, 最大3回)
 
+### GPT-5.4モデル対応 (2026-03-19)
+- **base_model選択可能化**: モデルプリセット(ModelAsset)に`base_model`フィールドを追加。プリセットごとにGPT-5.4/5.4-mini/5.2/5.1/5-miniを選択可能に
+- **エージェントファクトリ更新**: `seo_agent_factory.py`で`asset["base_model"]`を優先使用、未設定時は環境変数`MARKETING_AGENT_MODEL`にフォールバック
+- **デフォルトモデル変更**: `gpt-5.1` → `gpt-5.4` (settings.py, DB standard preset)
+- **フロントエンドUI更新**: ModelAssetForm/Selector/Tableにモデル選択ドロップダウン・バッジ表示を追加
+- **DBマイグレーション**: `0024_add_gpt54_models.sql` — standard presetのbase_modelとdescription更新
+- **GPT-5.4仕様**: reasoning_effortデフォルトは`none`（GPT-5.2以降）。1Mコンテキスト。`none/low/medium/high/xhigh`サポート
+
 ### ADKフィードバック対応 (2026-02-27)
 - **メモリ閾値修正**: `similarity_threshold` 0.3→0.55、`memory_max_results` 5→3（他会話のトピック混入対策）
 - **オーケストレーター指示文強化**: ルール5修正（記憶の慎重な活用）、ルール6追加（定義の一貫性）、ルール7追加（データ出所の透明性）

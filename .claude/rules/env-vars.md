@@ -18,7 +18,7 @@ OPENAI_API_KEY=
 IMAGE_GEN_GEMINI_API_KEY=    # 画像生成用個別キー (未設定時はGEMINI_API_KEYを使用)
 
 # ChatKit
-MARKETING_AGENT_MODEL=gpt-5-mini
+MARKETING_AGENT_MODEL=gpt-5.4    # フォールバック用 (プリセットのbase_modelが優先)
 MARKETING_REASONING_EFFORT=  # low/medium/high/xhigh
 MARKETING_CHATKIT_TOKEN_SECRET=  # JWT署名用 (32+バイト)
 MARKETING_UPLOAD_BASE_URL=

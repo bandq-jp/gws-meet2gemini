@@ -16,6 +16,15 @@
 - `nest_handoff_history` デフォルトが `True`→`False` に変更 (v0.7.0)
 - GPT-5.1/5.2 のデフォルト reasoning effort が `'none'` に変更
 
+## GPT-5.4 モデルファミリー
+- **GPT-5.4** (`gpt-5.4`): フラグシップ。1Mコンテキスト。reasoning_effortデフォルト=`none`
+- **GPT-5.4 Mini** (`gpt-5.4-mini`): 高速・低コスト版。高ボリュームワークロード向け
+- **GPT-5.4 Pro** (`gpt-5.4-pro`): 最大パフォーマンス。Responses APIのみ
+- **GPT-5.4 Nano** (`gpt-5.4-nano`): 分類・データ抽出・サブエージェント向け
+- **reasoning_effort**: `none` (デフォルト), `low`, `medium`, `high`, `xhigh`
+- **注意**: GPT-5.1以前は`none`非サポート。GPT-5.2以降デフォルトが`none`に変更
+- **情報ソース**: https://developers.openai.com/api/docs/models/gpt-5.4
+
 ## OpenAI Responses API (SSE)
 - **キープアライブ**: なし — OpenAI APIもSSEキープアライブを送信しない
 - **Background mode** (`"background": true`): 長時間推論タスクの公式ワークアラウンド

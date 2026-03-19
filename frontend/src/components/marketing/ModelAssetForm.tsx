@@ -21,6 +21,7 @@ export type ModelAsset = {
   id: string;
   name: string;
   description?: string;
+  base_model?: string;
   reasoning_effort?: "low" | "medium" | "high" | "xhigh";
   verbosity?: "low" | "medium" | "high";
   enable_web_search?: boolean;
@@ -111,6 +112,7 @@ export function ModelAssetForm({
 }: Props) {
   const [name, setName] = useState(initialValues?.name || "");
   const [description, setDescription] = useState(initialValues?.description || "");
+  const [baseModel, setBaseModel] = useState(initialValues?.base_model || "gpt-5.4");
   const [reasoning, setReasoning] = useState<ModelAsset["reasoning_effort"]>(
     initialValues?.reasoning_effort || "high"
   );
@@ -144,6 +146,7 @@ export function ModelAssetForm({
     onSubmit({
       name,
       description,
+      base_model: baseModel,
       reasoning_effort: reasoning,
       verbosity,
       system_prompt_addition: systemPrompt || null,
@@ -189,10 +192,28 @@ export function ModelAssetForm({
         <CardHeader>
           <CardTitle className="text-base">モデル設定</CardTitle>
           <CardDescription className="text-xs">
-            AIの思考の深さと出力の詳細度を調整
+            使用するモデル、思考の深さ、出力の詳細度を調整
           </CardDescription>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4">
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="base_model" className="text-sm">
+              モデル (Base Model)
+            </Label>
+            <Select value={baseModel} onValueChange={setBaseModel}>
+              <SelectTrigger id="base_model">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gpt-5.4">GPT-5.4 - フラグシップ (1Mコンテキスト)</SelectItem>
+                <SelectItem value="gpt-5.4-mini">GPT-5.4 Mini - 高速・低コスト</SelectItem>
+                <SelectItem value="gpt-5.2">GPT-5.2 - 安定版</SelectItem>
+                <SelectItem value="gpt-5.1">GPT-5.1 - レガシー</SelectItem>
+                <SelectItem value="gpt-5-mini">GPT-5 Mini - レガシー高速</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="reasoning" className="text-sm">
               推論レベル (Reasoning Effort)
@@ -224,6 +245,7 @@ export function ModelAssetForm({
                 <SelectItem value="high">High - 詳細</SelectItem>
               </SelectContent>
             </Select>
+          </div>
           </div>
         </CardContent>
       </Card>

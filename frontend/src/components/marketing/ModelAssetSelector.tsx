@@ -39,6 +39,7 @@ export type ModelAsset = {
   id: string;
   name: string;
   description?: string;
+  base_model?: string;
   reasoning_effort?: "low" | "medium" | "high" | "xhigh";
   verbosity?: "low" | "medium" | "high";
   enable_web_search?: boolean;
@@ -169,6 +170,9 @@ export function ModelAssetSelector({
                           <span className="font-medium truncate">{asset.name}</span>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
+                          <Badge variant="secondary" className="text-xs font-mono px-1.5 py-0">
+                            {asset.base_model || "gpt-5.4"}
+                          </Badge>
                           <Badge variant="outline" className="text-xs font-mono px-1.5 py-0">
                             {asset.reasoning_effort || "high"}
                           </Badge>

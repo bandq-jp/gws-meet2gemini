@@ -44,6 +44,7 @@ export type ModelAsset = {
   id: string;
   name: string;
   description?: string;
+  base_model?: string;
   reasoning_effort?: "low" | "medium" | "high" | "xhigh";
   verbosity?: "low" | "medium" | "high";
   enable_web_search?: boolean;
@@ -199,6 +200,7 @@ export function ModelAssetTable({ assets, onSave, onDelete }: Props) {
                   </div>
 
                   <div className="flex flex-col gap-1 text-xs font-mono text-slate-700">
+                    <Badge variant="secondary" className="w-fit">{asset.base_model || "gpt-5.4"}</Badge>
                     <Badge variant="outline" className="w-fit">推論: {asset.reasoning_effort || "high"}</Badge>
                     <Badge variant="outline" className="w-fit">詳細: {asset.verbosity || "medium"}</Badge>
                   </div>
