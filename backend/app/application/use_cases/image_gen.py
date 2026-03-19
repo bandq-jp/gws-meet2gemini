@@ -208,6 +208,9 @@ def _build_gemini_history(
     - assistant メッセージ: metadata.response_parts に保存された
       Thought Signature 付き Parts をそのまま復元
     - user メッセージ: text_content から Content を構築
+    - レガシーメッセージ（response_partsなし）: Thought Signatureが復元不可能
+      なため、そのペア（直前のuserメッセージ含む）は履歴から除外する
+      （Gemini APIが400エラーを返すため）
     """
     messages = repo.list_messages(session_id)
     history: List[types.Content] = []
@@ -217,30 +220,21 @@ def _build_gemini_history(
         metadata = msg.get("metadata") or {}
 
         if role == "assistant":
-            # response_parts が保存されている場合（Thought Signature付き）
             response_parts = metadata.get("response_parts")
             if response_parts:
                 content = _deserialize_to_content("model", response_parts)
                 history.append(content)
             else:
-                # 旧形式: response_parts がないレガシーメッセージ
-                # Storageから画像をダウンロードしてContentを構築（Thought Signatureなし）
-                parts: List[types.Part] = []
-                text_content = msg.get("text_content")
-                if text_content:
-                    parts.append(types.Part.from_text(text=text_content))
-                storage_path = msg.get("storage_path")
-                if storage_path:
-                    try:
-                        img = repo.download_image(OUTPUTS_BUCKET, storage_path)
-                        mime = "image/png"
-                        if storage_path.endswith(".jpeg") or storage_path.endswith(".jpg"):
-                            mime = "image/jpeg"
-                        parts.append(types.Part.from_bytes(data=img, mime_type=mime))
-                    except Exception as e:
-                        logger.warning("Failed to download image %s: %s", storage_path, e)
-                if parts:
-                    history.append(types.Content(role="model", parts=parts))
+                # レガシーメッセージ: Thought Signatureなし。
+                # この assistant + 直前の user ペアを履歴から除外する。
+                # 直前に追加した user Content を削除。
+                if history and history[-1].role == "user":
+                    history.pop()
+                logger.info(
+                    "Legacy message without response_parts (msg=%s), "
+                    "skipping this user-assistant pair from history",
+                    msg.get("id"),
+                )
         else:
             # user message
             text_content = msg.get("text_content")
@@ -305,14 +299,10 @@ def generate_image(
     # Build conversation history (with Thought Signatures) from past messages
     gemini_history = _build_gemini_history(repo, session_id)
 
-    # Save user message
-    repo.add_message({
-        "session_id": session_id,
-        "role": "user",
-        "text_content": prompt,
-    })
-
     # Generate image with conversation context
+    # NOTE: userメッセージは生成成功後に保存する。
+    # 先に保存すると、API失敗時に孤立したuserメッセージがDBに残り、
+    # 次回リクエストでuser→user連続のhistoryになりGeminiが画像を返さなくなる。
     generator = _get_generator()
     result = generator.generate(
         prompt=prompt,
@@ -322,6 +312,13 @@ def generate_image(
         system_prompt=system_prompt,
         history=gemini_history if gemini_history else None,
     )
+
+    # 生成成功 → userメッセージとassistantメッセージを両方保存
+    repo.add_message({
+        "session_id": session_id,
+        "role": "user",
+        "text_content": prompt,
+    })
 
     # Save generated image to storage
     image_url = None
