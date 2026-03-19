@@ -1131,7 +1131,7 @@ export default function ImageGenPage() {
                                   )}
                                 </div>
                               </div>
-                              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5 pt-0.5">
+                              <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5 pt-0.5">
                                 <button
                                   className="h-6 w-6 rounded-md flex items-center justify-center hover:bg-muted transition-colors"
                                   onClick={(e) => {
