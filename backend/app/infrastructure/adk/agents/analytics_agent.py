@@ -53,16 +53,22 @@ class AnalyticsAgentFactory(SubAgentFactory):
         asset: dict[str, Any] | None = None,
     ) -> List[Any]:
         """
-        Return MCP toolsets for GA4 and GSC.
-
-        In ADK, MCP toolsets are pre-filtered by the orchestrator
-        and passed directly to this agent.
+        Return MCP toolsets for GA4 and GSC + LP analytics function tools.
         """
-        # Orchestrator passes pre-filtered toolsets for this domain
+        tools: List[Any] = []
+
+        # MCP toolsets (GA4, GSC)
         if mcp_servers:
             logger.info(f"[AnalyticsAgent] Using {len(mcp_servers)} MCP toolsets")
-            return list(mcp_servers)
-        return []
+            tools.extend(mcp_servers)
+
+        # LP analytics function tools (spreadsheet SSoT)
+        if self._settings.lp_spreadsheet_id:
+            from app.infrastructure.adk.tools.lp_analytics_tools import ADK_LP_ANALYTICS_TOOLS
+            tools.extend(ADK_LP_ANALYTICS_TOOLS)
+            logger.info("[AnalyticsAgent] LP analytics tools added (%d)", len(ADK_LP_ANALYTICS_TOOLS))
+
+        return tools
 
     def _build_instructions(self) -> str:
         return """
@@ -80,6 +86,14 @@ class AnalyticsAgentFactory(SubAgentFactory):
 ## 担当領域
 - **GA4 (Google Analytics 4)**: トラフィック分析、ユーザー行動、コンバージョン
 - **GSC (Google Search Console)**: 検索パフォーマンス、インデックス状況、URL検査
+- **LP流入分析 (スプレッドシートSSoT)**: LP CV数、有効リード、TCV、面談予約
+
+## LP CV数の正確な取得方法（最重要）
+- **LP CV数（フォーム送信数）を聞かれたら、GA4 Thanks_Allではなく get_lp_cv_summary を使う**
+- GA4 Thanks_Allはサンクスページ閲覧数（テスト・リロード・bot含む）で過大計上される
+- get_lp_cv_summary はスプレッドシート（responses02）のSSoTデータを直接返す
+- 有効リード/TCV判定もスプシと同じロジックで自動計算される
+- チャネル別内訳は get_lp_cv_by_channel、ファネルは get_lp_funnel を使う
 
 ## ソース情報の提示
 - 回答にはデータの出所を添える（例: 「GA4 hitocareer.com 2025/6/1〜6/30」「GSC achievehr.jp 直近28日」）

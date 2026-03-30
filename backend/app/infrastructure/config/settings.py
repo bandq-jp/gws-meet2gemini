@@ -169,6 +169,12 @@ class Settings:
     company_db_spreadsheet_id: str = os.getenv("COMPANY_DB_SPREADSHEET_ID", "")
     company_db_cache_ttl: int = int(os.getenv("COMPANY_DB_CACHE_TTL", "300"))
 
+    # LP流入スプレッドシート (SSoT for LP CV data)
+    lp_spreadsheet_id: str = os.getenv("LP_SPREADSHEET_ID", "")
+    lp_sheet_responses02: str = os.getenv("LP_SHEET_RESPONSES02", "responses02")
+    lp_sheet_interview: str = os.getenv("LP_SHEET_INTERVIEW", "面談予約")
+    lp_cache_ttl: int = int(os.getenv("LP_CACHE_TTL", "300"))
+
     # Slack Integration
     slack_bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
     slack_user_token: str = os.getenv("SLACK_USER_TOKEN", "")

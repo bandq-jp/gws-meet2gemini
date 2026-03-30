@@ -727,15 +727,31 @@ def analyze_funnel_by_channel(
         total = sum(status_counts.values())
         lead_count = status_counts.get("1. リード", 0)
         hired_count = status_counts.get("14. 入社", 0)
-        interview_count = status_counts.get("4. 面談済み", 0)
+
+        # 面談実施数はfield29(面談日)ベースで取得（ステータスベースでは
+        # 「16. クローズ」に移動した面談済みレコードが漏れるため）
+        interviewed_count = zoho.count_interviewed(
+            channel=channel, date_from=date_from, date_to=date_to
+        )
+        # 累積カウント（ステータス4-15）も参考値として算出
+        cumulative_interview = sum(
+            cnt for st, cnt in status_counts.items()
+            if 4 <= _status_number(st) <= 15
+        )
+        cumulative_offer = sum(
+            cnt for st, cnt in status_counts.items()
+            if 12 <= _status_number(st) <= 14
+        )
 
         kpis = {
             "総数": total,
             "リード数": lead_count,
-            "面談済み数": interview_count,
+            "面談実施数（面談日ベース）": interviewed_count,
+            "面談実施数（累積ステータス4-15）": cumulative_interview,
+            "内定以上（累積12-14）": cumulative_offer,
             "入社数": hired_count,
-            "全体入社率": f"{(hired_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
-            "面談率": f"{(interview_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
+            "面談率": f"{(interviewed_count / total * 100):.1f}%" if total > 0 else "N/A",
+            "入社率": f"{(hired_count / total * 100):.1f}%" if total > 0 else "N/A",
         }
 
         return {
@@ -924,16 +940,24 @@ def compare_channels(
             status_counts = channel_stats.get(ch, {})
             total = sum(status_counts.values())
             hired = status_counts.get("14. 入社", 0)
-            interview_done = status_counts.get("4. 面談済み", 0)
+            # 面談実施数はfield29(面談日)ベースで取得
+            interviewed = zoho.count_interviewed(
+                channel=ch, date_from=date_from, date_to=date_to
+            )
+            cumulative_offer = sum(
+                cnt for st, cnt in status_counts.items()
+                if 12 <= _status_number(st) <= 14
+            )
 
             comparison_data.append({
                 "channel": ch,
                 "category": _categorize_channel(ch),
                 "total": total,
                 "hired": hired,
-                "interview_done": interview_done,
+                "interviewed": interviewed,
+                "offer_plus": cumulative_offer,
                 "hire_rate": f"{(hired / total * 100):.1f}%" if total > 0 else "N/A",
-                "interview_rate": f"{(interview_done / total * 100):.1f}%" if total > 0 else "N/A",
+                "interview_rate": f"{(interviewed / total * 100):.1f}%" if total > 0 else "N/A",
             })
 
         ranked_by_hire_rate = sorted(
@@ -954,6 +978,7 @@ def compare_channels(
             "comparison": comparison_data,
             "best_by_hire_rate": ranked_by_hire_rate[0]["channel"] if ranked_by_hire_rate else None,
             "best_by_volume": ranked_by_total[0]["channel"] if ranked_by_total else None,
+            "note": "interviewed はZoho面談日(field29)ベース。クローズ済み含む正確な面談実施数。",
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -996,13 +1021,14 @@ def get_pic_performance(
             status = record.get(zoho.STATUS_FIELD_API)
 
             if pic_name not in pic_stats:
-                pic_stats[pic_name] = {"total": 0, "hired": 0, "interview_done": 0}
+                pic_stats[pic_name] = {"total": 0, "hired": 0, "interviewed": 0}
 
             pic_stats[pic_name]["total"] += 1
             if status == "14. 入社":
                 pic_stats[pic_name]["hired"] += 1
-            if status == "4. 面談済み":
-                pic_stats[pic_name]["interview_done"] += 1
+            # 面談日(field29)があれば面談実施としてカウント
+            if record.get(zoho.INTERVIEW_DATE_FIELD_API):
+                pic_stats[pic_name]["interviewed"] += 1
 
         performance_data = []
         for pic_name, stats in pic_stats.items():
@@ -1010,9 +1036,9 @@ def get_pic_performance(
                 "pic": pic_name,
                 "total": stats["total"],
                 "hired": stats["hired"],
-                "interview_done": stats["interview_done"],
+                "interviewed": stats["interviewed"],
                 "hire_rate": f"{(stats['hired'] / stats['total'] * 100):.1f}%" if stats["total"] > 0 else "N/A",
-                "interview_rate": f"{(stats['interview_done'] / stats['total'] * 100):.1f}%" if stats["total"] > 0 else "N/A",
+                "interview_rate": f"{(stats['interviewed'] / stats['total'] * 100):.1f}%" if stats["total"] > 0 else "N/A",
             })
 
         performance_data.sort(
@@ -1078,6 +1104,12 @@ def get_conversion_metrics(
             if status:
                 channel_stats[ch][status] = channel_stats[ch].get(status, 0) + 1
 
+        # 面談日(field29)ベースのチャネル別面談実施数を取得
+        zoho = _get_zoho_client()
+        interviewed_by_channel = zoho.count_interviewed_by_channel(
+            date_from=date_from, date_to=date_to
+        )
+
         # Build metrics per channel
         metrics = []
         for ch, status_counts in channel_stats.items():
@@ -1085,10 +1117,10 @@ def get_conversion_metrics(
             if total == 0:
                 continue
 
-            # Cumulative counts (candidates who reached at least this stage)
-            # Use numeric comparison to avoid lexicographic ordering bugs
-            # (e.g., "12. 内定" < "4. 面談済み" in string comparison)
-            interview_plus = sum(
+            # 面談実施数: field29(面談日)ベース — クローズ済み含む正確な数
+            interviewed = interviewed_by_channel.get(ch, 0)
+            # 累積カウント（参考値）
+            cumulative_interview = sum(
                 cnt for st, cnt in status_counts.items()
                 if 4 <= _status_number(st) <= 15
             )
@@ -1098,7 +1130,7 @@ def get_conversion_metrics(
             )
             hired_count = status_counts.get("14. 入社", 0)
 
-            interview_rate = round((interview_plus / total) * 100, 1) if total > 0 else 0
+            interview_rate = round((interviewed / total) * 100, 1) if total > 0 else 0
             offer_rate = round((offer_plus / total) * 100, 1) if total > 0 else 0
             hire_rate = round((hired_count / total) * 100, 1) if total > 0 else 0
 
@@ -1108,6 +1140,7 @@ def get_conversion_metrics(
                 "channel": ch,
                 "category": category,
                 "total": total,
+                "interviewed": interviewed,
                 "interview_rate": f"{interview_rate}%",
                 "offer_rate": f"{offer_rate}%",
                 "hire_rate": f"{hire_rate}%",

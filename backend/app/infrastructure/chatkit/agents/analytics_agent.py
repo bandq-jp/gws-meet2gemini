@@ -112,6 +112,11 @@ class AnalyticsAgentFactory(SubAgentFactory):
                 )
             )
 
+        # LP analytics function tools (spreadsheet SSoT)
+        if self._settings.lp_spreadsheet_id:
+            from app.infrastructure.chatkit.lp_analytics_tools import CHATKIT_LP_ANALYTICS_TOOLS
+            tools.extend(CHATKIT_LP_ANALYTICS_TOOLS)
+
         return tools
 
     def _build_instructions(self) -> str:
@@ -127,6 +132,12 @@ class AnalyticsAgentFactory(SubAgentFactory):
 ## 担当領域
 - **GA4 (Google Analytics 4)**: トラフィック分析、ユーザー行動、コンバージョン
 - **GSC (Google Search Console)**: 検索パフォーマンス、インデックス状況、URL検査
+- **LP流入分析 (スプレッドシートSSoT)**: LP CV数、有効リード、TCV、面談予約
+
+## LP CV数の正確な取得方法（最重要）
+- **LP CV数を聞かれたら、GA4 Thanks_Allではなく get_lp_cv_summary を使う**
+- GA4 Thanks_Allはサンクスページ閲覧数で過大計上される
+- get_lp_cv_summary はスプシSSoTの正確な数字を返す
 
 ## 対象プロパティ
 - hitocareer.com (GA4 ID: 423714093)

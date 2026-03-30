@@ -122,6 +122,14 @@
 - **教訓**: Gemini画像生成はchat APIでThought Signatureを自動管理。`generate_content` 直接呼びではマルチターンの文脈が失われる
 - **教訓**: Gemini画像生成の `system_instruction` は `GenerateContentConfig` のパラメータとして渡す（contentsに混ぜない）
 
+### Zoho CRM ファネル指標修正 (2026-03-30)
+- **根本原因**: 面談実施数を `customer_status = "4. 面談済み"` で数えていたが、ステータスが先に進んだ人（提案中、内定、入社）やクローズされた人が漏れていた。修正前96人→修正後2,636人（27.5倍の差）
+- **修正内容**: `field29`（面談日フィールド）が `NOT NULL` のレコードをカウントする方式に変更。クローズ（4,154件中2,113件が面談済み）も正確にカウントされる
+- **影響範囲**: ChatKit `count_job_seekers_by_status`, `analyze_funnel_by_channel`, `compare_channels` / ADK `analyze_funnel_by_channel`, `compare_channels`, `get_pic_performance`, `get_conversion_metrics`
+- **ZohoClient追加メソッド**: `count_interviewed()`, `count_interviewed_by_channel()` — `INTERVIEW_DATE_FIELD_API = "field29"` ベース
+- **検証結果**: Zoho API面談数(2,636) > スプシRAWDATA面談数(1,718) — スプシは2025年末スナップショットのため差分は正常
+- **関連発見**: cv-via-studioのrow 195/890がEmail不正で毎分リトライ失敗（zohoID既存だがスキップされてない）
+
 ---
 
 ## 自己改善ログ（教訓集）
@@ -145,6 +153,8 @@
 - **PreloadMemoryTool閾値**: similarity_threshold=0.3は低すぎて別会話のトピックが混入する。0.55以上を推奨。max_resultsも3程度に絞る
 - **エージェント指示文にドメイン知識を**: Zohoチャネルフィルタ、ステータス値の厳密な定義、データなし時の報告義務など、業務知識を指示文に明記しないとAIが推測する
 - **番号付きステータスの文字列比較は壊れる**: `"12. 内定" >= "4. 面談済み"` は辞書順で `False`（`"1" < "4"`）。番号抽出して数値比較が必要
+- **ステータスベースのファネル計数は大幅に過少**: `customer_status = "4. 面談済み"` はスナップショット（その時点でそのステータスにいる人のみ）。CRMでは面談→提案→クローズと進むため、面談済みの人がステータス4から消える。正確な面談数は **面談日フィールド(field29) IS NOT NULL** で数える。検証: ステータスベース96人 vs field29ベース2,636人（27.5倍の差）
+- **GA4 Thanks_All ≠ フォーム送信数**: Thanks_AllはサンクスページPVイベント。直接アクセス、リロード、bot等もカウントされるため、実際のCV数より大幅に多くなる（検証: GA4=998 vs スプシ=609）
 
 ### 設計判断
 - **機能配置**: 別エージェントか既存統合かはユーザーに確認。同ドメインは原則同エージェント

@@ -1153,6 +1153,99 @@ class ZohoClient:
 
         return results
 
+    # 面談日フィールド（Zoho API名）
+    INTERVIEW_DATE_FIELD_API = "field29"
+
+    def count_interviewed(
+        self,
+        channel: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> int:
+        """面談日(field29)がNULLでないレコード数を返す。
+
+        ステータスベースの累積カウントでは「16. クローズ」に移動した
+        面談済みレコードが漏れるため、実際の面談実施数はこのメソッドで取得する。
+
+        Args:
+            channel: 流入経路でフィルタ
+            date_from: 登録日の開始（YYYY-MM-DD）
+            date_to: 登録日の終了（YYYY-MM-DD）
+
+        Returns:
+            面談日が入っているレコードの件数
+        """
+        module_api = self.settings.zoho_app_hc_module
+
+        where_parts: List[str] = [f"{self.INTERVIEW_DATE_FIELD_API} is not null"]
+        if channel:
+            where_parts.append(f"{self.CHANNEL_FIELD_API} = '{channel}'")
+        if date_from:
+            where_parts.append(f"{self.DATE_FIELD_API} >= '{date_from}'")
+        if date_to:
+            where_parts.append(f"{self.DATE_FIELD_API} <= '{date_to}'")
+        where_clause = " AND ".join(where_parts)
+
+        try:
+            query = f"SELECT COUNT(id) as cnt FROM {module_api} WHERE {where_clause}"
+            logger.info("[zoho] count_interviewed: %s", query)
+            result = self._coql_query(query)
+            data = result.get("data") or []
+            return data[0].get("cnt", 0) if data else 0
+        except Exception as e:
+            logger.warning("[zoho] count_interviewed COQL failed: %s, using legacy", e)
+            return self._count_interviewed_legacy(channel, date_from, date_to)
+
+    def _count_interviewed_legacy(
+        self,
+        channel: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> int:
+        """面談日カウントのレガシーフォールバック。"""
+        all_records = self._fetch_all_records(max_pages=15)
+        filtered = self._filter_by_date(all_records, date_from, date_to)
+        if channel:
+            filtered = [r for r in filtered if r.get(self.CHANNEL_FIELD_API) == channel]
+        return sum(1 for r in filtered if r.get(self.INTERVIEW_DATE_FIELD_API))
+
+    def count_interviewed_by_channel(
+        self,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """チャネル別の面談実施数（field29ベース）。
+
+        Returns:
+            チャネルごとの面談実施件数
+        """
+        module_api = self.settings.zoho_app_hc_module
+
+        where_parts: List[str] = [f"{self.INTERVIEW_DATE_FIELD_API} is not null"]
+        if date_from:
+            where_parts.append(f"{self.DATE_FIELD_API} >= '{date_from}'")
+        if date_to:
+            where_parts.append(f"{self.DATE_FIELD_API} <= '{date_to}'")
+        where_clause = " AND ".join(where_parts)
+
+        try:
+            query = (
+                f"SELECT {self.CHANNEL_FIELD_API}, COUNT(id) as cnt "
+                f"FROM {module_api} WHERE {where_clause} "
+                f"GROUP BY {self.CHANNEL_FIELD_API}"
+            )
+            logger.info("[zoho] count_interviewed_by_channel: %s", query)
+            result = self._coql_query(query)
+            data = result.get("data") or []
+            return {
+                row.get(self.CHANNEL_FIELD_API, "other"): row.get("cnt", 0)
+                for row in data
+                if row.get(self.CHANNEL_FIELD_API)
+            }
+        except Exception as e:
+            logger.warning("[zoho] count_interviewed_by_channel failed: %s", e)
+            return {}
+
     def get_channel_definitions(self) -> Dict[str, str]:
         """流入経路の定義一覧を返す"""
         return {

@@ -278,18 +278,20 @@ async def count_job_seekers_by_status(
 
         total = sum(results.values())
 
-        # 簡易ファネル分析
+        # 簡易ファネル分析（面談日field29ベース）
         funnel_analysis = None
         if total > 0:
-            lead_count = results.get("1. リード", 0)
-            interview_count = results.get("4. 面談済み", 0)
             hired_count = results.get("14. 入社", 0)
+            # 面談実施数はfield29(面談日)ベースで取得
+            interviewed_count = zoho.count_interviewed(
+                channel=channel, date_from=date_from, date_to=date_to
+            )
 
             funnel_analysis = {
-                "面談率": f"{(interview_count / total * 100):.1f}%" if total > 0 else "N/A",
+                "面談実施数（面談日ベース）": interviewed_count,
+                "面談率": f"{(interviewed_count / total * 100):.1f}%" if total > 0 else "N/A",
                 "入社率": f"{(hired_count / total * 100):.1f}%" if total > 0 else "N/A",
-                "リード→面談転換率": f"{(interview_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
-                "面談→入社転換率": f"{(hired_count / interview_count * 100):.1f}%" if interview_count > 0 else "N/A",
+                "面談→入社転換率": f"{(hired_count / interviewed_count * 100):.1f}%" if interviewed_count > 0 else "N/A",
             }
 
         return {
@@ -414,19 +416,21 @@ async def analyze_funnel_by_channel(
 
             prev_count = count
 
-        # 全体KPI
+        # 全体KPI（面談日field29ベース）
         total = sum(status_counts.values())
         lead_count = status_counts.get("1. リード", 0)
         hired_count = status_counts.get("14. 入社", 0)
-        interview_count = status_counts.get("4. 面談済み", 0)
+        interviewed_count = zoho.count_interviewed(
+            channel=channel, date_from=date_from, date_to=date_to
+        )
 
         kpis = {
             "総数": total,
             "リード数": lead_count,
-            "面談済み数": interview_count,
+            "面談実施数（面談日ベース）": interviewed_count,
             "入社数": hired_count,
-            "全体入社率": f"{(hired_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
-            "面談率": f"{(interview_count / lead_count * 100):.1f}%" if lead_count > 0 else "N/A",
+            "面談率": f"{(interviewed_count / total * 100):.1f}%" if total > 0 else "N/A",
+            "入社率": f"{(hired_count / total * 100):.1f}%" if total > 0 else "N/A",
         }
 
         # 改善提案を生成
@@ -661,16 +665,19 @@ async def compare_channels(
 
             total = sum(status_counts.values())
             hired = status_counts.get("14. 入社", 0)
-            interview_done = status_counts.get("4. 面談済み", 0)
+            # 面談実施数はfield29(面談日)ベースで取得
+            interviewed = zoho.count_interviewed(
+                channel=channel, date_from=date_from, date_to=date_to
+            )
 
             comparison_data.append({
                 "channel": channel,
                 "description": CHANNEL_DEFINITIONS.get(channel, "不明"),
                 "total": total,
                 "hired": hired,
-                "interview_done": interview_done,
+                "interviewed": interviewed,
                 "hire_rate": f"{(hired / total * 100):.1f}%" if total > 0 else "N/A",
-                "interview_rate": f"{(interview_done / total * 100):.1f}%" if total > 0 else "N/A",
+                "interview_rate": f"{(interviewed / total * 100):.1f}%" if total > 0 else "N/A",
             })
 
         # ランキング作成（入社率順）
