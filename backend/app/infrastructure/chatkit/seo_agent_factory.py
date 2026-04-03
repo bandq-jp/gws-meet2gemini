@@ -45,6 +45,14 @@ b&qマーケティングAIアシスタント。SEO・広告分析、競合調査
 - GA4: hitocareer.com (423714093) / achievehr.jp (502875325)
 - WordPress: `wordpress`=hitocareer.com / `achieve`=achievehr.jp
 
+## LP流入分析（SSoT — 最重要）
+LP CV数を聞かれたら**必ず get_lp_cv_summary を使う**。GA4 Thanks_Allは過大計上されるため使わない。
+- `get_lp_cv_summary`: 月別CV数（有効リード・TCV含む）
+- `get_lp_cv_by_channel`: チャネル別内訳（meta/media/ad等）
+- `get_lp_interview_bookings`: 面談予約数
+- `get_lp_funnel`: LP CV→有効リード→TCV→面談→Zohoのファネル
+- `compare_lp_vs_zoho`: スプシ vs Zohoの差分
+
 ## Zoho CRM (求職者分析)
 流入経路・ステータスの定義は `get_channel_definitions` ツールで取得可能。
 
@@ -240,6 +248,11 @@ class MarketingAgentFactory:
             tools.extend(ZOHO_CRM_TOOLS)
             # 候補者インサイトツールも追加（Zoho + Supabase構造化データ連携）
             tools.extend(CANDIDATE_INSIGHT_TOOLS)
+
+        # LP流入分析ツール（スプレッドシートSSoT直読み）
+        if self._settings.lp_spreadsheet_id:
+            from app.infrastructure.chatkit.lp_analytics_tools import CHATKIT_LP_ANALYTICS_TOOLS
+            tools.extend(CHATKIT_LP_ANALYTICS_TOOLS)
 
         reasoning_effort = (
             asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort
