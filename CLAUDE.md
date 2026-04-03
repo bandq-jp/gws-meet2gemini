@@ -130,6 +130,22 @@
 - **検証結果**: Zoho API面談数(2,636) > スプシRAWDATA面談数(1,718) — スプシは2025年末スナップショットのため差分は正常
 - **関連発見**: cv-via-studioのrow 195/890がEmail不正で毎分リトライ失敗（zohoID既存だがスキップされてない）
 
+### LP流入スプシ SSoT直読み (2026-04-03)
+- **目的**: GAS/スプシ（responses02）をSSoT（Single Source of Truth）として直接読み取り、Zoho経由のデータ漏れ（19%）を解消
+- **新規ファイル**:
+  - `infrastructure/google/lp_sheets_service.py` — Sheets API読み取り + TTLキャッシュ(300s)
+  - `infrastructure/google/lp_lead_evaluator.py` — 有効リード/TCV判定・チャネル分類（GAS数式と同等）
+  - `infrastructure/adk/tools/lp_analytics_tools.py` — ADKツール5個
+  - `infrastructure/chatkit/lp_analytics_tools.py` — ChatKitツール5個
+- **ツール**: `get_lp_cv_summary`, `get_lp_cv_by_channel`, `get_lp_interview_bookings`, `get_lp_funnel`, `compare_lp_vs_zoho`
+- **AnalyticsAgent統合**: ADK/ChatKit両方のAnalyticsAgentにLPツールを追加。エージェント指示文 + オーケストレーター指示文にLP CV優先ルーティングを明記
+- **有効リード基準**: 年齢23-32歳 + 許可勤務地（東京都,神奈川県等10箇所）→ スプシ数式と100%一致検証済み
+- **TCV基準**: 有効リード + 営業経験(salesexp="はい") → 同100%一致
+- **チャネル分類**: parentPathベース（/meta*→meta, /media*→media, /cp_a*→ad等）— GAS identifySource_()と同等
+- **検証結果**: ライブスプシ(946行) > xlsx(916行) — 30行の新規追加分。meta有効リード: API=382 vs xlsx=360（差22=新規行分）
+- **環境変数**: `LP_SPREADSHEET_ID=12oRSU23GWBvJ5QD74QGNkRxlESQYmJM_U6YQsXeb7V8`
+- **SAアクセス**: `bandq-dx@bandq-dx.iam.gserviceaccount.com` をスプシに閲覧者共有
+
 ---
 
 ## 自己改善ログ（教訓集）

@@ -40,7 +40,7 @@ INSTRUCTIONS = """
 3. 独立したサブエージェントは並列呼び出し
 
 ## サブエージェント
-- call_analytics_agent: GA4/GSC データ分析
+- call_analytics_agent: GA4/GSC データ分析 + LP流入分析（SSoT: CV数、有効リード、TCV、面談予約）
 - call_seo_agent: Ahrefs SEO分析
 - call_zoho_crm_agent: Zoho CRM 求職者データ
 - call_candidate_insight_agent: 候補者インサイト

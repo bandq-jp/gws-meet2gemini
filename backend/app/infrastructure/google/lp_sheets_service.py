@@ -157,7 +157,7 @@ class LPSheetsService:
 
     def get_valid_lead_criteria(self) -> Dict[str, Any]:
         """有効リードTCV要件シートから判定基準を取得."""
-        rows = self._read_sheet("有効リードTCV要件")
+        rows = self._read_sheet("有効リード/TCV要件")
 
         criteria = {
             "valid_lead": {"min_age": 23, "max_age": 32, "locations": [], "experience": None},

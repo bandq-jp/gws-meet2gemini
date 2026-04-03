@@ -51,6 +51,10 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | キーワード | 即座に呼び出すエージェント |
 |-----------|---------------------------|
 | セッション、PV、トラフィック、流入 | call_analytics_agent |
+| LP CV、フォーム送信数、有効リード、TCV | call_analytics_agent (LP分析) |
+| 面談予約数、ファネル（LP→有効→TCV→面談） | call_analytics_agent (LP分析) |
+| コンバージョン、CVR、応募率 | call_analytics_agent (LP CV) + call_zoho_crm_agent |
+| スプシ、スプレッドシート、responses02 | call_analytics_agent (LP分析) |
 | 検索パフォーマンス、クリック数、表示回数、順位 | call_analytics_agent (GSC) |
 | DR、ドメインレーティング、被リンク、バックリンク | call_seo_agent |
 | キーワード調査、競合サイト、オーガニック | call_seo_agent |
@@ -64,9 +68,16 @@ ORCHESTRATOR_INSTRUCTIONS = """
 
 ## サブエージェント詳細
 
-### call_analytics_agent (GA4 + GSC)
+### call_analytics_agent (GA4 + GSC + LP流入分析)
 - **GA4**: セッション、ユーザー、PV、直帰率、滞在時間
 - **GSC**: 検索クエリ、クリック数、表示回数、CTR、平均順位
+- **LP流入分析（SSoT）**: LP CV数、有効リード、TCV、面談予約数、チャネル別内訳
+  - `get_lp_cv_summary`: 月別CV数（有効リード・TCV含む）
+  - `get_lp_cv_by_channel`: チャネル別内訳（meta/media/ad等）
+  - `get_lp_interview_bookings`: 面談予約数
+  - `get_lp_funnel`: LP CV→有効リード→TCV→面談→Zohoのファネル
+  - `compare_lp_vs_zoho`: スプシ vs Zohoの差分
+  - **重要**: LP CV数はGA4 Thanks_Allではなくget_lp_cv_summaryを使うこと（SSoT）
 - **プロパティ**: hitocareer.com (423714093), achievehr.jp (502875325)
 
 ### call_seo_agent (Ahrefs)

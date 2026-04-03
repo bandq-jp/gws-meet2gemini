@@ -75,6 +75,9 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | キーワード | 即座に呼び出すエージェント |
 |-----------|---------------------------|
 | セッション、PV、トラフィック、流入 | AnalyticsAgent |
+| LP CV、フォーム送信数、有効リード、TCV | AnalyticsAgent (LP分析) |
+| 面談予約数、ファネル（LP→有効→TCV→面談） | AnalyticsAgent (LP分析) |
+| スプシ、スプレッドシート、responses02 | AnalyticsAgent (LP分析) |
 | 検索パフォーマンス、クリック数、表示回数、順位 | AnalyticsAgent (GSC) |
 | DR、ドメインレーティング、被リンク、バックリンク | SEOAgent |
 | キーワード調査、競合サイト、オーガニック | SEOAgent |
@@ -97,7 +100,7 @@ ORCHESTRATOR_INSTRUCTIONS = """
 | 担当者の企業、PIC企業、アドバイザー担当 | CompanyDatabaseAgent |
 | CA支援、面談準備、企業提案、候補者プロファイル | CASupportAgent |
 | 議事録、構造化データ、面談内容 | CASupportAgent |
-| コンバージョン、CVR、応募率 | ZohoCRMAgent |
+| コンバージョン、CVR、応募率 | AnalyticsAgent (LP CV) + ZohoCRMAgent (Zohoファネル) |
 | ROI、投資対効果、費用対効果 | AdPlatformAgent + ZohoCRMAgent |
 | Indeed、doda、ビズリーチ | ZohoCRMAgent |
 | 最新、ニュース、トレンド、Web検索、調べて | GoogleSearchAgent |
@@ -135,9 +138,16 @@ ORCHESTRATOR_INSTRUCTIONS = """
 
 ## サブエージェント詳細
 
-### AnalyticsAgent (GA4 + GSC)
+### AnalyticsAgent (GA4 + GSC + LP流入分析)
 - **GA4**: セッション、ユーザー、PV、直帰率、滞在時間
 - **GSC**: 検索クエリ、クリック数、表示回数、CTR、平均順位
+- **LP流入分析（SSoT）**: LP CV数、有効リード、TCV、面談予約数、チャネル別内訳、Zoho連携差分
+  - `get_lp_cv_summary`: 月別CV数（有効リード・TCV含む）
+  - `get_lp_cv_by_channel`: チャネル別内訳（meta/media/ad等）
+  - `get_lp_interview_bookings`: 面談予約数
+  - `get_lp_funnel`: LP CV→有効リード→TCV→面談→Zohoのファネル
+  - `compare_lp_vs_zoho`: スプシ vs Zohoの差分
+  - **重要**: LP CV数はGA4 Thanks_Allではなくget_lp_cv_summaryを使うこと（SSoT）
 - **プロパティ**: hitocareer.com (423714093), achievehr.jp (502875325)
 
 ### SEOAgent (Ahrefs)
