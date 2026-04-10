@@ -4,8 +4,9 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useImageGen } from "@/hooks/use-image-gen";
 import type {
+  ImageGenImageTransform,
+  ImageGenSession,
   ImageGenTemplate,
-  ImageGenMessage,
   ImageGenReference,
 } from "@/lib/api";
 import { apiClient, getRefImageUrl } from "@/lib/api";
@@ -104,6 +105,34 @@ const LABEL_MAP: Record<string, string> = {
   person: "人物",
   object: "素材",
   style: "スタイル",
+};
+
+const TEMPLATE_THUMB_TRANSFORM: ImageGenImageTransform = {
+  width: 96,
+  height: 96,
+  fit: "cover",
+  format: "webp",
+  quality: 78,
+};
+
+const REFERENCE_GRID_TRANSFORM: ImageGenImageTransform = {
+  width: 192,
+  height: 192,
+  fit: "cover",
+  format: "webp",
+  quality: 82,
+};
+
+const GENERATED_CHAT_TRANSFORM: ImageGenImageTransform = {
+  width: 1024,
+  format: "webp",
+  quality: 84,
+};
+
+const GENERATED_SIDEBAR_TRANSFORM: ImageGenImageTransform = {
+  width: 768,
+  format: "webp",
+  quality: 82,
 };
 
 // ── Template Dialog (2-step: create then add images) ──
@@ -547,15 +576,19 @@ function RefSection({
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={getRefImageUrl(ref.storage_path)}
+                  src={getRefImageUrl(ref.storage_path, REFERENCE_GRID_TRANSFORM)}
                   alt={ref.filename}
                   className="absolute inset-0 w-full h-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                  draggable={false}
                 />
                 <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors" />
-                <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="absolute top-0.5 right-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity">
                   <button
                     onClick={() => onDeleteRef(ref.id, templateId)}
                     className="w-5 h-5 rounded-full bg-black/60 hover:bg-red-600 flex items-center justify-center transition-colors"
+                    aria-label={`${ref.filename} を削除`}
                   >
                     <X className="h-2.5 w-2.5 text-white" />
                   </button>
@@ -622,6 +655,9 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
         src={src}
         alt="Generated"
         className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200"
+        loading="eager"
+        decoding="async"
+        draggable={false}
         onClick={(e) => e.stopPropagation()}
       />
     </div>
@@ -630,9 +666,30 @@ function Lightbox({ src, onClose }: { src: string; onClose: () => void }) {
 
 // ── Helpers ──
 
-function toProxyUrl(url: string | undefined | null): string {
+function buildTransformQuery(transform?: ImageGenImageTransform): string {
+  if (!transform) return "";
+
+  const params = new URLSearchParams();
+  if (transform.width) params.set("w", String(transform.width));
+  if (transform.height) params.set("h", String(transform.height));
+  if (transform.quality) params.set("q", String(transform.quality));
+  if (transform.fit) params.set("fit", transform.fit);
+  if (transform.format) params.set("format", transform.format);
+
+  return params.toString();
+}
+
+function toProxyUrl(
+  url: string | undefined | null,
+  transform?: ImageGenImageTransform,
+): string {
   if (!url) return "";
-  return url.replace(/^\/api\/v1\//, "/api/proxy/");
+
+  const proxied = url.replace(/^\/api\/v1\//, "/api/proxy/");
+  const query = buildTransformQuery(transform);
+  if (!query) return proxied;
+
+  return `${proxied}${proxied.includes("?") ? "&" : "?"}${query}`;
 }
 
 function formatTime(dateStr?: string): string {
@@ -679,9 +736,12 @@ function TemplateThumbnail({
       <div className={`${dim} shrink-0 rounded-lg overflow-hidden bg-muted`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={getRefImageUrl(refs[0].storage_path)}
+          src={getRefImageUrl(refs[0].storage_path, TEMPLATE_THUMB_TRANSFORM)}
           alt=""
           className="w-full h-full object-cover"
+          loading="lazy"
+          decoding="async"
+          draggable={false}
         />
       </div>
     );
@@ -699,9 +759,12 @@ function TemplateThumbnail({
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={ref.id}
-          src={getRefImageUrl(ref.storage_path)}
+          src={getRefImageUrl(ref.storage_path, TEMPLATE_THUMB_TRANSFORM)}
           alt=""
           className="w-full h-full object-cover"
+          loading="lazy"
+          decoding="async"
+          draggable={false}
         />
       ))}
     </div>
@@ -710,7 +773,13 @@ function TemplateThumbnail({
 
 // ── Main Page ──
 
-export default function ImageGenPage() {
+type ImageGenPageProps = {
+  initialSessionId?: string | null;
+};
+
+export default function ImageGenPage({
+  initialSessionId = null,
+}: ImageGenPageProps) {
   const { user } = useUser();
   const {
     templates,
@@ -780,7 +849,57 @@ export default function ImageGenPage() {
     }
   }, [error, setError]);
 
+  const syncSessionRoute = useCallback((sessionId: string | null) => {
+    const target = sessionId
+      ? `/marketing/image-gen/${sessionId}`
+      : "/marketing/image-gen";
+
+    if (
+      typeof window !== "undefined" &&
+      window.location.pathname !== target
+    ) {
+      window.history.replaceState({}, "", target);
+    }
+  }, []);
+
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId);
+
+  const applyLoadedSession = useCallback(
+    (session: ImageGenSession | null) => {
+      if (!session?.id) return;
+      setSelectedTemplateId(session.template_id || null);
+      syncSessionRoute(session.id);
+      if (isMobile) {
+        setShowLeftPanel(false);
+      }
+    },
+    [isMobile, syncSessionRoute]
+  );
+
+  useEffect(() => {
+    if (!initialSessionId) return;
+    if (currentSession?.id === initialSessionId) {
+      setSelectedTemplateId(currentSession.template_id || null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      const loaded = await loadSession(initialSessionId);
+      if (cancelled || !loaded) return;
+      setSelectedTemplateId(loaded.template_id || null);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    currentSession?.id,
+    currentSession?.template_id,
+    initialSessionId,
+    loadSession,
+  ]);
 
   const handleSelectTemplate = useCallback(
     (templateId: string | null) => {
@@ -805,8 +924,10 @@ export default function ImageGenPage() {
       created_by: user?.id,
       created_by_email: email,
     });
+    applyLoadedSession(session);
     return session;
   }, [
+    applyLoadedSession,
     createSession,
     selectedTemplateId,
     selectedTemplate,
@@ -1076,10 +1197,12 @@ export default function ImageGenPage() {
                         const refCount =
                           t.image_gen_references?.length || 0;
                         const isSelected = selectedTemplateId === t.id;
+                        const showActions = isMobile || isSelected;
                         return (
                           <div
                             key={t.id}
                             role="button"
+                            aria-pressed={isSelected}
                             tabIndex={0}
                             onClick={() =>
                               handleSelectTemplate(
@@ -1087,10 +1210,12 @@ export default function ImageGenPage() {
                               )
                             }
                             onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ")
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
                                 handleSelectTemplate(
                                   isSelected ? null : t.id
                                 );
+                              }
                             }}
                             className={`w-full text-left rounded-lg p-2 transition-all group cursor-pointer ${
                               isSelected
@@ -1101,64 +1226,79 @@ export default function ImageGenPage() {
                             <div className="flex items-start gap-2.5">
                               <TemplateThumbnail template={t} />
                               <div className="flex-1 min-w-0 pt-0.5">
-                                <p className="text-[13px] font-medium truncate leading-tight">
-                                  {t.name}
-                                </p>
-                                <div className="flex items-center gap-1 mt-1 flex-wrap">
-                                  <span className="text-[10px] text-muted-foreground">
-                                    {
-                                      CATEGORIES.find(
-                                        (c) => c.value === t.category
-                                      )?.label || t.category
-                                    }
-                                  </span>
-                                  <span className="text-muted-foreground/30">
-                                    ·
-                                  </span>
-                                  <span className="text-[10px] text-muted-foreground">
-                                    {t.aspect_ratio || "auto"}{" "}
-                                    {t.image_size || "1K"}
-                                  </span>
-                                  {refCount > 0 && (
-                                    <>
+                                <div className="flex items-start gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <p
+                                      title={t.name}
+                                      className="text-[13px] font-medium leading-tight line-clamp-2 break-all"
+                                    >
+                                      {t.name}
+                                    </p>
+                                    <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {
+                                          CATEGORIES.find(
+                                            (c) => c.value === t.category
+                                          )?.label || t.category
+                                        }
+                                      </span>
                                       <span className="text-muted-foreground/30">
                                         ·
                                       </span>
-                                      <span className="text-[10px] text-[var(--brand-400)]">
-                                        {refCount}枚
+                                      <span className="text-[10px] text-muted-foreground">
+                                        {t.aspect_ratio || "auto"}{" "}
+                                        {t.image_size || "1K"}
                                       </span>
-                                    </>
-                                  )}
+                                      {refCount > 0 && (
+                                        <>
+                                          <span className="text-muted-foreground/30">
+                                            ·
+                                          </span>
+                                          <span className="text-[10px] text-[var(--brand-400)]">
+                                            {refCount}枚
+                                          </span>
+                                        </>
+                                      )}
+                                    </div>
+                                    {t.description && (
+                                      <p className="text-[11px] text-muted-foreground/70 mt-1 line-clamp-2 break-words">
+                                        {t.description}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div
+                                    className={`shrink-0 flex gap-0.5 pt-0.5 transition-opacity ${
+                                      showActions
+                                        ? "opacity-100"
+                                        : "opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100"
+                                    }`}
+                                  >
+                                    <button
+                                      className="h-6 w-6 rounded-md flex items-center justify-center hover:bg-muted transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingTemplate(t);
+                                        setTemplateDialogOpen(true);
+                                      }}
+                                      aria-label={`${t.name} を編集`}
+                                    >
+                                      <Pencil className="h-3 w-3 text-muted-foreground" />
+                                    </button>
+                                    <button
+                                      className="h-6 w-6 rounded-md flex items-center justify-center hover:bg-destructive/10 transition-colors"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (confirm("このテンプレートを削除しますか？"))
+                                          deleteTemplate(t.id);
+                                      }}
+                                      aria-label={`${t.name} を削除`}
+                                    >
+                                      <Trash2 className="h-3 w-3 text-muted-foreground" />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
-                              <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5 pt-0.5">
-                                <button
-                                  className="h-6 w-6 rounded-md flex items-center justify-center hover:bg-muted transition-colors"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingTemplate(t);
-                                    setTemplateDialogOpen(true);
-                                  }}
-                                >
-                                  <Pencil className="h-3 w-3 text-muted-foreground" />
-                                </button>
-                                <button
-                                  className="h-6 w-6 rounded-md flex items-center justify-center hover:bg-destructive/10 transition-colors"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (confirm("このテンプレートを削除しますか？"))
-                                      deleteTemplate(t.id);
-                                  }}
-                                >
-                                  <Trash2 className="h-3 w-3 text-muted-foreground" />
-                                </button>
-                              </div>
                             </div>
-                            {t.description && (
-                              <p className="text-[11px] text-muted-foreground/70 mt-1 line-clamp-1 ml-[52px]">
-                                {t.description}
-                              </p>
-                            )}
                           </div>
                         );
                       })}
@@ -1198,10 +1338,7 @@ export default function ImageGenPage() {
                             key={s.id}
                             onClick={async () => {
                               const loaded = await loadSession(s.id);
-                              if (loaded) {
-                                // Sync template selection with the loaded session's template
-                                setSelectedTemplateId(loaded.template_id || null);
-                              }
+                              applyLoadedSession(loaded);
                             }}
                             className={`w-full text-left rounded-lg p-2.5 transition-all ${
                               isCurrent
@@ -1298,65 +1435,75 @@ export default function ImageGenPage() {
                 )}
 
                 {/* Messages */}
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${
-                      msg.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    {msg.role === "user" ? (
-                      <div className="max-w-[80%] bg-[var(--brand-400)] text-white rounded-2xl rounded-br-sm px-4 py-2.5">
-                        <p className="text-sm leading-relaxed">
-                          {msg.text_content}
-                        </p>
-                        <p className="text-[10px] opacity-40 mt-1 text-right">
-                          {formatTime(msg.created_at)}
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="max-w-[90%] space-y-2">
-                        {msg.text_content && (
-                          <div className="bg-muted/40 rounded-2xl rounded-bl-sm px-4 py-3 border border-border/30">
-                            <p className="text-sm leading-relaxed text-foreground">
-                              {msg.text_content}
-                            </p>
-                          </div>
-                        )}
-                        {toProxyUrl(msg.image_url) && (
-                          <div className="relative group rounded-xl overflow-hidden border border-border/40 shadow-sm cursor-pointer">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={toProxyUrl(msg.image_url)}
-                              alt="Generated image"
-                              className="w-full h-auto max-w-lg"
-                              onClick={() =>
-                                setLightboxSrc(toProxyUrl(msg.image_url))
-                              }
-                            />
-                            {/* Hover overlay */}
-                            <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                              <button
-                                className="w-7 h-7 rounded-md bg-white/90 hover:bg-white flex items-center justify-center shadow-sm transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setLightboxSrc(toProxyUrl(msg.image_url));
-                                }}
-                              >
-                                <Maximize2 className="h-3.5 w-3.5 text-foreground" />
-                              </button>
-                              <a
-                                href={toProxyUrl(msg.image_url)}
-                                download
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="w-7 h-7 rounded-md bg-white/90 hover:bg-white flex items-center justify-center shadow-sm transition-colors"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <Download className="h-3.5 w-3.5 text-foreground" />
-                              </a>
+                {messages.map((msg) => {
+                  const fullImageUrl = toProxyUrl(msg.image_url);
+                  const previewImageUrl = toProxyUrl(
+                    msg.image_url,
+                    GENERATED_CHAT_TRANSFORM
+                  );
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex ${
+                        msg.role === "user" ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      {msg.role === "user" ? (
+                        <div className="max-w-[80%] bg-[var(--brand-400)] text-white rounded-2xl rounded-br-sm px-4 py-2.5">
+                          <p className="text-sm leading-relaxed">
+                            {msg.text_content}
+                          </p>
+                          <p className="text-[10px] opacity-40 mt-1 text-right">
+                            {formatTime(msg.created_at)}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="max-w-[90%] space-y-2">
+                          {msg.text_content && (
+                            <div className="bg-muted/40 rounded-2xl rounded-bl-sm px-4 py-3 border border-border/30">
+                              <p className="text-sm leading-relaxed text-foreground">
+                                {msg.text_content}
+                              </p>
                             </div>
+                          )}
+                          {fullImageUrl && (
+                            <div className="relative group rounded-xl overflow-hidden border border-border/40 shadow-sm cursor-pointer">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={previewImageUrl}
+                                alt="Generated image"
+                                className="w-full h-auto max-w-lg"
+                                loading="lazy"
+                                decoding="async"
+                                draggable={false}
+                                onClick={() => setLightboxSrc(fullImageUrl)}
+                              />
+                              {/* Hover overlay */}
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                                <button
+                                  className="w-7 h-7 rounded-md bg-white/90 hover:bg-white flex items-center justify-center shadow-sm transition-colors"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setLightboxSrc(fullImageUrl);
+                                  }}
+                                  aria-label="画像を拡大"
+                                >
+                                  <Maximize2 className="h-3.5 w-3.5 text-foreground" />
+                                </button>
+                                <a
+                                  href={fullImageUrl}
+                                  download
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="w-7 h-7 rounded-md bg-white/90 hover:bg-white flex items-center justify-center shadow-sm transition-colors"
+                                  onClick={(e) => e.stopPropagation()}
+                                  aria-label="画像をダウンロード"
+                                >
+                                  <Download className="h-3.5 w-3.5 text-foreground" />
+                                </a>
+                              </div>
                             {/* Metadata bar */}
                             {msg.metadata && (
                               <div className="absolute bottom-0 left-0 right-0 px-3 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1413,12 +1560,13 @@ export default function ImageGenPage() {
                                 </div>
                               </div>
                             )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 
                 {/* Generating indicator */}
                 {isGenerating && (
@@ -1569,6 +1717,11 @@ export default function ImageGenPage() {
                       const meta = msg.metadata as
                         | Record<string, unknown>
                         | undefined;
+                      const fullImageUrl = toProxyUrl(msg.image_url);
+                      const previewImageUrl = toProxyUrl(
+                        msg.image_url,
+                        GENERATED_SIDEBAR_TRANSFORM
+                      );
                       return (
                         <div
                           key={msg.id}
@@ -1576,15 +1729,16 @@ export default function ImageGenPage() {
                         >
                           <div
                             className="relative cursor-pointer"
-                            onClick={() =>
-                              setLightboxSrc(toProxyUrl(msg.image_url))
-                            }
+                            onClick={() => setLightboxSrc(fullImageUrl)}
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
-                              src={toProxyUrl(msg.image_url)!}
+                              src={previewImageUrl}
                               alt="Generated"
                               className="w-full h-auto"
+                              loading="lazy"
+                              decoding="async"
+                              draggable={false}
                             />
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                             <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
@@ -1592,18 +1746,20 @@ export default function ImageGenPage() {
                                 className="w-6 h-6 rounded-md bg-white/90 hover:bg-white flex items-center justify-center shadow-sm"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setLightboxSrc(toProxyUrl(msg.image_url));
+                                  setLightboxSrc(fullImageUrl);
                                 }}
+                                aria-label="画像を拡大"
                               >
                                 <Maximize2 className="h-3 w-3" />
                               </button>
                               <a
-                                href={toProxyUrl(msg.image_url)!}
+                                href={fullImageUrl}
                                 download
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="w-6 h-6 rounded-md bg-white/90 hover:bg-white flex items-center justify-center shadow-sm"
                                 onClick={(e) => e.stopPropagation()}
+                                aria-label="画像をダウンロード"
                               >
                                 <Download className="h-3 w-3" />
                               </a>

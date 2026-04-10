@@ -5,11 +5,13 @@
 """
 from __future__ import annotations
 
+import io
 import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
+from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel
 
 from app.application.use_cases import image_gen as use_cases
@@ -23,6 +25,8 @@ from app.infrastructure.supabase.repositories.image_gen_repository import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/image-gen", tags=["image-gen"])
+
+IMMUTABLE_IMAGE_CACHE_CONTROL = "private, max-age=31536000, immutable"
 
 
 # ── Schemas ──
@@ -240,20 +244,133 @@ def generate_image(session_id: str, body: GenerateRequest) -> Dict[str, Any]:
 # ── Image Serving ──
 
 
+def _detect_image_mime(path: str) -> str:
+    path_lower = path.lower()
+    if path_lower.endswith(".jpeg") or path_lower.endswith(".jpg"):
+        return "image/jpeg"
+    if path_lower.endswith(".webp"):
+        return "image/webp"
+    return "image/png"
+
+
+def _resolve_output_format(
+    requested_format: Optional[str],
+    original_mime: str,
+) -> tuple[str, str]:
+    if requested_format == "jpeg":
+        return "JPEG", "image/jpeg"
+    if requested_format == "webp":
+        return "WEBP", "image/webp"
+    if requested_format == "png":
+        return "PNG", "image/png"
+
+    if original_mime == "image/jpeg":
+        return "JPEG", "image/jpeg"
+    if original_mime == "image/webp":
+        return "WEBP", "image/webp"
+    return "PNG", "image/png"
+
+
+def _resize_image(
+    data: bytes,
+    original_mime: str,
+    width: Optional[int],
+    height: Optional[int],
+    fit: str,
+    quality: int,
+    requested_format: Optional[str],
+) -> tuple[bytes, str]:
+    should_transform = (
+        width is not None
+        or height is not None
+        or requested_format is not None
+    )
+    if not should_transform:
+        return data, original_mime
+
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image = ImageOps.exif_transpose(image)
+
+            target_width = min(width or image.width, image.width)
+            target_height = min(height or image.height, image.height)
+
+            if target_width > 0 or target_height > 0:
+                if target_width > 0 and target_height > 0 and fit == "cover":
+                    image = ImageOps.fit(
+                        image,
+                        (target_width, target_height),
+                        method=Image.Resampling.LANCZOS,
+                    )
+                else:
+                    image.thumbnail(
+                        (
+                            target_width or image.width,
+                            target_height or image.height,
+                        ),
+                        Image.Resampling.LANCZOS,
+                    )
+
+            output_format, output_mime = _resolve_output_format(
+                requested_format=requested_format,
+                original_mime=original_mime,
+            )
+
+            save_kwargs: Dict[str, Any] = {}
+            if output_format == "JPEG":
+                if image.mode not in ("RGB", "L"):
+                    image = image.convert("RGB")
+                save_kwargs["quality"] = quality
+                save_kwargs["optimize"] = True
+            elif output_format == "WEBP":
+                if image.mode == "P":
+                    image = image.convert("RGBA")
+                save_kwargs["quality"] = quality
+                save_kwargs["method"] = 6
+            else:
+                save_kwargs["optimize"] = True
+
+            out = io.BytesIO()
+            image.save(out, format=output_format, **save_kwargs)
+            return out.getvalue(), output_mime
+    except (UnidentifiedImageError, OSError) as e:
+        logger.warning("Failed to transform image: %s", e)
+        return data, original_mime
+
+
 @router.get("/images/{bucket}/{path:path}")
-def serve_image(bucket: str, path: str) -> Response:
+def serve_image(
+    bucket: str,
+    path: str,
+    w: Optional[int] = Query(None, ge=32, le=4096),
+    h: Optional[int] = Query(None, ge=32, le=4096),
+    q: int = Query(82, ge=40, le=100),
+    fit: str = Query("contain", pattern="^(contain|cover)$"),
+    format: Optional[str] = Query(None, pattern="^(png|jpeg|webp)$"),
+) -> Response:
     if bucket not in (REFERENCES_BUCKET, OUTPUTS_BUCKET):
         raise HTTPException(status_code=400, detail="Invalid bucket")
     try:
         repo = ImageGenRepository()
         data = repo.download_image(bucket, path)
-        # Detect mime type from extension
-        mime = "image/png"
-        if path.endswith(".jpeg") or path.endswith(".jpg"):
-            mime = "image/jpeg"
-        elif path.endswith(".webp"):
-            mime = "image/webp"
-        return Response(content=data, media_type=mime)
+        mime = _detect_image_mime(path)
+        transformed_data, transformed_mime = _resize_image(
+            data=data,
+            original_mime=mime,
+            width=w,
+            height=h,
+            fit=fit,
+            quality=q,
+            requested_format=format,
+        )
+        return Response(
+            content=transformed_data,
+            media_type=transformed_mime,
+            headers={
+                "Cache-Control": IMMUTABLE_IMAGE_CACHE_CONTROL,
+                "Content-Length": str(len(transformed_data)),
+            },
+        )
     except Exception as e:
         logger.error("Failed to serve image %s/%s: %s", bucket, path, e)
         raise HTTPException(status_code=404, detail="Image not found")

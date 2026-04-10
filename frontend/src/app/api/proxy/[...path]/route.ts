@@ -7,6 +7,32 @@ const USE_LOCAL_BACKEND = process.env.USE_LOCAL_BACKEND === 'true';
 const LOCAL_API_BASE_URL = process.env.DEV_BACKEND_BASE || 'http://localhost:8000';
 const CLOUD_RUN_BASE_URL = process.env.CLOUD_RUN_BASE || '';
 const GCP_SA_JSON = process.env.GCP_SA_JSON || '';
+const BINARY_HEADER_KEYS = [
+  'content-type',
+  'cache-control',
+  'content-length',
+  'content-disposition',
+  'etag',
+  'last-modified',
+] as const;
+
+function copyBinaryHeaders(
+  source: Headers | Record<string, string | string[] | undefined>
+): Headers {
+  const headers = new Headers();
+
+  for (const key of BINARY_HEADER_KEYS) {
+    const value =
+      source instanceof Headers
+        ? source.get(key)
+        : source[key];
+
+    if (!value) continue;
+    headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+  }
+
+  return headers;
+}
 
 export async function GET(
   request: NextRequest,
@@ -157,7 +183,7 @@ async function handleRequest(
         const data = await response.arrayBuffer();
         return new NextResponse(data, {
           status: response.status,
-          headers: { 'Content-Type': responseContentType },
+          headers: copyBinaryHeaders(response.headers),
         });
       }
 
@@ -223,7 +249,10 @@ async function handleRequest(
       }
       if (resContentType.startsWith('image/') || resContentType.startsWith('application/octet-stream')) {
         const data = await uploadRes.arrayBuffer();
-        return new NextResponse(data, { status: uploadRes.status, headers: { 'Content-Type': resContentType } });
+        return new NextResponse(data, {
+          status: uploadRes.status,
+          headers: copyBinaryHeaders(uploadRes.headers),
+        });
       }
       const responseData = await uploadRes.json();
       return NextResponse.json(responseData);
@@ -272,7 +301,7 @@ async function handleRequest(
     if (responseContentType.startsWith('image/') || responseContentType.startsWith('application/octet-stream')) {
       return new NextResponse(response.data as ArrayBuffer, {
         status: response.status,
-        headers: { 'Content-Type': responseContentType },
+        headers: copyBinaryHeaders(response.headers || {}),
       });
     }
 

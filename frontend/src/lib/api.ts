@@ -100,12 +100,36 @@ export interface SettingsResponse {
 }
 
 // Image Generation interfaces
-export function getImageGenImageUrl(bucket: string, storagePath: string): string {
-  return `${API_BASE_URL}/image-gen/images/${bucket}/${storagePath}`;
+export interface ImageGenImageTransform {
+  width?: number;
+  height?: number;
+  quality?: number;
+  fit?: "contain" | "cover";
+  format?: "png" | "jpeg" | "webp";
 }
 
-export function getRefImageUrl(storagePath: string): string {
-  return getImageGenImageUrl('image-gen-references', storagePath);
+export function getImageGenImageUrl(
+  bucket: string,
+  storagePath: string,
+  transform?: ImageGenImageTransform,
+): string {
+  const params = new URLSearchParams();
+
+  if (transform?.width) params.set("w", String(transform.width));
+  if (transform?.height) params.set("h", String(transform.height));
+  if (transform?.quality) params.set("q", String(transform.quality));
+  if (transform?.fit) params.set("fit", transform.fit);
+  if (transform?.format) params.set("format", transform.format);
+
+  const qs = params.toString();
+  return `${API_BASE_URL}/image-gen/images/${bucket}/${storagePath}${qs ? `?${qs}` : ""}`;
+}
+
+export function getRefImageUrl(
+  storagePath: string,
+  transform?: ImageGenImageTransform,
+): string {
+  return getImageGenImageUrl("image-gen-references", storagePath, transform);
 }
 
 export interface ImageGenReference {
