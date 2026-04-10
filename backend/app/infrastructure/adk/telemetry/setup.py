@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from app.infrastructure.config.settings import Settings
@@ -41,6 +42,16 @@ def setup_adk_telemetry(settings: Settings) -> None:
         # Phoenix OTLP exporter
         phoenix_endpoint = settings.phoenix_endpoint
         if phoenix_endpoint:
+            parsed = urlparse(phoenix_endpoint)
+            if (
+                settings.environment.lower() != "local"
+                and parsed.hostname in {"localhost", "127.0.0.1"}
+            ):
+                logger.warning(
+                    "[Telemetry] Skipping Phoenix exporter in non-local environment: %s",
+                    phoenix_endpoint,
+                )
+                return
             try:
                 from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
                     OTLPSpanExporter,

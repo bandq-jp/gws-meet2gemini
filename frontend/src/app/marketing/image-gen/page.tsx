@@ -951,12 +951,14 @@ export default function ImageGenPage({
       sessionId = newSession.id;
     }
 
-    await generateImage(prompt.trim(), {
+    const result = await generateImage(prompt.trim(), {
       aspect_ratio: aspectRatio !== "auto" ? aspectRatio : undefined,
       image_size: imageSize,
       sessionId,
     });
-    setPrompt("");
+    if (result) {
+      setPrompt("");
+    }
     textareaRef.current?.focus();
   }, [
     prompt,

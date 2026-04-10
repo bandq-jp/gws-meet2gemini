@@ -15,6 +15,17 @@ def _default_marketing_upload_base_url() -> str:
         return "http://localhost:3000"
     return ""
 
+
+def _default_phoenix_endpoint() -> str:
+    explicit = os.getenv("PHOENIX_ENDPOINT")
+    if explicit is not None:
+        return explicit
+
+    env = os.getenv("ENV", os.getenv("ENVIRONMENT", "local")).lower()
+    if env == "local":
+        return "http://localhost:6006/v1/traces"
+    return ""
+
 class Settings:
     # OpenAI
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
@@ -181,7 +192,7 @@ class Settings:
 
     # Agent Analytics / Telemetry
     adk_telemetry_enabled: bool = os.getenv("ADK_TELEMETRY_ENABLED", "true").lower() == "true"
-    phoenix_endpoint: str = os.getenv("PHOENIX_ENDPOINT", "http://localhost:6006/v1/traces")
+    phoenix_endpoint: str = _default_phoenix_endpoint()
 
 
 @lru_cache(maxsize=1)
