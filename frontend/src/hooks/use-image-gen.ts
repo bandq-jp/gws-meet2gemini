@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   apiClient,
   type ImageGenTemplate,
@@ -23,8 +23,24 @@ export function useImageGen() {
   const [messages, setMessages] = useState<ImageGenMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [usage, setUsage] = useState<ImageGenUsage | null>(null);
+  const sessionCacheRef = useRef<Record<string, ImageGenSession>>({});
+  const messagesRef = useRef<ImageGenMessage[]>([]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  const applySessionState = useCallback((session: ImageGenSession) => {
+    setCurrentSession(session);
+    setMessages(session.messages || []);
+  }, []);
+
+  const cacheSession = useCallback((session: ImageGenSession) => {
+    sessionCacheRef.current[session.id] = session;
+  }, []);
 
   // ── Usage / Quota ──
 
@@ -134,28 +150,49 @@ export function useImageGen() {
       created_by_email?: string;
     }) => {
       const result = await apiClient.createImageGenSession(data);
+      cacheSession(result);
       setSessions((prev) => [result, ...prev]);
-      setCurrentSession(result);
-      setMessages([]);
+      applySessionState(result);
       return result;
     },
-    []
+    [applySessionState, cacheSession]
   );
 
-  const loadSession = useCallback(async (sessionId: string) => {
+  const loadSession = useCallback(async (
+    sessionId: string,
+    options?: { seedSession?: ImageGenSession }
+  ) => {
+    const cached = sessionCacheRef.current[sessionId];
+    if (cached) {
+      applySessionState(cached);
+      return cached;
+    }
+
+    if (options?.seedSession) {
+      setCurrentSession(options.seedSession);
+      setMessages([]);
+    }
+
+    setLoadingSessionId(sessionId);
     setIsLoading(true);
     try {
       const session = await apiClient.getImageGenSession(sessionId);
-      setCurrentSession(session);
-      setMessages(session.messages || []);
+      cacheSession(session);
+      applySessionState(session);
+      setSessions((prev) =>
+        prev.map((item) =>
+          item.id === session.id ? { ...item, ...session, messages: undefined } : item
+        )
+      );
       return session;
     } catch (e) {
       setError(e instanceof Error ? e.message : "セッションの読み込みに失敗しました");
       return null;
     } finally {
+      setLoadingSessionId((prev) => (prev === sessionId ? null : prev));
       setIsLoading(false);
     }
-  }, []);
+  }, [applySessionState, cacheSession]);
 
   // ── Update Session Template ──
 
@@ -201,7 +238,9 @@ export function useImageGen() {
         text_content: prompt,
         created_at: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, userMsg]);
+      const optimisticMessages = [...messagesRef.current, userMsg];
+      messagesRef.current = optimisticMessages;
+      setMessages(optimisticMessages);
 
       try {
         const result = await apiClient.generateImage(targetSessionId, {
@@ -209,13 +248,24 @@ export function useImageGen() {
           ...options,
         });
 
-        // Replace optimistic user message and add assistant message
-        setMessages((prev) => {
-          const filtered = prev.filter((m) => m.id !== userMsg.id);
-          // The API returns the assistant message, but we also need the saved user message
-          // Re-fetch full session messages for accuracy
-          return [...filtered, { ...userMsg, id: `user-${Date.now()}` }, result];
-        });
+        const nextMessages = [
+          ...messagesRef.current.filter((m) => m.id !== userMsg.id),
+          { ...userMsg, id: `user-${Date.now()}` },
+          result,
+        ];
+        messagesRef.current = nextMessages;
+        setMessages(nextMessages);
+
+        const baseSession =
+          sessionCacheRef.current[targetSessionId]
+          || (currentSession?.id === targetSessionId ? currentSession : null);
+        if (baseSession) {
+          const updatedSession = { ...baseSession, messages: nextMessages };
+          cacheSession(updatedSession);
+          if (currentSession?.id === targetSessionId) {
+            setCurrentSession(updatedSession);
+          }
+        }
 
         // Refresh usage after successful generation
         fetchUsage();
@@ -224,7 +274,9 @@ export function useImageGen() {
       } catch (e) {
         setError(e instanceof Error ? e.message : "画像生成に失敗しました");
         // Remove optimistic message on error
-        setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+        const revertedMessages = messagesRef.current.filter((m) => m.id !== userMsg.id);
+        messagesRef.current = revertedMessages;
+        setMessages(revertedMessages);
         return null;
       } finally {
         setIsGenerating(false);
@@ -241,6 +293,7 @@ export function useImageGen() {
     messages,
     isLoading,
     isGenerating,
+    loadingSessionId,
     error,
     usage,
     // Template actions

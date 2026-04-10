@@ -788,6 +788,7 @@ export default function ImageGenPage({
     messages,
     isLoading,
     isGenerating,
+    loadingSessionId,
     error,
     fetchTemplates,
     createTemplate,
@@ -1333,12 +1334,13 @@ export default function ImageGenPage({
                       )}
                       {sessions.map((s) => {
                         const isCurrent = currentSession?.id === s.id;
+                        const isSessionLoading = loadingSessionId === s.id;
                         return (
                           <button
                             key={s.id}
-                            onClick={async () => {
-                              const loaded = await loadSession(s.id);
-                              applyLoadedSession(loaded);
+                            onClick={() => {
+                              applyLoadedSession(s);
+                              void loadSession(s.id, { seedSession: s });
                             }}
                             className={`w-full text-left rounded-lg p-2.5 transition-all ${
                               isCurrent
@@ -1374,6 +1376,9 @@ export default function ImageGenPage({
                                   )}
                                 </div>
                               </div>
+                              {isSessionLoading && (
+                                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/70" />
+                              )}
                             </div>
                           </button>
                         );
