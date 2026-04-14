@@ -38,9 +38,9 @@ class AnalyticsAgentFactory(SubAgentFactory):
     @property
     def tool_description(self) -> str:
         return (
-            "Google Analytics 4とSearch Consoleのデータ分析を実行。"
+            "Google Analytics 4、Search Console、LP流入スプレッドシートSSoTのデータ分析を実行。"
             "トラフィック分析、検索パフォーマンス、URLインスペクション、"
-            "リアルタイムレポート、期間比較などを担当。"
+            "LP CV数、有効リード、TCV、面談予約、ファネル比較などを担当。"
         )
 
     def _get_domain_tools(
