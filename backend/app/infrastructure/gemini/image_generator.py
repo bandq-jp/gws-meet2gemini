@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, Dict, List, Optional
 
+import httpx
 from google import genai
 from google.genai import types
 from google.genai.types import HttpOptions, HttpRetryOptions
@@ -40,7 +42,9 @@ SUPPORTED_IMAGE_SIZES = ["1K", "2K", "4K"]
 # SDK組み込みの tenacity ベース指数バックオフで自動リトライする。
 # attempts=5, 指数バックオフ+ジッタ: 2s → 4s → 8s → 16s (max 30s)
 # リトライ対象: 408(Timeout), 429(Rate Limit), 500/502/503/504(一時的サーバーエラー)
-_IMAGE_GEN_TIMEOUT_MS = 300_000  # 5分 (4K生成は30秒以上かかるため余裕を持たせる)
+# ★Timeoutを長くする理由: 4K + refs=4 の重い生成は5分超も起こり得る。Cloud Run
+#   のrequest timeout(900s=15分)との間に十分マージンを残した600s(10分)を採用。
+_IMAGE_GEN_TIMEOUT_MS = 600_000  # 10分
 _IMAGE_GEN_RETRY_OPTIONS = HttpRetryOptions(
     attempts=5,
     initial_delay=2.0,
@@ -49,6 +53,32 @@ _IMAGE_GEN_RETRY_OPTIONS = HttpRetryOptions(
     jitter=1.0,
     http_status_codes=[408, 429, 500, 502, 503, 504],
 )
+
+# SDKのリトライは `errors.APIError` サブクラスしか拾わない。
+# httpx のネットワーク系例外（ReadTimeout/ConnectError等）は素通りして500になるため、
+# アプリ層で1回だけ再試行する（重複生成を避けるため回数は絞る）。
+_TRANSIENT_NETWORK_ERRORS = (
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    httpx.WriteTimeout,
+    httpx.PoolTimeout,
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.RemoteProtocolError,
+)
+
+
+def _send_with_transient_retry(chat, parts):
+    """chat.send_message を呼び、ネットワーク一時障害時のみ1回再試行する。"""
+    try:
+        return chat.send_message(parts)
+    except _TRANSIENT_NETWORK_ERRORS as e:
+        logger.warning(
+            "Transient network error on chat.send_message (%s). Retrying once after 5s.",
+            type(e).__name__,
+        )
+        time.sleep(5.0)
+        return chat.send_message(parts)
 
 
 @dataclass
@@ -245,7 +275,7 @@ class GeminiImageGenerator:
             history=history,
         )
 
-        response = chat.send_message(current_parts)
+        response = _send_with_transient_retry(chat, current_parts)
 
         latency_ms = int((perf_counter() - t0) * 1000)
 

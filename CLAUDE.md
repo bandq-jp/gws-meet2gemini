@@ -125,10 +125,22 @@
 ### 画像生成 503 UNAVAILABLE 自動リトライ対応 (2026-04-17)
 - **症状**: `gemini-3.1-flash-image-preview` が高負荷時に `503 UNAVAILABLE` を返し、画像生成が失敗。2026-04-10/04-11/04-17 と継続発生（refs=4, size=4K, ratio=auto で約33秒後に503、`"This model is currently experiencing high demand"`）
 - **根本原因**: `genai.Client()` 初期化時にリトライ設定なし。SDKデフォルトは `stop_after_attempt(1)`（=リトライなし）
-- **修正**: `image_generator.py` の Client 初期化で `HttpOptions(retry_options=HttpRetryOptions(...))` を指定。attempts=5, initial_delay=2s, max_delay=30s, exp_base=2, jitter=1, http_status_codes=[408,429,500,502,503,504]、HTTP timeout=300秒
+- **修正**: `image_generator.py` の Client 初期化で `HttpOptions(retry_options=HttpRetryOptions(...))` を指定。attempts=5, initial_delay=2s, max_delay=30s, exp_base=2, jitter=1, http_status_codes=[408,429,500,502,503,504]
 - **SDK仕様**: `google-genai` v1.68.0 の `HttpRetryOptions` は tenacity ベース。Client レベルで設定すると `chat.send_message()` 経由でも同じリトライが有効（`_api_client.py` L758 `self._retry = tenacity.Retrying(**retry_kwargs)`）
 - **検証**: モックで503×2を返すシミュレーション→3回目で成功。指数バックオフ+ジッタで ~2.6s → ~4.6s の遅延、SDKログに `"Retrying ... as it raised ServerError: 503"` が自動出力
 - **教訓**: `genai.Client()` はデフォルトでリトライしない。503/429/504など一時的エラーが想定される本番APIコールでは `HttpRetryOptions` 必須。画像/動画など高負荷モデル呼び出しには特に重要
+
+### 画像生成 ReadTimeout 対応 & Timeout延長 (2026-04-17 追補)
+- **症状**: 503対応デプロイ後、本番で `httpx.ReadTimeout: The read operation timed out` が発生（refs=4, size=4Kで5分ちょうどで500返却）。画像生成は続くが接続が切れる
+- **根本原因1**: 初期設定 Timeout=300秒(5分)が、4K+refs=4の高負荷時の応答時間(〜10分)に不足
+- **根本原因2**: SDKの `HttpRetryOptions` は `retry_if_exception: isinstance(e, errors.APIError)` でステータスコード判定のためリトライするが、**`httpx.ReadTimeout` は `errors.APIError` のサブクラスではないためリトライ対象外**
+- **修正**:
+  1. `_IMAGE_GEN_TIMEOUT_MS = 600_000` (10分) に延長。Cloud Run request timeout (900秒) との間に5分のマージン確保
+  2. `_send_with_transient_retry()` ヘルパを追加し、`httpx.{ReadTimeout,ConnectTimeout,WriteTimeout,PoolTimeout,ConnectError,ReadError,RemoteProtocolError}` を1回だけ独自に再試行
+  3. `chat.send_message()` 呼び出し箇所を `_send_with_transient_retry(chat, current_parts)` に置き換え
+- **検証**: ユニットテスト (ReadTimeout→2回目成功 / ConnectError→2回目成功 / 2連続失敗→raise) 全合格。実機で1K画像生成16.4秒成功、`http_options.timeout=600000ms` → `http_request.timeout=600.0s` がSDK内で確認
+- **教訓**: SDK組み込みリトライは HTTP ステータス系のみ。ネットワーク層 (httpx/aiohttp) の一時エラーはアプリ層で別途ハンドリングが必要
+- **教訓**: 画像/動画生成のような高負荷APIはCloud Run timeout直前までtimeoutマージンを取る。Gemini側が10分近く応答を返さないケースは実在する
 
 ### Zoho CRM ファネル指標修正 (2026-03-30)
 - **根本原因**: 面談実施数を `customer_status = "4. 面談済み"` で数えていたが、ステータスが先に進んだ人（提案中、内定、入社）やクローズされた人が漏れていた。修正前96人→修正後2,636人（27.5倍の差）
