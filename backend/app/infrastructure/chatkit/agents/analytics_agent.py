@@ -113,9 +113,9 @@ class AnalyticsAgentFactory(SubAgentFactory):
             )
 
         # LP analytics function tools (spreadsheet SSoT)
-        if self._settings.lp_spreadsheet_id:
-            from app.infrastructure.chatkit.lp_analytics_tools import CHATKIT_LP_ANALYTICS_TOOLS
-            tools.extend(CHATKIT_LP_ANALYTICS_TOOLS)
+        # スプシIDはsettings.pyで既定値を持つため常に登録する。
+        from app.infrastructure.chatkit.lp_analytics_tools import CHATKIT_LP_ANALYTICS_TOOLS
+        tools.extend(CHATKIT_LP_ANALYTICS_TOOLS)
 
         return tools
 

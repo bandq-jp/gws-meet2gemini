@@ -63,10 +63,10 @@ class AnalyticsAgentFactory(SubAgentFactory):
             tools.extend(mcp_servers)
 
         # LP analytics function tools (spreadsheet SSoT)
-        if self._settings.lp_spreadsheet_id:
-            from app.infrastructure.adk.tools.lp_analytics_tools import ADK_LP_ANALYTICS_TOOLS
-            tools.extend(ADK_LP_ANALYTICS_TOOLS)
-            logger.info("[AnalyticsAgent] LP analytics tools added (%d)", len(ADK_LP_ANALYTICS_TOOLS))
+        # スプシIDはsettings.pyで既定値を持つため常に登録する。
+        from app.infrastructure.adk.tools.lp_analytics_tools import ADK_LP_ANALYTICS_TOOLS
+        tools.extend(ADK_LP_ANALYTICS_TOOLS)
+        logger.info("[AnalyticsAgent] LP analytics tools added (%d)", len(ADK_LP_ANALYTICS_TOOLS))
 
         return tools
 

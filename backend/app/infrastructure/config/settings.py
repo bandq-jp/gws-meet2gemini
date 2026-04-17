@@ -181,7 +181,12 @@ class Settings:
     company_db_cache_ttl: int = int(os.getenv("COMPANY_DB_CACHE_TTL", "300"))
 
     # LP流入スプレッドシート (SSoT for LP CV data)
-    lp_spreadsheet_id: str = os.getenv("LP_SPREADSHEET_ID", "")
+    # デフォルトIDはLP申込フォーム用スプシ（SAアクセス: bandq-dx@bandq-dx.iam.gserviceaccount.com）。
+    # 環境変数 LP_SPREADSHEET_ID で上書き可能。ツール自体は常にエージェントへ登録される。
+    lp_spreadsheet_id: str = os.getenv(
+        "LP_SPREADSHEET_ID",
+        "12oRSU23GWBvJ5QD74QGNkRxlESQYmJM_U6YQsXeb7V8",
+    )
     lp_sheet_responses02: str = os.getenv("LP_SHEET_RESPONSES02", "responses02")
     lp_sheet_interview: str = os.getenv("LP_SHEET_INTERVIEW", "面談予約")
     lp_cache_ttl: int = int(os.getenv("LP_CACHE_TTL", "300"))

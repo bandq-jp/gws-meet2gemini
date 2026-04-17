@@ -154,6 +154,16 @@
 - **環境変数**: `LP_SPREADSHEET_ID=12oRSU23GWBvJ5QD74QGNkRxlESQYmJM_U6YQsXeb7V8`
 - **SAアクセス**: `bandq-dx@bandq-dx.iam.gserviceaccount.com` をスプシに閲覧者共有
 
+### LP CVツール常時登録 + 範囲フィルタバグ修正 (2026-04-17)
+- **症状**: マーケティングチャットで「CV値についてget_lpツールで教えて」と聞くと「このツールは使えません」と返答。Cloud Run の `LP_SPREADSHEET_ID` 環境変数が未設定で、3箇所のファクトリで `if self._settings.lp_spreadsheet_id:` ガードによりツール未登録だった
+- **修正1 (ツール常時登録)**:
+  - `settings.py` の `lp_spreadsheet_id` にデフォルト値 `12oRSU23GWBvJ5QD74QGNkRxlESQYmJM_U6YQsXeb7V8` を埋め込み
+  - `seo_agent_factory.py` / `chatkit/agents/analytics_agent.py` / `adk/agents/analytics_agent.py` の条件分岐を削除し、LPツールは無条件に登録
+- **修正2 (日付フィルタバグ)**: `_filter_by_period` と `get_lp_interview_bookings` で `timestamp[:10]` を文字列比較していたが、スプシのタイムスタンプは `2026/04/17 11:48:33` のスラッシュ区切りで、`date_from="2026-04-01"` と比較すると `"/" (0x2F) > "-" (0x2D)` により全件除外される重大バグ。`_normalize_date()` ヘルパで `/` → `-` に正規化してから比較
+- **検証**: 2026-04-01〜04-17 の範囲で実スプシから 134件(test除外後)、meta 111件、有効リード109 (81.3%)、TCV 69 (51.5%)、面談予約 54 (40.3%) を正しく取得
+- **教訓**: 業務重要ツールは環境変数ガードで無効化せず、必要な設定はコード側のデフォルト値で保証する（スプシIDはSA共有が前提なので公開でも問題なし）
+- **教訓**: 日付フィルタは文字列比較する前に必ず区切り文字を正規化する。スプシ/GAS由来のタイムスタンプはスラッシュ区切りが多い
+
 ---
 
 ## 自己改善ログ（教訓集）

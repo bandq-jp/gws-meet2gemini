@@ -55,18 +55,31 @@ def _parse_ym(timestamp: str) -> str:
     return ""
 
 
+def _normalize_date(ts: str) -> str:
+    """タイムスタンプの先頭日付部分を YYYY-MM-DD 形式に正規化する。
+
+    スプシのタイムスタンプは `2026/04/17 11:48:33` のようにスラッシュ区切りのため
+    文字列比較では `2026-04-17` と一致せず、範囲フィルタが誤動作する。
+    """
+    if not ts:
+        return ""
+    head = ts[:10]
+    # "2026/04/17" → "2026-04-17"、"2026-04-17" はそのまま
+    return head.replace("/", "-")
+
+
 def _filter_by_period(
     rows: List[Dict[str, Any]],
     date_from: Optional[str],
     date_to: Optional[str],
 ) -> List[Dict[str, Any]]:
-    """日付範囲でフィルタ (YYYY-MM-DD)."""
+    """日付範囲でフィルタ (YYYY-MM-DD)。タイムスタンプはスラッシュ/ハイフンどちらでも可。"""
     if not date_from and not date_to:
         return rows
 
     result = []
     for row in rows:
-        ts = row.get("timestamp", "")[:10]
+        ts = _normalize_date(row.get("timestamp", ""))
         if date_from and ts < date_from:
             continue
         if date_to and ts > date_to:
@@ -248,7 +261,7 @@ def get_lp_interview_bookings(
         total = 0
 
         for b in bookings:
-            dt = b.get("datetime", "")[:10]
+            dt = _normalize_date(b.get("datetime", ""))
             if date_from and dt < date_from:
                 continue
             if date_to and dt > date_to:

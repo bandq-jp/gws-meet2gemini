@@ -250,9 +250,10 @@ class MarketingAgentFactory:
             tools.extend(CANDIDATE_INSIGHT_TOOLS)
 
         # LP流入分析ツール（スプレッドシートSSoT直読み）
-        if self._settings.lp_spreadsheet_id:
-            from app.infrastructure.chatkit.lp_analytics_tools import CHATKIT_LP_ANALYTICS_TOOLS
-            tools.extend(CHATKIT_LP_ANALYTICS_TOOLS)
+        # スプシIDはsettings.pyで既定値を持つため常に登録する。
+        # IDが空の場合はツール実行時にエラー応答を返す（LPSheetsService側で警告済み）。
+        from app.infrastructure.chatkit.lp_analytics_tools import CHATKIT_LP_ANALYTICS_TOOLS
+        tools.extend(CHATKIT_LP_ANALYTICS_TOOLS)
 
         reasoning_effort = (
             asset.get("reasoning_effort") if asset else self._settings.marketing_reasoning_effort
