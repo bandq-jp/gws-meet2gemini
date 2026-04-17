@@ -122,6 +122,14 @@
 - **教訓**: Gemini画像生成はchat APIでThought Signatureを自動管理。`generate_content` 直接呼びではマルチターンの文脈が失われる
 - **教訓**: Gemini画像生成の `system_instruction` は `GenerateContentConfig` のパラメータとして渡す（contentsに混ぜない）
 
+### 画像生成 503 UNAVAILABLE 自動リトライ対応 (2026-04-17)
+- **症状**: `gemini-3.1-flash-image-preview` が高負荷時に `503 UNAVAILABLE` を返し、画像生成が失敗。2026-04-10/04-11/04-17 と継続発生（refs=4, size=4K, ratio=auto で約33秒後に503、`"This model is currently experiencing high demand"`）
+- **根本原因**: `genai.Client()` 初期化時にリトライ設定なし。SDKデフォルトは `stop_after_attempt(1)`（=リトライなし）
+- **修正**: `image_generator.py` の Client 初期化で `HttpOptions(retry_options=HttpRetryOptions(...))` を指定。attempts=5, initial_delay=2s, max_delay=30s, exp_base=2, jitter=1, http_status_codes=[408,429,500,502,503,504]、HTTP timeout=300秒
+- **SDK仕様**: `google-genai` v1.68.0 の `HttpRetryOptions` は tenacity ベース。Client レベルで設定すると `chat.send_message()` 経由でも同じリトライが有効（`_api_client.py` L758 `self._retry = tenacity.Retrying(**retry_kwargs)`）
+- **検証**: モックで503×2を返すシミュレーション→3回目で成功。指数バックオフ+ジッタで ~2.6s → ~4.6s の遅延、SDKログに `"Retrying ... as it raised ServerError: 503"` が自動出力
+- **教訓**: `genai.Client()` はデフォルトでリトライしない。503/429/504など一時的エラーが想定される本番APIコールでは `HttpRetryOptions` 必須。画像/動画など高負荷モデル呼び出しには特に重要
+
 ### Zoho CRM ファネル指標修正 (2026-03-30)
 - **根本原因**: 面談実施数を `customer_status = "4. 面談済み"` で数えていたが、ステータスが先に進んだ人（提案中、内定、入社）やクローズされた人が漏れていた。修正前96人→修正後2,636人（27.5倍の差）
 - **修正内容**: `field29`（面談日フィールド）が `NOT NULL` のレコードをカウントする方式に変更。クローズ（4,154件中2,113件が面談済み）も正確にカウントされる

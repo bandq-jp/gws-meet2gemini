@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 
 from google import genai
 from google.genai import types
+from google.genai.types import HttpOptions, HttpRetryOptions
 
 from app.infrastructure.config.settings import get_settings
 
@@ -33,6 +34,21 @@ SUPPORTED_ASPECT_RATIOS = [
 ]
 
 SUPPORTED_IMAGE_SIZES = ["1K", "2K", "4K"]
+
+# 画像生成APIのリトライ設定
+# gemini-3.1-flash-image-preview は高負荷時に 503 UNAVAILABLE を返すため、
+# SDK組み込みの tenacity ベース指数バックオフで自動リトライする。
+# attempts=5, 指数バックオフ+ジッタ: 2s → 4s → 8s → 16s (max 30s)
+# リトライ対象: 408(Timeout), 429(Rate Limit), 500/502/503/504(一時的サーバーエラー)
+_IMAGE_GEN_TIMEOUT_MS = 300_000  # 5分 (4K生成は30秒以上かかるため余裕を持たせる)
+_IMAGE_GEN_RETRY_OPTIONS = HttpRetryOptions(
+    attempts=5,
+    initial_delay=2.0,
+    max_delay=30.0,
+    exp_base=2.0,
+    jitter=1.0,
+    http_status_codes=[408, 429, 500, 502, 503, 504],
+)
 
 
 @dataclass
@@ -131,7 +147,13 @@ class GeminiImageGenerator:
             raise ValueError(
                 "Gemini API key is required. Set GEMINI_API_KEY or GOOGLE_API_KEY."
             )
-        self.client = genai.Client(api_key=key)
+        self.client = genai.Client(
+            api_key=key,
+            http_options=HttpOptions(
+                timeout=_IMAGE_GEN_TIMEOUT_MS,
+                retry_options=_IMAGE_GEN_RETRY_OPTIONS,
+            ),
+        )
 
     def generate(
         self,
