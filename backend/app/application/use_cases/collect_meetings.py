@@ -19,12 +19,14 @@ class CollectMeetingsUseCase:
         include_structure: bool = False,
         force_update: bool = False,
         job_id: Optional[str] = None,
+        since_days: Optional[int] = None,
     ) -> None:
         logger.info(
-            "CollectMeetingsUseCase started: accounts=%s include_structure=%s force_update=%s",
+            "CollectMeetingsUseCase started: accounts=%s include_structure=%s force_update=%s since_days=%s",
             accounts,
             include_structure,
             force_update,
+            since_days,
         )
         try:
             settings = get_settings()
@@ -41,12 +43,23 @@ class CollectMeetingsUseCase:
             repo = MeetingRepositoryImpl()
 
             collected = []
+            collect_errors: List[str] = []
             for collector in collectors:
-                collected.extend(
-                    await collector.collect_meeting_docs(
-                        accounts, include_structure=include_structure
+                # 片方のソース障害でもう片方まで止めない(both運用時の隔離)
+                try:
+                    collected.extend(
+                        await collector.collect_meeting_docs(
+                            accounts,
+                            include_structure=include_structure,
+                            since_days=since_days,
+                        )
                     )
-                )
+                except Exception as e:
+                    name = type(collector).__name__
+                    collect_errors.append(f"{name}: {e}")
+                    logger.exception("Collector failed (continuing with others): %s", name)
+            if collect_errors and not collected:
+                raise RuntimeError("; ".join(collect_errors))
             logger.info("Collected meetings from Drive: %d", len(collected))
             if job_id:
                 JobTracker.update(job_id, collected=len(collected))

@@ -24,6 +24,7 @@ async def collect_meetings(
     accounts: Optional[List[str]] = Query(default=None),
     include_structure: bool = Query(default=False),
     force_update: bool = Query(default=False),
+    since_days: Optional[int] = Query(default=None, description="増分収集ウィンドウ(日)。未指定はMEETING_SINCE_DAYS、0以下で全件"),
 ):
     """Kick off meeting collection in the background and return immediately."""
     use_case = CollectMeetingsUseCase()
@@ -53,6 +54,7 @@ async def collect_meetings(
                     include_structure=include_structure,
                     force_update=force_update,
                     job_id=job_id,
+                    since_days=since_days,
                 )
             except Exception as e:  # pragma: no cover
                 logger.exception("Background collect failed: %s", e)
@@ -169,6 +171,7 @@ async def enqueue_collect_meetings(
     accounts: Optional[List[str]] = Query(default=None),
     include_structure: bool = Query(default=False),
     force_update: bool = Query(default=False),
+    since_days: Optional[int] = Query(default=None, description="増分収集ウィンドウ(日)。未指定はMEETING_SINCE_DAYS、0以下で全件"),
 ):
     """
     収集処理をCloud Tasksへエンキューする新エンドポイント。
@@ -191,6 +194,7 @@ async def enqueue_collect_meetings(
         "accounts": accounts or [],
         "include_structure": include_structure,
         "force_update": force_update,
+        "since_days": since_days,
     }
 
     task_name = None  # 連続実行の重複を抑止したい場合は日付ベースのnameを付ける
@@ -213,6 +217,7 @@ class CollectWorkerIn(BaseModel):
     accounts: Optional[List[str]] = None
     include_structure: bool = False
     force_update: bool = False
+    since_days: Optional[int] = None
 
 @router.post("/collect/worker", status_code=204)
 async def collect_worker(request: Request, body: CollectWorkerIn = Body(...)):
@@ -240,6 +245,7 @@ async def collect_worker(request: Request, body: CollectWorkerIn = Body(...)):
             include_structure=body.include_structure,
             force_update=body.force_update,
             job_id=body.job_id,
+            since_days=body.since_days,
         )
         # UseCase 側で JobTracker.mark_success/failed まで面倒をみてくれる
         # （途中メトリクス更新もUseCase内で済む）

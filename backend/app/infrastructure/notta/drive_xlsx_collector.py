@@ -37,6 +37,7 @@ class NottaDriveXlsxCollector:
         accounts: Optional[List[str]] = None,
         include_structure: bool = False,
         skip_failed_exports: bool = False,
+        since_days: Optional[int] = None,
     ) -> List[MeetingDocument]:
         subject = self._resolve_subject(accounts)
         if not subject:
@@ -44,7 +45,9 @@ class NottaDriveXlsxCollector:
 
         import asyncio
 
-        return await asyncio.to_thread(self._collect_for_subject_sync, subject, skip_failed_exports)
+        return await asyncio.to_thread(
+            self._collect_for_subject_sync, subject, skip_failed_exports, since_days
+        )
 
     def list_shared_drives(self) -> List[Dict[str, Any]]:
         subject = self._resolve_subject(None)
@@ -100,7 +103,30 @@ class NottaDriveXlsxCollector:
                 break
         return folders
 
-    def _collect_for_subject_sync(self, subject: str, skip_failed_exports: bool) -> List[MeetingDocument]:
+    def _resolve_since_iso(self, since_days: Optional[int]) -> Optional[str]:
+        """増分収集の起点(RFC3339)。since_days<=0 で全件(従来挙動)。
+
+        フォルダが肥大化(2026/07時点で5,700件超)し、毎回全件ダウンロードすると
+        実行が完走できずBrokenPipeで死ぬ障害が起きたため(2026/06/05以降保存ゼロ)、
+        既定は直近数日の差分のみ処理する。バックフィルは since_days を大きくして呼ぶ。
+        """
+        from datetime import datetime, timedelta, timezone
+
+        days = since_days if since_days is not None else self.settings.meeting_since_days
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = 0
+        if days <= 0:
+            return None
+        return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _collect_for_subject_sync(
+        self,
+        subject: str,
+        skip_failed_exports: bool,
+        since_days: Optional[int] = None,
+    ) -> List[MeetingDocument]:
         self.logger.debug("Start Notta collection subject=%s", subject)
         drive = self._build_drive(subject)
 
@@ -129,31 +155,55 @@ class NottaDriveXlsxCollector:
                 "NOTTA_FOLDER_ID is not set. Use /api/v1/meetings/notta/drives and /api/v1/meetings/notta/folders to discover."
             )
 
-        files = self._list_xlsx_files(drive, folder_id)
+        since_iso = self._resolve_since_iso(since_days)
+        files = self._list_xlsx_files(drive, folder_id, since_iso=since_iso)
         results: List[MeetingDocument] = []
+        failed = 0
         for f in files:
-            try:
-                data = self._download_xlsx(drive, f)
-                parsed = self.parser.parse(data, f.get("name"))
-                meeting = MeetingDocument(
-                    id=None,
-                    doc_id=f["id"],
-                    title=parsed.title or f.get("name"),
-                    meeting_datetime=parsed.meeting_datetime or f.get("modifiedTime"),
-                    organizer_email=self.settings.notta_organizer_email,
-                    organizer_name=None,
-                    document_url=f.get("webViewLink"),
-                    invited_emails=[],
-                    text_content=parsed.text_content,
-                    metadata=self._build_metadata(f, parsed),
+            # 1ファイルの失敗でラン全体を殺さない(従来はraiseで全滅→2026/06/05以降
+            # 30分毎のジョブが毎回1件も保存できない状態が続いた)。
+            # ネットワーク断(BrokenPipe等)はDriveクライアントを作り直してリトライする。
+            parsed = None
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    data = self._download_xlsx(drive, f)
+                    parsed = self.parser.parse(data, f.get("name"))
+                    break
+                except (BrokenPipeError, ConnectionError, TimeoutError, OSError) as e:
+                    last_error = e
+                    self.logger.warning(
+                        "Transient network error (attempt %d/3) id=%s name=%s error=%s — rebuilding Drive client",
+                        attempt + 1, f.get("id"), f.get("name"), e,
+                    )
+                    drive = self._build_drive(subject)
+                except Exception as e:
+                    last_error = e
+                    break
+            if parsed is None:
+                failed += 1
+                self.logger.error(
+                    "Failed to fetch/parse Notta xlsx id=%s name=%s error=%s (skipped)",
+                    f.get("id"), f.get("name"), last_error,
                 )
-                results.append(meeting)
-            except Exception as e:
-                self.logger.error("Failed to parse Notta xlsx id=%s name=%s error=%s", f.get("id"), f.get("name"), e)
-                if skip_failed_exports:
-                    continue
-                raise
-        self.logger.debug("Finished Notta collection total=%d", len(results))
+                continue
+            meeting = MeetingDocument(
+                id=None,
+                doc_id=f["id"],
+                title=parsed.title or f.get("name"),
+                meeting_datetime=parsed.meeting_datetime or f.get("modifiedTime"),
+                organizer_email=self.settings.notta_organizer_email,
+                organizer_name=None,
+                document_url=f.get("webViewLink"),
+                invited_emails=[],
+                text_content=parsed.text_content,
+                metadata=self._build_metadata(f, parsed),
+            )
+            results.append(meeting)
+        self.logger.info(
+            "Finished Notta collection: collected=%d failed=%d since=%s",
+            len(results), failed, since_iso or "(all)",
+        )
         return results
 
     def _find_folder_by_name(
@@ -187,13 +237,18 @@ class NottaDriveXlsxCollector:
                 break
         return folders
 
-    def _list_xlsx_files(self, drive, folder_id: str) -> List[Dict[str, Any]]:
+    def _list_xlsx_files(
+        self, drive, folder_id: str, since_iso: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         files: List[Dict[str, Any]] = []
         page_token = None
         query = (
             f"'{folder_id}' in parents and trashed=false and "
             f"(mimeType='{_XLSX_MIME}' or mimeType='{_SHEET_MIME}')"
         )
+        if since_iso:
+            # 増分収集: Drive側でフィルタし、全件リスト+全件ダウンロードを避ける
+            query += f" and createdTime > '{since_iso}'"
         while True:
             resp = (
                 drive.files()

@@ -35,6 +35,10 @@ class Settings:
     impersonate_subjects: list[str] = [s.strip() for s in os.getenv("GOOGLE_SUBJECT_EMAILS", "").split(",") if s.strip()]
     # Meeting source switch (google_docs / notta / both)
     meeting_source: str = os.getenv("MEETING_SOURCE", "google_docs")
+    # 増分収集の既定ウィンドウ(日)。0以下で全件(従来挙動)。
+    # フォルダ肥大化(Notta 5,700件超)で毎回の全件ダウンロードが完走不能になり
+    # 2026/06/05以降保存ゼロが続いた障害の恒久対策。バックフィルはAPIのsince_daysで上書き。
+    meeting_since_days: int = int(os.getenv("MEETING_SINCE_DAYS", "3") or "3")
 
     # Notta (shared drive xlsx)
     notta_drive_id: str = os.getenv("NOTTA_DRIVE_ID", "")
