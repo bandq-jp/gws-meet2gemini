@@ -124,19 +124,12 @@ class GeminiClient:
         settings = get_settings()
         primary = model_override or self.model
         
-        # 環境変数ベースのフォールバックモデル決定
-        # プライマリモデルに対応するフォールバックモデルを決定
-        fallback_model = None
-        if "pro" in primary.lower():
-            # proモデルの場合は設定されたfallbackモデルを使用
-            fallback_model = settings.gemini_fallback_model
-        elif "flash" in primary.lower():
-            # flashモデルの場合はフォールバックなし（既に軽量モデル）
-            fallback_model = None
-        else:
-            # その他のモデルの場合も設定されたfallbackモデルを使用
-            fallback_model = settings.gemini_fallback_model
-            
+        # 環境変数ベースのフォールバックモデル決定。
+        # 以前は「flashモデルはフォールバックなし」としていたが、2026/07/09に
+        # gemini-2.5-flash-lite が予告より早く一時的に404を返す事故が実際に起きたため、
+        # 軽量モデルでも設定されたフォールバックを常に適用する（可用性の保険）。
+        fallback_model = settings.gemini_fallback_model or None
+
         models_to_try = [primary]
         if fallback_model and fallback_model != primary:
             models_to_try.append(fallback_model)

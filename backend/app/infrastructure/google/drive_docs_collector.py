@@ -26,7 +26,7 @@ class DriveDocsCollector:
         self.settings = get_settings()
         self.logger = logging.getLogger(__name__)
 
-    async def collect_meeting_docs(self, accounts: Optional[List[str]] = None, include_structure: bool = False, skip_failed_exports: bool = False) -> List[MeetingDocument]:
+    async def collect_meeting_docs(self, accounts: Optional[List[str]] = None, include_structure: bool = False, skip_failed_exports: bool = False, since_days: Optional[int] = None) -> List[MeetingDocument]:
         subjects = accounts or self.settings.impersonate_subjects
         self.logger.debug("collect_meeting_docs: subjects=%s include_structure=%s", subjects, include_structure)
         results: List[MeetingDocument] = []
@@ -36,7 +36,7 @@ class DriveDocsCollector:
         import asyncio
         async def _run_one(subject: str) -> Tuple[str, List[MeetingDocument] | Exception]:
             try:
-                return subject, await asyncio.to_thread(self._collect_for_account_sync, subject, skip_failed_exports)
+                return subject, await asyncio.to_thread(self._collect_for_account_sync, subject, skip_failed_exports, since_days)
             except Exception as e:
                 return subject, e
 
@@ -53,7 +53,20 @@ class DriveDocsCollector:
             self.logger.warning("Skipped accounts: %s", ", ".join(skipped_accounts))
         return results
 
-    def _collect_for_account_sync(self, subject: str, skip_failed_exports: bool = False) -> List[MeetingDocument]:
+    def _resolve_since_iso(self, since_days: Optional[int]) -> Optional[str]:
+        """増分収集の起点(RFC3339)。since_days<=0 で全件(従来挙動)。"""
+        from datetime import datetime, timedelta, timezone
+
+        days = since_days if since_days is not None else self.settings.meeting_since_days
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            days = 0
+        if days <= 0:
+            return None
+        return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _collect_for_account_sync(self, subject: str, skip_failed_exports: bool = False, since_days: Optional[int] = None) -> List[MeetingDocument]:
         """Blocking collection logic for a single account, safe to run in a thread."""
         self.logger.debug("Start collecting for subject=%s (sync)", subject)
         try:
@@ -66,10 +79,12 @@ class DriveDocsCollector:
                 self.logger.warning("No 'Meet Recordings' folder found for subject=%s", subject)
                 return []
 
+            since_iso = self._resolve_since_iso(since_days)
             results: List[MeetingDocument] = []
+            failed = 0
             for fid in meet_folders:
                 self.logger.debug("Scanning folder id=%s name=%s", fid, folders.get(fid, {}).get("name"))
-                files = self._list_files_in_folder(drive, fid)
+                files = self._list_files_in_folder(drive, fid, since_iso=since_iso)
                 self.logger.debug("Files in folder=%d", len(files))
                 for f in files:
                     mime = f.get("mimeType")
@@ -77,43 +92,54 @@ class DriveDocsCollector:
                     if mime != "application/vnd.google-apps.document":
                         self.logger.debug("Skip non-Google Doc id=%s", f.get("id"))
                         continue
-                    
-                    # テキスト取得を試行
-                    text = self._export_doc_as_text(drive, f["id"])
-                    if text is None:  # エラーが発生した場合はNoneが返される
-                        self.logger.warning("Failed to export doc as text id=%s name=%s", f.get("id"), f.get("name"))
-                        if skip_failed_exports:
-                            self.logger.info("Skipping document due to text export failure id=%s name=%s", f.get("id"), f.get("name"))
-                            continue
-                        text = ""  # スキップしない場合は空文字列で継続
-                    
-                    self.logger.debug("Exported text length id=%s len=%d", f.get("id"), len(text))
-                    invited = self._get_invited_emails(drive, f["id"]) or []
-                    self.logger.debug("Invited emails count id=%s count=%d", f.get("id"), len(invited))
-                    organizer_name = None
-                    if isinstance(f.get("owners"), list) and f["owners"]:
-                        owner = f["owners"][0]
-                        organizer_name = owner.get("displayName")
-                    title = f.get("name")
-                    meeting_dt = self._parse_meeting_datetime(title) or f.get("modifiedTime")
-                    if meeting_dt == f.get("modifiedTime"):
-                        self.logger.debug("Datetime parsed from modifiedTime id=%s", f.get("id"))
-                    else:
-                        self.logger.debug("Datetime parsed from title id=%s", f.get("id"))
-                    meeting = MeetingDocument(
-                        id=None,
-                        doc_id=f["id"],
-                        title=title,
-                        meeting_datetime=meeting_dt,
-                        organizer_email=subject,
-                        organizer_name=organizer_name,
-                        document_url=f.get("webViewLink"),
-                        invited_emails=invited,
-                        text_content=text,
-                        metadata=f,
-                    )
-                    results.append(meeting)
-            self.logger.debug("Finished subject=%s collected=%d", subject, len(results))
+                    # 1ファイルの失敗でアカウント全体の収集を殺さない
+                    try:
+                        # テキスト取得を試行
+                        text = self._export_doc_as_text(drive, f["id"])
+                        if text is None:  # エラーが発生した場合はNoneが返される
+                            self.logger.warning("Failed to export doc as text id=%s name=%s", f.get("id"), f.get("name"))
+                            if skip_failed_exports:
+                                self.logger.info("Skipping document due to text export failure id=%s name=%s", f.get("id"), f.get("name"))
+                                continue
+                            text = ""  # スキップしない場合は空文字列で継続
+
+                        self.logger.debug("Exported text length id=%s len=%d", f.get("id"), len(text))
+                        invited = self._get_invited_emails(drive, f["id"]) or []
+                        self.logger.debug("Invited emails count id=%s count=%d", f.get("id"), len(invited))
+                        organizer_name = None
+                        if isinstance(f.get("owners"), list) and f["owners"]:
+                            owner = f["owners"][0]
+                            organizer_name = owner.get("displayName")
+                        title = f.get("name")
+                        meeting_dt = self._parse_meeting_datetime(title) or f.get("modifiedTime")
+                        if meeting_dt == f.get("modifiedTime"):
+                            self.logger.debug("Datetime parsed from modifiedTime id=%s", f.get("id"))
+                        else:
+                            self.logger.debug("Datetime parsed from title id=%s", f.get("id"))
+                        meeting = MeetingDocument(
+                            id=None,
+                            doc_id=f["id"],
+                            title=title,
+                            meeting_datetime=meeting_dt,
+                            organizer_email=subject,
+                            organizer_name=organizer_name,
+                            document_url=f.get("webViewLink"),
+                            invited_emails=invited,
+                            text_content=text,
+                            metadata=f,
+                        )
+                        results.append(meeting)
+                    except Exception as e:
+                        failed += 1
+                        self.logger.error(
+                            "Failed to collect doc id=%s name=%s subject=%s error=%s (skipped)",
+                            f.get("id"), f.get("name"), subject, e,
+                        )
+                        continue
+            self.logger.info(
+                "Finished subject=%s collected=%d failed=%d since=%s",
+                subject, len(results), failed, since_iso or "(all)",
+            )
             return results
         except (RefreshError, HttpError) as e:
             self.logger.warning("Auth/API error for subject=%s: %s", subject, e)
@@ -175,13 +201,17 @@ class DriveDocsCollector:
                 break
         return folders
 
-    def _list_files_in_folder(self, drive, folder_id: str):
+    def _list_files_in_folder(self, drive, folder_id: str, since_iso: Optional[str] = None):
         files: list[Dict[str, Any]] = []
         page_token = None
+        base_q = f"'{folder_id}' in parents and trashed=false"
+        if since_iso:
+            # 増分収集: Drive側でフィルタし、全件エクスポートを避ける
+            base_q += f" and createdTime > '{since_iso}'"
         while True:
             resp = (
                 drive.files().list(
-                    q=f"'{folder_id}' in parents and trashed=false",
+                    q=base_q,
                     fields=("nextPageToken, files(id,name,mimeType,createdTime,modifiedTime,owners(emailAddress,displayName),webViewLink)"),
                     pageSize=1000,
                     corpora="allDrives",

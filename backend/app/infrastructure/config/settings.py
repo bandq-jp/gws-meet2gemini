@@ -35,6 +35,10 @@ class Settings:
     impersonate_subjects: list[str] = [s.strip() for s in os.getenv("GOOGLE_SUBJECT_EMAILS", "").split(",") if s.strip()]
     # Meeting source switch (google_docs / notta / both)
     meeting_source: str = os.getenv("MEETING_SOURCE", "google_docs")
+    # 増分収集の既定ウィンドウ(日)。0以下で全件(従来挙動)。
+    # フォルダ肥大化(Notta 5,700件超)で毎回の全件ダウンロードが完走不能になり
+    # 2026/06/05以降保存ゼロが続いた障害の恒久対策。バックフィルはAPIのsince_daysで上書き。
+    meeting_since_days: int = int(os.getenv("MEETING_SINCE_DAYS", "3") or "3")
 
     # Notta (shared drive xlsx)
     notta_drive_id: str = os.getenv("NOTTA_DRIVE_ID", "")
@@ -52,13 +56,18 @@ class Settings:
 
     # Gemini
     gemini_api_key: str = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-pro")
+    # 既定を最新GAへ更新(2026/07)。旧既定 gemini-2.5-pro/2.5-flash 系は2026/10/16停止予定。
+    # 構造化抽出の実測(初回面談5本/210フィールド)で 3.1-flash-lite が
+    # 充填率93.8%・平均1.4s と、2.5-flash(71.4%・14.9s)を上回った。
+    gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
     # Image Generation
     image_gen_has_dedicated_key: bool = bool(os.getenv("IMAGE_GEN_GEMINI_API_KEY"))
     image_gen_gemini_api_key: str = os.getenv("IMAGE_GEN_GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     image_gen_monthly_limit: int = int(os.getenv("IMAGE_GEN_MONTHLY_LIMIT", "30"))
-    gemini_fallback_model: str = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-2.5-flash")
+    # 旧既定 gemini-2.5-flash-lite は 2026/07 時点で generateContent が404(実測)。
+    # 現行GAの gemini-3.5-flash をフォールバックに(難議事録の保険)。
+    gemini_fallback_model: str = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash")
     gemini_temperature: float = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))
     gemini_max_tokens: int = int(os.getenv("GEMINI_MAX_TOKENS", "20000"))
 
