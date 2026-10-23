@@ -18,7 +18,7 @@ export default function Page() {
             }
           }}
           signUpUrl="/sign-up"
-          redirectUrl="/"
+          fallbackRedirectUrl="/"
         />
         <div className="text-center mt-6 text-sm text-muted-foreground">
           <p>@bandq.jp ドメインのアカウントでのみログイン可能です</p>

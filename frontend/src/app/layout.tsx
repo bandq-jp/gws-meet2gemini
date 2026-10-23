@@ -39,10 +39,10 @@ export default function RootLayout({
         variables: {
           colorPrimary: "hsl(220.9, 39.3%, 11%)",
           colorBackground: "hsl(0, 0%, 100%)",
-          colorText: "hsl(224, 71.4%, 4.1%)",
-          colorTextSecondary: "hsl(220, 8.9%, 46.1%)",
-          colorInputBackground: "hsl(0, 0%, 100%)",
-          colorInputText: "hsl(224, 71.4%, 4.1%)",
+          colorForeground: "hsl(224, 71.4%, 4.1%)",
+          colorMutedForeground: "hsl(220, 8.9%, 46.1%)",
+          colorInput: "hsl(0, 0%, 100%)",
+          colorInputForeground: "hsl(224, 71.4%, 4.1%)",
           borderRadius: "0.5rem"
         },
         elements: {
