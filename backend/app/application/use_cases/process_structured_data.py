@@ -23,7 +23,10 @@ class ProcessStructuredDataUseCase:
                      zoho_candidate_name: Optional[str] = None, 
                      zoho_candidate_email: Optional[str] = None,
                      custom_schema_id: Optional[UUID] = None,
-                     meeting_data: Optional[Dict[str, Any]] = None) -> dict:
+                     meeting_data: Optional[Dict[str, Any]] = None,
+                     fill_only: bool = False) -> dict:
+        """fill_only=True: Zoho の空欄だけを埋める（既に値がある項目・空の抽出結果は送らない）。
+        自動処理はこれを使う。画面からの手動処理は従来どおり上書き。"""
         meetings = MeetingRepositoryImpl()
         structured_repo = StructuredRepositoryImpl()
         meeting = meeting_data or meetings.get_meeting(meeting_id)
@@ -115,7 +118,8 @@ class ProcessStructuredDataUseCase:
         zoho_result = self._write_to_zoho(
             zoho_record_id=zoho_record_id,
             structured_data=data,
-            candidate_name=zoho_candidate_name
+            candidate_name=zoho_candidate_name,
+            fill_only=fill_only,
         )
 
         # Update Zoho sync status in DB
@@ -170,7 +174,8 @@ class ProcessStructuredDataUseCase:
         self,
         zoho_record_id: str,
         structured_data: Dict[str, Any], 
-        candidate_name: Optional[str] = None
+        candidate_name: Optional[str] = None,
+        fill_only: bool = False,
     ) -> Dict[str, Any]:
         """構造化データをZoho CRMに書き込み
         
@@ -190,7 +195,8 @@ class ProcessStructuredDataUseCase:
             result = zoho_client.update_jobseeker_record(
                 record_id=zoho_record_id,
                 structured_data=structured_data,
-                candidate_name=candidate_name
+                candidate_name=candidate_name,
+                fill_only=fill_only,
             )
             
             if result["status"] == "success":
@@ -201,6 +207,8 @@ class ProcessStructuredDataUseCase:
                     "message": f"Zohoレコードを正常に更新しました（{updated_count}フィールド）",
                     "updated_fields_count": updated_count,
                     "updated_fields": result.get("updated_fields", []),
+                    "skipped_fields": result.get("skipped_fields", []),
+                    "fill_only": fill_only,
                     "zoho_response": result.get("data")
                 }
             else:

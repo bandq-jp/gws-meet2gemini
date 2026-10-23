@@ -187,6 +187,7 @@ class TestAutoProcessMeetingsUseCase:
         }
         deps['meeting_repo'].get_meeting_core.return_value = sample_meeting_data
         deps['title_matcher'].extract_from_title.return_value = "田中太郎"
+        deps['title_matcher'].extract_candidates_from_title.return_value = ["田中太郎"]
         deps['zoho_client'].search_app_hc_by_exact_name.return_value = [sample_zoho_match]
         deps['title_matcher'].is_exact_match.return_value = True
         
@@ -203,7 +204,7 @@ class TestAutoProcessMeetingsUseCase:
         assert len(candidates) == 1
         assert candidates[0].meeting_id == "meeting-123"
         assert candidates[0].candidate_name == "田中太郎"
-        assert candidates[0].title == "初回面談 - 田中太郎さん"
+        assert candidates[0].title == "初回面談 - 田中太郎"
         assert candidates[0].priority_score > 0
 
     @pytest.mark.asyncio
@@ -219,6 +220,7 @@ class TestAutoProcessMeetingsUseCase:
         }
         deps['meeting_repo'].get_meeting_core.return_value = free_meeting
         deps['title_matcher'].extract_from_title.return_value = "田中太郎"
+        deps['title_matcher'].extract_candidates_from_title.return_value = ["田中太郎"]
         deps['zoho_client'].search_app_hc_by_exact_name.return_value = [sample_zoho_match]
         deps['title_matcher'].is_exact_match.return_value = True
 
@@ -261,6 +263,7 @@ class TestAutoProcessMeetingsUseCase:
         
         deps['meeting_repo'].get_meeting_core.side_effect = get_meeting_side_effect
         deps['title_matcher'].extract_from_title.return_value = "田中太郎"
+        deps['title_matcher'].extract_candidates_from_title.return_value = ["田中太郎"]
         deps['zoho_client'].search_app_hc_by_exact_name.return_value = [{"record_id": "zoho-1", "candidate_name": "田中太郎"}]
         deps['title_matcher'].is_exact_match.return_value = True
         
@@ -329,6 +332,8 @@ class TestAutoProcessMeetingsUseCase:
         # Assertions
         assert result.meeting_id == candidate.meeting_id
         assert result.status == "success"
+        # 自動処理は空欄だけ埋める（CAの手入力を上書きしない）
+        assert mock_orchestrator.execute.call_args.kwargs.get("fill_only") is True
         assert result.processing_time > 0
         assert result.error_message is None
 
