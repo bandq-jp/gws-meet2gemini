@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time
 import json
+import re
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import request, parse, error
@@ -629,6 +630,12 @@ class ZohoClient:
                 except Exception as e:
                     logger.warning("[zoho] search starts_with failed: variation='%s' err=%s", variation, e)
 
+        # Stage 3: 題名とZohoで名前のスペースの入れ方が違う（「山田太郎」と「山田 太郎」など）と
+        # equals では当たらない。文字の間に % を入れた COQL の LIKE で探し、
+        # 呼び出し側（is_exact_match）でスペースを除いた完全一致を確かめる
+        if not data:
+            data = self._search_app_hc_by_loose_name(module_api, name_field, id_field, name)
+
         records = []
         for r in data or []:
             records.append(
@@ -641,6 +648,25 @@ class ZohoClient:
             )
         logger.info("[zoho] search exact results: count=%s", len(records))
         return records
+
+    def _search_app_hc_by_loose_name(self, module_api: str, name_field: str, id_field: Optional[str], name: str) -> List[Dict[str, Any]]:
+        """スペースの違いを無視して名前を探す（COQL LIKE '山%田%太%郎'）。候補の絞り込みだけで、一致の判定は呼び出し側。"""
+        compact = re.sub(r"[\s　]+", "", name or "")
+        if not (2 <= len(compact) <= 20) or re.search(r"['%_\\]", compact):
+            return []
+        pattern = "%".join(compact)
+        fields = f"id, {name_field}" + (f", {id_field}" if id_field else "")
+        query = f"select {fields} from {module_api} where {name_field} like '{pattern}' limit 50"
+        try:
+            data = (self._coql_query(query, limit=50) or {}).get("data", []) or []
+            if data:
+                logger.info("[zoho] search hit: op=coql_like count=%s", len(data))
+            return data
+        except ZohoAuthError:
+            raise
+        except Exception as e:
+            logger.warning("[zoho] search coql_like failed: err=%s", e)
+            return []
 
     # --- 流入経路検索・集計メソッド (Marketing ChatKit用) ---
 
