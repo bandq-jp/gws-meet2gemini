@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 import asyncio
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
@@ -18,6 +18,10 @@ from app.application.use_cases.process_structured_data import ProcessStructuredD
 logger = logging.getLogger(__name__)
 
 AUTO_PROCESS_KEYWORDS: Tuple[str, ...] = ("初回", "無料キャリア相談")
+# Notta の題名「山田 太郎さん: 【ひとキャリ松浦】転職面談」のように「初回」が付かない初回面談も拾う。
+# ただし面接対策・進捗面談・提案面談などは初回面談ではないので外す（この除外はこちらの語にだけ使う）
+EXTRA_FIRST_MEETING_KEYWORDS: Tuple[str, ...] = ("転職面談", "キャリア面談")
+EXTRA_EXCLUDE_WORDS: Tuple[str, ...] = ("対策", "進捗", "面接", "提案")
 
 
 @dataclass
@@ -66,9 +70,11 @@ class AutoProcessMeetingsUseCase:
         job_id: Optional[str] = None,
         parallel_workers: Optional[int] = None,
         batch_size: Optional[int] = None,
+        lookback_days: Optional[int] = None,
     ) -> Dict[str, Any]:
         settings = get_settings()
         max_items = max_items or self._safe_int(settings.autoproc_max_items, default=20)
+        lookback_days = lookback_days or self._safe_int(getattr(settings, "autoproc_lookback_days", 7), default=7)
         parallel_workers = parallel_workers or settings.autoproc_parallel_workers
         batch_size = batch_size or settings.autoproc_batch_size
         title_regex = title_regex_override or settings.candidate_title_regex
@@ -97,7 +103,7 @@ class AutoProcessMeetingsUseCase:
         # Step 1: Collect processing candidates with priority scoring
         logger.info("[auto] collecting candidates...")
         candidates = await self._collect_processing_candidates(
-            repo, matcher, accounts, max_items, title_regex
+            repo, matcher, accounts, max_items, title_regex, lookback_days=lookback_days
         )
         
         logger.info("[auto] candidates collected: total=%s", len(candidates))
@@ -156,6 +162,7 @@ class AutoProcessMeetingsUseCase:
             "skipped_already_structured": skipped_already_structured,
             "errors": errors,
             "max_items": max_items,
+            "lookback_days": lookback_days,
             "dry_run": dry_run,
             "parallel_workers": parallel_workers,
             "batch_size": batch_size,
@@ -201,11 +208,20 @@ class AutoProcessMeetingsUseCase:
         matcher: CandidateTitleMatcher,
         accounts: Optional[List[str]],
         max_items: int,
-        title_regex: Optional[str]
+        title_regex: Optional[str],
+        lookback_days: Optional[int] = None,
     ) -> List[ProcessingCandidate]:
-        """候補会議を収集し、優先度スコアを計算する"""
+        """候補会議を収集し、優先度スコアを計算する
+
+        題名のキーワードと取り込み日（lookback_days 以内）はサーバー側で絞る。
+        名前が一致しない面談を毎回さかのぼって検索し直さないため（Zoho のクレジット対策）。
+        """
         candidates = []
         zoho = ZohoClient()
+        search_cache: Dict[str, List[Dict[str, Any]]] = {}
+        created_at_gte = None
+        if lookback_days:
+            created_at_gte = (datetime.now(timezone.utc) - timedelta(days=int(lookback_days))).strftime("%Y-%m-%dT%H:%M:%SZ")
         
         # Page through meetings to collect candidates
         page = 1
@@ -229,6 +245,8 @@ class AutoProcessMeetingsUseCase:
                 page_size=page_size,
                 accounts=accounts,
                 structured=False,  # only unstructured
+                title_keywords=list(AUTO_PROCESS_KEYWORDS + EXTRA_FIRST_MEETING_KEYWORDS),
+                created_at_gte=created_at_gte,
             )
             
             items = page_result.get("items", [])
@@ -264,8 +282,8 @@ class AutoProcessMeetingsUseCase:
                         continue
 
                     # タイトルマッチをtext_content取得の前に実行（不要なDB取得を回避）
-                    extracted = matcher.extract_from_title(title)
-                    if not extracted:
+                    names = matcher.extract_candidates_from_title(title)
+                    if not names:
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'no_title_match',
                             'meeting_id': meeting_id,
@@ -274,11 +292,21 @@ class AutoProcessMeetingsUseCase:
                         candidates.append(mock_candidate)
                         continue
 
-                    # Zoho検索: 名前バリエーション（スペース有無等）で複数パターン検索
-                    variations = matcher.get_search_variations(extracted)
-                    matches = zoho.search_app_hc_by_exact_name(extracted, limit=5, name_variations=variations)
+                    # 名前の候補を順に Zoho で完全一致検索し、1件に決まった最初のものを使う
+                    extracted, match = None, None
+                    for name in names:
+                        key = CandidateTitleMatcher._normalize_spaceless(name) or name
+                        if key not in search_cache:
+                            variations = matcher.get_search_variations(name)
+                            search_cache[key] = zoho.search_app_hc_by_exact_name(name, limit=5, name_variations=variations) or []
+                        verified = [m for m in search_cache[key] if matcher.is_exact_match(name, m.get("candidate_name", ""), pre_extracted=True)]
+                        if len(verified) == 1:
+                            extracted, match = name, verified[0]
+                            break
+                        if len(verified) > 1:
+                            break  # 同名が複数いる。取り違えを避けて処理しない
 
-                    if not matches:
+                    if not match:
                         mock_candidate = type('SkippedCandidate', (), {
                             'skip_reason': 'zoho_not_exact',
                             'meeting_id': meeting_id,
@@ -286,29 +314,6 @@ class AutoProcessMeetingsUseCase:
                         })()
                         candidates.append(mock_candidate)
                         continue
-
-                    # 複数ヒット時: 正規化マッチで絞り込み
-                    if len(matches) > 1:
-                        verified = [m for m in matches if matcher.is_exact_match(extracted, m.get("candidate_name", ""), pre_extracted=True)]
-                        if len(verified) != 1:
-                            mock_candidate = type('SkippedCandidate', (), {
-                                'skip_reason': 'zoho_not_exact',
-                                'meeting_id': meeting_id,
-                                'title': title
-                            })()
-                            candidates.append(mock_candidate)
-                            continue
-                        match = verified[0]
-                    else:
-                        match = matches[0]
-                        if not matcher.is_exact_match(extracted, match.get("candidate_name", ""), pre_extracted=True):
-                            mock_candidate = type('SkippedCandidate', (), {
-                                'skip_reason': 'zoho_not_exact',
-                                'meeting_id': meeting_id,
-                                'title': title
-                            })()
-                            candidates.append(mock_candidate)
-                            continue
 
                     # Zohoマッチ確定後にのみtext_contentを取得
                     full = repo.get_meeting_core(meeting_id)
@@ -403,7 +408,9 @@ class AutoProcessMeetingsUseCase:
         """Return True when the meeting title contains an auto-process trigger keyword."""
         if not title:
             return False
-        return any(keyword in title for keyword in AUTO_PROCESS_KEYWORDS)
+        if any(keyword in title for keyword in AUTO_PROCESS_KEYWORDS):
+            return True
+        return any(k in title for k in EXTRA_FIRST_MEETING_KEYWORDS) and not any(x in title for x in EXTRA_EXCLUDE_WORDS)
 
     async def _process_candidates_parallel(
         self,
@@ -481,6 +488,7 @@ class AutoProcessMeetingsUseCase:
                 zoho_candidate_name=candidate.candidate_name,
                 zoho_candidate_email=candidate.zoho_match.get("candidate_email"),
                 meeting_data=candidate.meeting_data,
+                fill_only=True,  # 自動処理は空欄だけ埋める（CAが手で入れた値を上書き・消去しない）
             )
             
             processing_time = time.time() - start_time

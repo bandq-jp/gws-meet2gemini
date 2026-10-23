@@ -1631,7 +1631,42 @@ class ZohoWriteClient:
 
         return zoho_data
     
-    def update_jobseeker_record(self, record_id: str, structured_data: Dict[str, Any], skip_validation: bool = False, candidate_name: str = None) -> Dict[str, Any]:
+    @staticmethod
+    def _is_blank(value: Any) -> bool:
+        return value is None or value == "" or (isinstance(value, (list, dict)) and len(value) == 0)
+
+    @classmethod
+    def _filter_fill_only(cls, zoho_data: Dict[str, Any], current: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        """空欄だけ埋める: 抽出結果が空の項目と、Zoho に既に値がある項目を送らない。
+
+        Returns: (送る項目, 送らなかった項目名)
+        """
+        to_send: Dict[str, Any] = {}
+        skipped: List[str] = []
+        for field, value in zoho_data.items():
+            if cls._is_blank(value):
+                continue
+            if not cls._is_blank(current.get(field)):
+                skipped.append(field)
+                continue
+            to_send[field] = value
+        return to_send, skipped
+
+    def _get_current_values(self, record_id: str, fields: List[str]) -> Dict[str, Any]:
+        """求職者レコードの現在値を読む（空欄だけ埋めるため）。失敗したら例外。"""
+        module_api = self.settings.zoho_app_hc_module
+        base_url = self.settings.zoho_api_base_url.rstrip("/")
+        url = f"{base_url}/crm/v2/{module_api}/{record_id}?" + parse.urlencode({"fields": ",".join(fields)})
+        headers = {"Authorization": f"Zoho-oauthtoken {self._get_access_token()}"}
+        req = request.Request(url, headers=headers, method="GET")
+        with request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "{}")
+        rows = body.get("data") or []
+        if not rows:
+            raise RuntimeError(f"record not found: {record_id}")
+        return rows[0]
+
+    def update_jobseeker_record(self, record_id: str, structured_data: Dict[str, Any], skip_validation: bool = False, candidate_name: str = None, fill_only: bool = False) -> Dict[str, Any]:
         """jobSeekerレコードを構造化データで更新
         
         Args:
@@ -1683,7 +1718,20 @@ class ZohoWriteClient:
         
         if not zoho_data:
             return {"status": "no_data", "message": "No mappable data to update"}
-        
+
+        skipped_fields: List[str] = []
+        if fill_only:
+            # 空欄だけ埋める。現在値が読めないときは書かない（CAの手入力を消さないため）
+            try:
+                current = self._get_current_values(record_id, list(zoho_data.keys()))
+            except Exception as e:
+                logger.error(f"❌ 空欄だけ埋めるための現在値の取得に失敗したので書き込みません: record_id={record_id}, error={e}")
+                return {"status": "error", "error": f"fill_only: 現在値の取得に失敗: {e}", "attempted_data": {}}
+            zoho_data, skipped_fields = self._filter_fill_only(zoho_data, current)
+            logger.info(f"🧩 空欄だけ埋める: 送る={list(zoho_data.keys())} 既に値があるので送らない={skipped_fields}")
+            if not zoho_data:
+                return {"status": "success", "status_code": 200, "data": None, "updated_fields": [], "skipped_fields": skipped_fields}
+
         # Zoho CRM API呼び出し
         base_url = self.settings.zoho_api_base_url.rstrip("/")
         url = f"{base_url}/crm/v2/{module_api}/{record_id}"
@@ -1772,7 +1820,8 @@ class ZohoWriteClient:
                     "status": "success",
                     "status_code": resp.getcode(),
                     "data": response_data,
-                    "updated_fields": list(zoho_data.keys())
+                    "updated_fields": list(zoho_data.keys()),
+                    "skipped_fields": skipped_fields,
                 }
         except error.HTTPError as e:
             error_body = e.read().decode("utf-8", "ignore")

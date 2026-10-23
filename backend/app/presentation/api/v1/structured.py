@@ -81,6 +81,8 @@ class AutoProcessIn(BaseModel):
     sync: bool = False
     parallel_workers: Optional[int] = None
     batch_size: Optional[int] = None
+    # 取り込みから何日以内の面談を見るか（未指定なら AUTOPROC_LOOKBACK_DAYS）。取りこぼしの一括処理では広げる
+    lookback_days: Optional[int] = None
 
 
 @router.post("/auto-process", response_model=Dict[str, Any])
@@ -101,6 +103,7 @@ async def auto_process(
                 title_regex_override=body.title_regex,
                 parallel_workers=body.parallel_workers,
                 batch_size=body.batch_size,
+            lookback_days=body.lookback_days,
                 job_id=None,
             )
             logger.info("[api] auto_process sync finished: processed=%s errors=%s",
@@ -125,6 +128,7 @@ async def auto_process(
                     title_regex_override=body.title_regex,
                     parallel_workers=body.parallel_workers,
                     batch_size=body.batch_size,
+                    lookback_days=body.lookback_days,
                     job_id=job_id,
                 )
                 logger.info("[api] auto_process background finished: job_id=%s", job_id)
@@ -194,6 +198,7 @@ async def auto_process_worker(request: Request, body: AutoWorkerIn = Body(...)):
             title_regex_override=body.title_regex,
             parallel_workers=body.parallel_workers,
             batch_size=body.batch_size,
+            lookback_days=body.lookback_days,
             job_id=body.job_id,
         )
         return Response(status_code=204)

@@ -98,6 +98,8 @@ class Settings:
     # Auto-process settings
     candidate_title_regex: str | None = os.getenv("CANDIDATE_TITLE_REGEX") or None
     autoproc_max_items: int = int(os.getenv("AUTOPROC_MAX_ITEMS", "20"))
+    # 自動処理で見る範囲: 取り込みから何日以内の面談か（名前が一致しない面談を何十日も検索し直さないため）
+    autoproc_lookback_days: int = int(os.getenv("AUTOPROC_LOOKBACK_DAYS", "7"))
     
     # Auto-process parallel execution settings
     autoproc_parallel_workers: int = int(os.getenv("AUTOPROC_PARALLEL_WORKERS", "5"))

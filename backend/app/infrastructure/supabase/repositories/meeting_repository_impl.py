@@ -82,12 +82,17 @@ class MeetingRepositoryImpl:
         accounts: Optional[List[str]] = None,
         structured: Optional[bool] = None,
         search_query: Optional[str] = None,
-        zoho_sync_failed: Optional[bool] = None
+        zoho_sync_failed: Optional[bool] = None,
+        title_keywords: Optional[List[str]] = None,
+        created_at_gte: Optional[str] = None,
     ) -> Dict[str, Any]:
         """ページネーション付きの軽量な議事録一覧取得
 
         meeting_documents_enriched ビューを使用し、全タブ 1 クエリで
         正確な total + page_size 件のデータを返す。
+
+        title_keywords: 題名にどれかを含むものだけ（自動処理用。サーバー側で絞る）
+        created_at_gte: この日時以降に取り込んだものだけ（ISO 8601）
         """
         try:
             sb = get_supabase()
@@ -115,6 +120,13 @@ class MeetingRepositoryImpl:
                     f"organizer_email.ilike.{query_term},"
                     f"organizer_name.ilike.{query_term}"
                 )
+
+            if title_keywords:
+                safe = [k.replace(",", "").replace("(", "").replace(")", "") for k in title_keywords if k]
+                if safe:
+                    query = query.or_(",".join(f"title.ilike.%{k}%" for k in safe))
+            if created_at_gte:
+                query = query.gte("created_at", created_at_gte)
 
             # タブ固有フィルタ
             if zoho_sync_failed is True:

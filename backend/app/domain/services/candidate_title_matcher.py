@@ -103,6 +103,63 @@ class CandidateTitleMatcher:
         # Fallback: return entire title
         return title
 
+    # 会社名らしいトークン（「レイノス株式会社 山田 太郎さん: …」の会社名部分を名前候補から外す）
+    _CORP_RE = re.compile(r"株式会社|有限会社|合同会社|[（(]株[）)]|会社|inc\.?$|llc", re.IGNORECASE)
+
+    def extract_candidates_from_title(self, title: Optional[str]) -> list[str]:
+        """自動処理用: 題名から求職者名の候補を、もっともらしい順に返す（無ければ空リスト）。
+
+        extract_from_title と違い、何も読み取れないときに題名全体を返さない
+        （題名全体で Zoho を検索しても当たらず、クレジットだけ減るため）。
+        呼び出し側は候補を順に Zoho で完全一致検索し、1件に決まったものだけ使う。
+
+        対応する題名の形:
+        - 「山田 太郎様【無料キャリア相談】」「JP15:30~ 山田 太郎様_初回面談」
+        - 「山田 太郎さん: 【ひとキャリ松浦】転職面談」（Notta の題名）
+        - 「レイノス株式会社 山田 太郎さん: 【株式会社b&q】転職面談」（会社名が前に付く）
+        - 「転職面談 (山田 太郎)」「初回面談（山田 太郎）」
+        """
+        if not title:
+            return []
+        if self._compiled:
+            # 正規表現が設定されている場合はそれだけを使う（従来どおり）
+            name = self.extract_from_title(title)
+            return [name] if name else []
+
+        cleaned = self._TIME_PREFIX_RE.sub("", title).strip() or title
+        out: list[str] = []
+        seen: set[str] = set()
+
+        def _add(name: str) -> None:
+            name = self._NOISE_PREFIX_RE.sub("", name or "").strip(" 　_-・:：")
+            key = self._normalize_spaceless(name)
+            if len(key) < 2 or key in seen or self._CORP_RE.search(name):
+                return
+            seen.add(key)
+            out.append(name)
+
+        def _add_tokens(prefix: str) -> None:
+            tokens = [t for t in re.split(r"[\s　]+", prefix.strip()) if t]
+            tokens = [t for t in tokens if not self._CORP_RE.search(t) and not re.search(r"[【】\[\]]", t)]
+            if len(tokens) >= 2:
+                _add(" ".join(tokens[-2:]))
+            if tokens:
+                _add(tokens[-1])
+
+        # 1) 「面談 (名前)」「相談（名前）」
+        m = re.search(r"(?:面談|相談)[^\(（]*[(（]([^)）]+)[)）]", cleaned)
+        if m:
+            _add(m.group(1))
+        # 2) 「名前さん:」「名前さん_初回面談」
+        m = re.search(r"^(.*?)\s*さん(?=\s*[:：_【]|\s|$)", cleaned)
+        if m:
+            _add_tokens(m.group(1))
+        # 3) 「名前様」（~ や _ の後ろだけを見る）
+        m = re.search(r"^(.*?)\s*様", cleaned)
+        if m:
+            _add_tokens(re.split(r"[~〜～_]", m.group(1))[-1])
+        return out
+
     def is_exact_match(self, title_or_extracted: Optional[str], zoho_candidate_name: Optional[str], *, pre_extracted: bool = False) -> bool:
         """Return True if normalized extracted title name equals Zoho name.
 
