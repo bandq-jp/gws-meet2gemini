@@ -631,7 +631,7 @@ class ZohoClient:
                     logger.warning("[zoho] search starts_with failed: variation='%s' err=%s", variation, e)
 
         # Stage 3: 題名とZohoで名前のスペースの入れ方が違う（「山田太郎」と「山田 太郎」など）と
-        # equals では当たらない。文字の間に % を入れた COQL の LIKE で探し、
+        # equals では当たらない。スペースを入れられる位置をすべて並べた COQL の IN で探し、
         # 呼び出し側（is_exact_match）でスペースを除いた完全一致を確かめる
         if not data:
             data = self._search_app_hc_by_loose_name(module_api, name_field, id_field, name)
@@ -649,23 +649,34 @@ class ZohoClient:
         logger.info("[zoho] search exact results: count=%s", len(records))
         return records
 
-    def _search_app_hc_by_loose_name(self, module_api: str, name_field: str, id_field: Optional[str], name: str) -> List[Dict[str, Any]]:
-        """スペースの違いを無視して名前を探す（COQL LIKE '山%田%太%郎'）。候補の絞り込みだけで、一致の判定は呼び出し側。"""
+    @staticmethod
+    def _spacing_variants(name: str) -> List[str]:
+        """「山田太郎」→「山田太郎」「山 田太郎」「山　田太郎」「山田 太郎」…（スペースを入れられる位置をすべて）"""
         compact = re.sub(r"[\s　]+", "", name or "")
-        if not (2 <= len(compact) <= 20) or re.search(r"['%_\\]", compact):
+        out = [compact]
+        for i in range(1, len(compact)):
+            out += [f"{compact[:i]} {compact[i:]}", f"{compact[:i]}　{compact[i:]}"]
+        return out
+
+    def _search_app_hc_by_loose_name(self, module_api: str, name_field: str, id_field: Optional[str], name: str) -> List[Dict[str, Any]]:
+        """スペースの違いを無視して名前を探す。スペースを入れられる位置をすべて並べた COQL の IN で1回だけ問い合わせる。
+        （COQL の LIKE は途中の % を受け付けず 0 件になるため使わない。2026-10-24 本番で確認）
+        候補の絞り込みだけで、一致の判定は呼び出し側。"""
+        compact = re.sub(r"[\s　]+", "", name or "")
+        if not (2 <= len(compact) <= 12) or re.search(r"['%_\\]", compact):
             return []
-        pattern = "%".join(compact)
+        values = ", ".join(f"'{v}'" for v in self._spacing_variants(compact))
         fields = f"id, {name_field}" + (f", {id_field}" if id_field else "")
-        query = f"select {fields} from {module_api} where {name_field} like '{pattern}' limit 50"
+        query = f"select {fields} from {module_api} where {name_field} in ({values}) limit 50"
         try:
             data = (self._coql_query(query, limit=50) or {}).get("data", []) or []
             if data:
-                logger.info("[zoho] search hit: op=coql_like count=%s", len(data))
+                logger.info("[zoho] search hit: op=coql_in count=%s", len(data))
             return data
         except ZohoAuthError:
             raise
         except Exception as e:
-            logger.warning("[zoho] search coql_like failed: err=%s", e)
+            logger.warning("[zoho] search coql_in failed: err=%s", e)
             return []
 
     # --- 流入経路検索・集計メソッド (Marketing ChatKit用) ---

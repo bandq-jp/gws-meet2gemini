@@ -125,7 +125,7 @@ def test_exact_name_search_falls_back_to_loose_like_when_spacing_differs():
     client._coql_query = MagicMock(return_value={"data": [{"id": "9", "Name": "山田 太郎", "field1": "C9"}]})
     out = client.search_app_hc_by_exact_name("山田太郎", name_variations=["山田太郎"])
     q = client._coql_query.call_args.args[0]
-    assert "like '山%田%太%郎'" in q and "from jobSeeker" in q
+    assert "from jobSeeker" in q and " in (" in q and "'山田 太郎'" in q and "'山田　太郎'" in q and "'山田太郎'" in q
     assert out[0]["record_id"] == "9" and out[0]["candidate_name"] == "山田 太郎"
     assert CandidateTitleMatcher(None).is_exact_match("山田太郎", out[0]["candidate_name"], pre_extracted=True)
 
@@ -136,4 +136,5 @@ def test_loose_search_rejects_unsafe_names():
     client._coql_query = MagicMock()
     assert client._search_app_hc_by_loose_name("jobSeeker", "Name", None, "O'Brien") == []
     assert client._search_app_hc_by_loose_name("jobSeeker", "Name", None, "山") == []
+    assert client._search_app_hc_by_loose_name("jobSeeker", "Name", None, "あ" * 13) == []
     client._coql_query.assert_not_called()
