@@ -1,0 +1,16 @@
+name: trivy
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 0 * * 1" # 毎週月曜 9:00 JST(新しく公開された CVE を拾う)
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trivy:
+    uses: bandq-jp/ci-workflows/.github/workflows/trivy.yml@v1
+    with:
+      dockerfile: backend/Dockerfile
+      docker-context: backend
