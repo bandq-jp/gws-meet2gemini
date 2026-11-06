@@ -61,9 +61,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0(v7 は .gitmodules の無いサブモジュールがあると取得の段階で落ちるため)
-        with:
-          persist-credentials: false
+      # persist-credentials: false にすると、.gitmodules の無いサブモジュールがあるリポジトリで
+      # checkout が後片付けの段階で落ちる(v4・v7 とも)。代わりに取得の直後に自分で認証情報を消す。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 取得に使った認証情報を消す
+        run: git config --local --unset-all http.https://github.com/.extraheader || true
 
       - name: Trivy を入れる(SHA256 を確認)
         run: |
