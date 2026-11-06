@@ -10,7 +10,7 @@ permissions:
   contents: read
 jobs:
   trivy:
-    uses: bandq-jp/ci-workflows/.github/workflows/trivy.yml@v1
+    uses: ./.github/workflows/trivy-reusable.yml
     with:
       dockerfile: backend/Dockerfile
       docker-context: backend

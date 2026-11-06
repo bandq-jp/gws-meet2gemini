@@ -1,0 +1,178 @@
+# bandq-jp/ci-workflows(private)の .github/workflows/trivy.yml v1 の写し。
+# public リポジトリからは private の共通ワークフローを呼べないため置いている。直すときは ci-workflows と両方直す。
+# b&q 共通の Trivy スキャン(呼び出し側から uses: で使う再利用ワークフロー)
+#
+# 調べるもの
+#   - 依存パッケージの既知の脆弱性(CVE)  uv.lock / package-lock.json / bun.lock / pnpm-lock.yaml / go.sum など
+#   - Dockerfile・Terraform などの設定ミス
+#   - リポジトリにコミットされた秘密情報(APIキー・秘密鍵など)
+#   - dockerfile を渡したときだけ、ビルドしたコンテナイメージ(OSのパッケージを含む)
+#
+# 失敗させる条件
+#   - 秘密情報が見つかったら常に失敗
+#   - 脆弱性と設定ミスは fail-on-findings: true のときだけ失敗(既定は結果を出すだけ)
+#
+# 安全のため aquasecurity/trivy-action は使わない(2026/03 にタグが書き換えられ、
+# 秘密情報を盗む版が配られた CVE-2026-33634)。Trivy 本体を公式リリースから取り、
+# 下の SHA256 と一致したときだけ使う。更新するときは cosign で署名を確かめてから値を変える。
+name: trivy
+
+on:
+  workflow_call:
+    inputs:
+      scan-path:
+        description: 調べるディレクトリ
+        type: string
+        default: "."
+      severity:
+        description: 報告する重大度
+        type: string
+        default: "HIGH,CRITICAL"
+      ignore-unfixed:
+        description: 修正版がまだ無い脆弱性を出さない
+        type: boolean
+        default: true
+      skip-dirs:
+        description: 調べないディレクトリ(カンマ区切り)
+        type: string
+        default: "node_modules,.venv,.next,dist,build"
+      dockerfile:
+        description: ビルドしてイメージも調べる Dockerfile のパス(空ならイメージは調べない)
+        type: string
+        default: ""
+      docker-context:
+        description: イメージをビルドするときのコンテキスト
+        type: string
+        default: "."
+      fail-on-findings:
+        description: 脆弱性・設定ミスが見つかったら失敗させる
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_VERSION: "0.76.1"
+  TRIVY_SHA256: "c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trivy を入れる(SHA256 を確認)
+        run: |
+          set -euo pipefail
+          f="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$f" "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/$f"
+          echo "${TRIVY_SHA256}  $RUNNER_TEMP/$f" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/trivy-bin"
+          tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP/trivy-bin" trivy
+          echo "$RUNNER_TEMP/trivy-bin" >> "$GITHUB_PATH"
+
+      - name: 脆弱性データベースのキャッシュ
+        id: date
+        run: echo "today=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ steps.date.outputs.today }}
+          restore-keys: trivy-db-
+
+      - name: リポジトリを調べる
+        env:
+          SCAN_PATH: ${{ inputs.scan-path }}
+          SEVERITY: ${{ inputs.severity }}
+          SKIP_DIRS: ${{ inputs.skip-dirs }}
+          IGNORE_UNFIXED: ${{ inputs.ignore-unfixed }}
+        run: |
+          set -euo pipefail
+          mkdir -p trivy-report
+          args=(fs --scanners vuln,secret,misconfig --severity "$SEVERITY" --skip-dirs "$SKIP_DIRS" --exit-code 0)
+          [ "$IGNORE_UNFIXED" = "true" ] && args+=(--ignore-unfixed)
+          trivy "${args[@]}" --format json -o trivy-report/fs.json "$SCAN_PATH"
+          trivy convert --format table -o trivy-report/fs.txt trivy-report/fs.json
+          cat trivy-report/fs.txt
+
+      - name: イメージをビルドして調べる
+        if: inputs.dockerfile != ''
+        env:
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          CONTEXT: ${{ inputs.docker-context }}
+          SEVERITY: ${{ inputs.severity }}
+          IGNORE_UNFIXED: ${{ inputs.ignore-unfixed }}
+        run: |
+          set -euo pipefail
+          docker build -q -t trivy-scan:ci -f "$DOCKERFILE" "$CONTEXT"
+          args=(image --scanners vuln,secret --severity "$SEVERITY" --exit-code 0)
+          [ "$IGNORE_UNFIXED" = "true" ] && args+=(--ignore-unfixed)
+          trivy "${args[@]}" --format json -o trivy-report/image.json trivy-scan:ci
+          trivy convert --format table -o trivy-report/image.txt trivy-report/image.json
+          cat trivy-report/image.txt
+
+      - name: 結果をまとめる
+        id: summary
+        if: always()
+        run: |
+          set -euo pipefail
+          vuln=0; crit=0; secret=0; misconf=0
+          {
+            echo "## Trivy の結果"
+            echo
+            echo "| 対象 | 脆弱性 | うちCRITICAL | 設定ミス | 秘密情報 |"
+            echo "|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for j in trivy-report/*.json; do
+            [ -f "$j" ] || continue
+            jq -r '.Results[]? | [.Target,
+                ([.Vulnerabilities[]?]|length),
+                ([.Vulnerabilities[]?|select(.Severity=="CRITICAL")]|length),
+                ([.Misconfigurations[]?|select(.Status=="FAIL")]|length),
+                ([.Secrets[]?]|length)]
+              | select(.[1]+.[3]+.[4] > 0) | "| `\(.[0])` | \(.[1]) | \(.[2]) | \(.[3]) | \(.[4]) |"' "$j" >> "$GITHUB_STEP_SUMMARY"
+            vuln=$((vuln + $(jq '[.Results[]?.Vulnerabilities[]?]|length' "$j")))
+            crit=$((crit + $(jq '[.Results[]?.Vulnerabilities[]?|select(.Severity=="CRITICAL")]|length' "$j")))
+            misconf=$((misconf + $(jq '[.Results[]?.Misconfigurations[]?|select(.Status=="FAIL")]|length' "$j")))
+            secret=$((secret + $(jq '[.Results[]?.Secrets[]?]|length' "$j")))
+          done
+          {
+            echo
+            echo "合計: 脆弱性 ${vuln}件(CRITICAL ${crit}件)/ 設定ミス ${misconf}件 / 秘密情報 ${secret}件"
+            echo
+            echo "詳細はこの実行の Artifacts「trivy-report」か、各ステップのログを見てください。"
+            echo "直せない・誤検知のものは、リポジトリ直下の .trivyignore に ID と理由を書くと外せます。"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "vuln=$vuln" >> "$GITHUB_OUTPUT"
+          echo "misconf=$misconf" >> "$GITHUB_OUTPUT"
+          echo "secret=$secret" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: trivy-report
+          path: trivy-report/
+          retention-days: 30
+
+      - name: 判定
+        env:
+          FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+          VULN: ${{ steps.summary.outputs.vuln }}
+          MISCONF: ${{ steps.summary.outputs.misconf }}
+          SECRET: ${{ steps.summary.outputs.secret }}
+        run: |
+          if [ "${SECRET:-0}" -gt 0 ]; then
+            echo "::error::秘密情報が ${SECRET} 件見つかりました。キーを無効にして作り直し、コミットから消してください。"
+            exit 1
+          fi
+          if [ "$FAIL_ON_FINDINGS" = "true" ] && [ $(( ${VULN:-0} + ${MISCONF:-0} )) -gt 0 ]; then
+            echo "::error::脆弱性 ${VULN} 件・設定ミス ${MISCONF} 件が見つかりました。"
+            exit 1
+          fi
+          if [ $(( ${VULN:-0} + ${MISCONF:-0} )) -gt 0 ]; then
+            echo "::warning::脆弱性 ${VULN} 件・設定ミス ${MISCONF} 件(いまは警告だけ。fail-on-findings: true で失敗させられます)"
+          fi
