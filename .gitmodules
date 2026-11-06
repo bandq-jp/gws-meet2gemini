@@ -1,0 +1,3 @@
+[submodule "wordpress-ability-plugin"]
+	path = wordpress-ability-plugin
+	url = https://github.com/als141/wordpress-ability-plugin.git
